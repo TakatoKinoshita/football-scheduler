@@ -1,0 +1,256 @@
+{
+  "benchmark_schema_version": "0.1.0",
+  "fixture": "representative",
+  "repeat": 1,
+  "requested_timeout_seconds": 1e-06,
+  "input": {
+    "invocation_bytes": 28,
+    "invocation_sha256": "6ba48f86945376a5692914d9af92a6cfdbbc9f8c7051986b73e6992e6383f717",
+    "effective_input_bytes": 5933,
+    "effective_input_sha256": "223e65911e24f0a64e7cd81681baf52f7ae337f1e6ffbb727b9112c813c23c51",
+    "random_seed": 20260803
+  },
+  "source": {
+    "commit": "393c3973c2fffb1a4f27d501a44d971e0d549db0",
+    "worktree_dirty": true
+  },
+  "environment": {
+    "python_version": "3.14.3",
+    "ortools_version": "9.15.6755",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "architecture": "AMD64"
+  },
+  "summary": {
+    "minimum_wall_time_seconds": 0.3006940999766812,
+    "median_wall_time_seconds": 0.3006940999766812,
+    "p95_wall_time_seconds": 0.3006940999766812,
+    "maximum_wall_time_seconds": 0.3006940999766812,
+    "mean_wall_time_seconds": 0.3006940999766812,
+    "minimum_solver_wall_time_seconds": 0.0188294,
+    "median_solver_wall_time_seconds": 0.0188294,
+    "p95_solver_wall_time_seconds": 0.0188294,
+    "maximum_solver_wall_time_seconds": 0.0188294,
+    "minimum_result_bytes": 4258,
+    "maximum_result_bytes": 4258,
+    "maximum_observed_rss_bytes": 104710144,
+    "determinism_hash": "6285328a6c4224dcb65806a1ed229b0582b17cf608516fb260dfdde8dbd91b65",
+    "deterministic": true,
+    "rss_available": true
+  },
+  "runs": [
+    {
+      "run_no": 1,
+      "wall_time_seconds": 0.3006940999766812,
+      "rss_before_bytes": 96792576,
+      "rss_after_bytes": 104710144,
+      "rss_delta_bytes": 7917568,
+      "result_bytes": 4258,
+      "determinism_hash": "6285328a6c4224dcb65806a1ed229b0582b17cf608516fb260dfdde8dbd91b65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "UNKNOWN",
+        "slots": [],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 1e-06,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0188294,
+          "used_sections": null,
+          "objective_value": null,
+          "best_objective_bound": null,
+          "optimality_proven": false
+        },
+        "diagnostics": [
+          {
+            "code": "SCHEDULE_SEARCH_TIMEOUT",
+            "message": "制限時間内に実行可能な日程を見つけられませんでした。条件を変えて再実行してください。",
+            "details": {
+              "required_matches": 24,
+              "available_slots": 48,
+              "max_sections": 16
+            }
+          }
+        ],
+        "validation": {
+          "valid": false,
+          "diagnostics": [
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M1」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M1"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M2」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M2"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M3」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M3"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M4」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M4"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M5」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M5"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-A-M6」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-A-M6"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M1」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M1"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M2」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M2"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M3」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M3"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M4」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M4"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M5」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M5"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-B-M6」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-B-M6"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M1」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M1"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M2」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M2"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M3」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M3"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M4」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M4"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M5」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M5"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-C-M6」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-C-M6"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M1」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M1"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M2」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M2"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M3」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M3"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M4」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M4"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M5」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M5"
+              }
+            },
+            {
+              "code": "MATCH_NOT_ASSIGNED",
+              "message": "試合「LG-D-M6」がスケジュールに配置されていません。",
+              "details": {
+                "match_id": "LG-D-M6"
+              }
+            }
+          ],
+          "summary": {
+            "checked_match_count": 24,
+            "checked_slot_count": 0,
+            "error_count": 24
+          }
+        }
+      }
+    }
+  ]
+}

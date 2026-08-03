@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  OR-Tools FaaS feasibility probe. This template intentionally creates no
+  public Function URL or API endpoint.
+
+Resources:
+  SolverProbeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      DockerContext: .
+      Dockerfile: Dockerfile
+      DockerTag: python3.14-ortools-probe
+    Properties:
+      PackageType: Image
+      Architectures:
+        - x86_64
+      MemorySize: 2048
+      Timeout: 45
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          SOLVER_MAX_TIME_SECONDS: "30"
+
+# A browser origin restriction (CORS) is not authentication or abuse
+# prevention. If an HTTP endpoint is introduced for a later experiment, add
+# authentication, rate limiting, and cost controls explicitly; do not expose
+# this function merely by adding an unrestricted Function URL.

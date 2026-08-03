@@ -1,0 +1,602 @@
+{
+  "benchmark_schema_version": "0.1.0",
+  "fixture": "smoke",
+  "repeat": 10,
+  "requested_timeout_seconds": 30.0,
+  "input": {
+    "invocation_bytes": 19,
+    "invocation_sha256": "6c9723dd69eee5f3f3145e4671908fc28da12c9764a942de861e2dbaa218bf87",
+    "effective_input_bytes": 976,
+    "effective_input_sha256": "a88d55dd40f63de35dadd3d739de521413e7d9ccc9c96f1aeaa5daad18aa538d",
+    "random_seed": 20260803
+  },
+  "source": {
+    "commit": "393c3973c2fffb1a4f27d501a44d971e0d549db0",
+    "worktree_dirty": true
+  },
+  "environment": {
+    "python_version": "3.14.3",
+    "ortools_version": "9.15.6755",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "architecture": "AMD64"
+  },
+  "summary": {
+    "minimum_wall_time_seconds": 0.004147800034843385,
+    "median_wall_time_seconds": 0.004480350035009906,
+    "p95_wall_time_seconds": 0.010814185027265921,
+    "maximum_wall_time_seconds": 0.015024700027424842,
+    "mean_wall_time_seconds": 0.005612340016523376,
+    "minimum_solver_wall_time_seconds": 0.0015196,
+    "median_solver_wall_time_seconds": 0.0017296500000000001,
+    "p95_solver_wall_time_seconds": 0.00450968,
+    "maximum_solver_wall_time_seconds": 0.006593000000000001,
+    "minimum_result_bytes": 690,
+    "maximum_result_bytes": 702,
+    "maximum_observed_rss_bytes": 102948864,
+    "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+    "deterministic": true,
+    "rss_available": true
+  },
+  "runs": [
+    {
+      "run_no": 1,
+      "wall_time_seconds": 0.015024700027424842,
+      "rss_before_bytes": 96808960,
+      "rss_after_bytes": 101933056,
+      "rss_delta_bytes": 5124096,
+      "result_bytes": 701,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.006593000000000001,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 2,
+      "wall_time_seconds": 0.005008200008887798,
+      "rss_before_bytes": 101957632,
+      "rss_after_bytes": 102019072,
+      "rss_delta_bytes": 61440,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0019023000000000002,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 3,
+      "wall_time_seconds": 0.004285799979697913,
+      "rss_before_bytes": 102019072,
+      "rss_after_bytes": 102105088,
+      "rss_delta_bytes": 86016,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0015752000000000001,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 4,
+      "wall_time_seconds": 0.004711800022050738,
+      "rss_before_bytes": 102109184,
+      "rss_after_bytes": 102166528,
+      "rss_delta_bytes": 57344,
+      "result_bytes": 690,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0017921,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 5,
+      "wall_time_seconds": 0.004399900033604354,
+      "rss_before_bytes": 102166528,
+      "rss_after_bytes": 102215680,
+      "rss_delta_bytes": 49152,
+      "result_bytes": 690,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0015196,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 6,
+      "wall_time_seconds": 0.005668000027071685,
+      "rss_before_bytes": 102219776,
+      "rss_after_bytes": 102305792,
+      "rss_delta_bytes": 86016,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0019509000000000002,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 7,
+      "wall_time_seconds": 0.004162599972914904,
+      "rss_before_bytes": 102309888,
+      "rss_after_bytes": 102367232,
+      "rss_delta_bytes": 57344,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0016277000000000002,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 8,
+      "wall_time_seconds": 0.004147800034843385,
+      "rss_before_bytes": 102367232,
+      "rss_after_bytes": 102498304,
+      "rss_delta_bytes": 131072,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0016078000000000002,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 9,
+      "wall_time_seconds": 0.004560800036415458,
+      "rss_before_bytes": 102498304,
+      "rss_after_bytes": 102621184,
+      "rss_delta_bytes": 122880,
+      "result_bytes": 690,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0019634,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    },
+    {
+      "run_no": 10,
+      "wall_time_seconds": 0.0041538000223226845,
+      "rss_before_bytes": 102621184,
+      "rss_after_bytes": 102948864,
+      "rss_delta_bytes": 327680,
+      "result_bytes": 702,
+      "determinism_hash": "d5526aaae88a8fc74b041de3976d7a48ad2356dbdd7a4d34700b1531e56a2f65",
+      "result": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0.0016672000000000002,
+          "used_sections": 1,
+          "objective_value": 1.0,
+          "best_objective_bound": 1.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0
+          }
+        }
+      }
+    }
+  ]
+}
