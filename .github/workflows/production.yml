@@ -1,0 +1,304 @@
+name: 本番リリース
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 空欄の場合はcommit SHAを使用します
+        required: false
+        type: string
+      production_release_confirmed:
+        description: production環境への変更と失敗時rollbackを確認済み
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 手動承認後に本番へ反映
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME || 'football-scheduler-production' }}
+      ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+      RELEASE_ID: ${{ inputs.release_id || github.sha }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+      PUBLIC_APPLICATION_URL: ${{ vars.PUBLIC_APPLICATION_URL }}
+      SAM_CLI_TELEMETRY: "0"
+
+    steps:
+      - name: Reject unconfirmed release
+        if: ${{ !inputs.production_release_confirmed }}
+        run: |
+          echo "本番変更とrollbackの確認が必要です。" >&2
+          exit 1
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Authenticate to AWS with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check deployment configuration
+        env:
+          AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN: ${{ secrets.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ORIGIN_VERIFY_VALUE: ${{ secrets.ORIGIN_VERIFY_VALUE }}
+          PUBLIC_USAGE_API_KEY: ${{ secrets.PUBLIC_USAGE_API_KEY }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+        run: |
+          for value in AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN ECR_REPOSITORY_URI SAM_ARTIFACT_BUCKET CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_PAGES_PROJECT PUBLIC_APPLICATION_URL CLOUDFLARE_API_TOKEN ORIGIN_VERIFY_VALUE PUBLIC_USAGE_API_KEY TURNSTILE_SECRET_KEY; do
+            if [[ -z "${!value}" ]]; then
+              echo "GitHub Environmentの${value}が必要です。" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check AWS account prerequisites without changing resources
+        run: PYTHONPATH=src python scripts/check_production_prerequisites.py --hosting cloudflare-pages
+
+      - name: Run Python quality checks
+        run: |
+          uv sync --locked --all-groups
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+          uv run pytest
+          uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
+
+      - name: Build and test PWA and Pages Function
+        working-directory: web
+        env:
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+          npm run build:functions
+          uv run python ../scripts/write_cloudflare_release_headers.py dist/_headers "$RELEASE_ID"
+
+      - name: Validate infrastructure
+        run: sam validate --lint --template-file infra/production/template.yaml
+
+      - name: Record previous releases
+        id: previous
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          previous_function="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SolverFunctionName'].OutputValue | [0]" \
+            --output text --no-cli-pager 2>/dev/null || true)"
+          previous_version=""
+          if [[ -n "$previous_function" && "$previous_function" != "None" ]]; then
+            previous_version="$(aws lambda get-alias \
+              --function-name "$previous_function" --name live \
+              --query FunctionVersion --output text --no-cli-pager 2>/dev/null || true)"
+          fi
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/cloudflare-deployments.json
+          previous_pages="$(uv run python scripts/find_cloudflare_production_deployment.py /tmp/cloudflare-deployments.json)"
+          echo "function=$previous_function" >> "$GITHUB_OUTPUT"
+          echo "version=$previous_version" >> "$GITHUB_OUTPUT"
+          echo "pages=$previous_pages" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push immutable solver image
+        id: image
+        shell: bash
+        run: |
+          repository_name="${ECR_REPOSITORY_URI##*/}"
+          image_tag="${ECR_REPOSITORY_URI}:${RELEASE_ID}"
+          docker build --tag "$image_tag" .
+          docker push "$image_tag"
+          digest="$(aws ecr describe-images \
+            --repository-name "$repository_name" \
+            --image-ids imageTag="$RELEASE_ID" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text --no-cli-pager)"
+          echo "uri=${ECR_REPOSITORY_URI}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and create AWS change set
+        run: |
+          sam build \
+            --template-file infra/production/template.yaml \
+            --parameter-overrides \
+              SolverImageUri="${{ steps.image.outputs.uri }}" \
+              ReleaseId="$RELEASE_ID" \
+              OriginVerifyValue="${{ secrets.ORIGIN_VERIFY_VALUE }}" \
+              TurnstileSecretKey="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+              PublicUsageApiKeyValue="${{ secrets.PUBLIC_USAGE_API_KEY }}" \
+              EnableBudgetNotifications=true \
+              BudgetNotificationEmail="${{ vars.BUDGET_NOTIFICATION_EMAIL }}"
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --s3-bucket "${{ vars.SAM_ARTIFACT_BUCKET }}" \
+            --role-arn "${{ secrets.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}" \
+            --capabilities CAPABILITY_IAM \
+            --no-execute-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              SolverImageUri="${{ steps.image.outputs.uri }}" \
+              ReleaseId="$RELEASE_ID" \
+              OriginVerifyValue="${{ secrets.ORIGIN_VERIFY_VALUE }}" \
+              TurnstileSecretKey="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+              PublicUsageApiKeyValue="${{ secrets.PUBLIC_USAGE_API_KEY }}" \
+              EnableBudgetNotifications=true \
+              BudgetNotificationEmail="${{ vars.BUDGET_NOTIFICATION_EMAIL }}"
+
+      - name: Record infrastructure change diff
+        id: change_set
+        shell: bash
+        run: |
+          change_set_id="$(aws cloudformation list-change-sets \
+            --stack-name "$STACK_NAME" \
+            --query 'reverse(sort_by(Summaries[?Status==`CREATE_COMPLETE`], &CreationTime))[0].ChangeSetId' \
+            --output text --no-cli-pager)"
+          if [[ -z "$change_set_id" || "$change_set_id" == "None" ]]; then
+            echo "実行可能なCloudFormation change setが見つかりません。" >&2
+            exit 1
+          fi
+          stack_status="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' \
+            --output text --no-cli-pager)"
+          aws cloudformation describe-change-set \
+            --change-set-name "$change_set_id" \
+            --query 'Changes[].ResourceChange.{Action:Action,LogicalId:LogicalResourceId,Type:ResourceType,Replacement:Replacement}' \
+            --output table --no-cli-pager | tee /tmp/cloudformation-change-set.txt
+          {
+            echo "## CloudFormation change set"
+            echo '```text'
+            cat /tmp/cloudformation-change-set.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "id=$change_set_id" >> "$GITHUB_OUTPUT"
+          echo "previous_stack_status=$stack_status" >> "$GITHUB_OUTPUT"
+
+      - name: Execute approved infrastructure change
+        id: stack_deploy
+        run: |
+          aws cloudformation execute-change-set \
+            --change-set-name "${{ steps.change_set.outputs.id }}" --no-cli-pager
+          if [[ "${{ steps.change_set.outputs.previous_stack_status }}" == "REVIEW_IN_PROGRESS" ]]; then
+            aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" --no-cli-pager
+          else
+            aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" --no-cli-pager
+          fi
+
+      - name: Read new AWS endpoints
+        id: stack
+        shell: bash
+        run: |
+          function_name="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SolverFunctionName'].OutputValue | [0]" \
+            --output text --no-cli-pager)"
+          api_origin="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue | [0]" \
+            --output text --no-cli-pager)"
+          echo "function=$function_name" >> "$GITHUB_OUTPUT"
+          echo "api_origin=$api_origin" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test new Lambda alias
+        run: |
+          uv run python scripts/write_lambda_smoke_event.py /tmp/lambda-smoke-event.json
+          aws lambda invoke \
+            --function-name "${{ steps.stack.outputs.function }}" \
+            --qualifier live \
+            --payload fileb:///tmp/lambda-smoke-event.json \
+            --cli-binary-format raw-in-base64-out \
+            --no-cli-pager /tmp/lambda-smoke-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/lambda-smoke-response.json --release-id "$RELEASE_ID"
+
+      - name: Update Pages Function secrets
+        working-directory: web
+        env:
+          API_ORIGIN: ${{ steps.stack.outputs.api_origin }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ORIGIN_VERIFY_VALUE: ${{ secrets.ORIGIN_VERIFY_VALUE }}
+          API_USAGE_KEY: ${{ secrets.PUBLIC_USAGE_API_KEY }}
+        run: |
+          printf '%s' "$API_ORIGIN" | npx --no-install wrangler pages secret put AWS_API_ORIGIN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          printf '%s' "$ORIGIN_VERIFY_VALUE" | npx --no-install wrangler pages secret put ORIGIN_VERIFY_VALUE --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          printf '%s' "$API_USAGE_KEY" | npx --no-install wrangler pages secret put API_USAGE_KEY --project-name "$CLOUDFLARE_PAGES_PROJECT"
+
+      - name: Deploy Cloudflare Pages release
+        id: pages
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx --no-install wrangler pages deploy dist \
+            --project-name "$CLOUDFLARE_PAGES_PROJECT" \
+            --branch main \
+            --commit-hash "$GITHUB_SHA" \
+            --commit-message "release ${RELEASE_ID}" \
+            --commit-dirty=false
+
+      - name: Smoke-test public application shell
+        run: |
+          response_headers="$(curl --fail --silent --show-error --head "$PUBLIC_APPLICATION_URL")"
+          echo "$response_headers" | grep --ignore-case "x-release-id: $RELEASE_ID"
+          curl --fail --silent --show-error "$PUBLIC_APPLICATION_URL" | grep "大会日程スケジューラー"
+
+      - name: Roll back Cloudflare Pages after failure
+        if: ${{ failure() && steps.pages.outcome == 'success' && steps.previous.outputs.pages != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          curl --fail --silent --show-error \
+            --request POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${{ steps.previous.outputs.pages }}/rollback" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{}'
+
+      - name: Roll back Lambda alias after failure
+        if: ${{ failure() && steps.stack_deploy.outcome == 'success' && steps.previous.outputs.version != '' && steps.previous.outputs.version != 'None' }}
+        run: |
+          aws lambda update-alias \
+            --function-name "${{ steps.previous.outputs.function }}" \
+            --name live \
+            --function-version "${{ steps.previous.outputs.version }}" \
+            --no-cli-pager
