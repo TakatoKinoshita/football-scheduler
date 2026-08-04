@@ -1,0 +1,138 @@
+import { cloneDocument, type TournamentDocument } from "./types";
+
+const DATABASE_NAME = "football-scheduler";
+const DATABASE_VERSION = 1;
+const STORE_NAME = "documents";
+
+type StorageKey = "draft" | "confirmed" | "previous";
+
+interface StoredDocument {
+  key: StorageKey;
+  document: TournamentDocument;
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error ?? new Error("保存処理に失敗しました。")));
+  });
+}
+
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.addEventListener("complete", () => resolve());
+    transaction.addEventListener("abort", () => reject(transaction.error ?? new Error("保存処理を中断しました。")));
+    transaction.addEventListener("error", () => reject(transaction.error ?? new Error("保存処理に失敗しました。")));
+  });
+}
+
+export class TournamentStorage {
+  private databasePromise?: Promise<IDBDatabase>;
+
+  constructor(private readonly indexedDb: IDBFactory = indexedDB) {}
+
+  private database(): Promise<IDBDatabase> {
+    if (this.databasePromise === undefined) {
+      this.databasePromise = new Promise((resolve, reject) => {
+        const request = this.indexedDb.open(DATABASE_NAME, DATABASE_VERSION);
+        request.addEventListener("upgradeneeded", () => {
+          if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+            request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
+          }
+        });
+        request.addEventListener("success", () => resolve(request.result));
+        request.addEventListener("error", () => reject(request.error ?? new Error("保存場所を開けませんでした。")));
+      });
+    }
+    return this.databasePromise;
+  }
+
+  async get(key: StorageKey): Promise<TournamentDocument | undefined> {
+    const database = await this.database();
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const value = await requestResult(
+      transaction.objectStore(STORE_NAME).get(key) as IDBRequest<StoredDocument | undefined>,
+    );
+    await transactionDone(transaction);
+    return value === undefined ? undefined : cloneDocument(value.document);
+  }
+
+  async loadLatest(): Promise<TournamentDocument | undefined> {
+    return (await this.get("draft")) ?? (await this.get("confirmed"));
+  }
+
+  async saveDraft(document: TournamentDocument): Promise<void> {
+    await this.put("draft", document);
+  }
+
+  async confirm(document: TournamentDocument): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const current = await requestResult(
+      store.get("confirmed") as IDBRequest<StoredDocument | undefined>,
+    );
+    if (current !== undefined) {
+      store.put({ key: "previous", document: current.document } satisfies StoredDocument);
+    }
+    store.put({ key: "confirmed", document: cloneDocument(document) } satisfies StoredDocument);
+    store.put({ key: "draft", document: cloneDocument(document) } satisfies StoredDocument);
+    await transactionDone(transaction);
+  }
+
+  async replaceImported(document: TournamentDocument): Promise<void> {
+    await this.confirm(document);
+  }
+
+  async deleteCurrent(): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const current =
+      (await requestResult(store.get("draft") as IDBRequest<StoredDocument | undefined>)) ??
+      (await requestResult(store.get("confirmed") as IDBRequest<StoredDocument | undefined>));
+    if (current !== undefined) {
+      store.put({ key: "previous", document: current.document } satisfies StoredDocument);
+    }
+    store.delete("draft");
+    store.delete("confirmed");
+    await transactionDone(transaction);
+  }
+
+  async restorePrevious(): Promise<TournamentDocument | undefined> {
+    const previous = await this.get("previous");
+    if (previous === undefined) return undefined;
+    await this.confirm(previous);
+    return previous;
+  }
+
+  private async put(key: StorageKey, document: TournamentDocument): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).put({ key, document: cloneDocument(document) } satisfies StoredDocument);
+    await transactionDone(transaction);
+  }
+}
+
+export class AutosaveController {
+  private timer?: ReturnType<typeof setTimeout>;
+
+  constructor(
+    private readonly save: (document: TournamentDocument) => Promise<void>,
+    private readonly delayMilliseconds = 500,
+  ) {}
+
+  schedule(document: TournamentDocument, onSaved: () => void, onError: (error: unknown) => void): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    const snapshot = cloneDocument(document);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.save(snapshot).then(onSaved).catch(onError);
+    }, this.delayMilliseconds);
+  }
+
+  cancel(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+}

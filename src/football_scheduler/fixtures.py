@@ -79,3 +79,43 @@ def make_representative_request() -> ScheduleRequest:
         random_seed=20260803,
         solver=SolverSettings(max_time_seconds=30),
     )
+
+
+def make_maximum_mvp_request() -> ScheduleRequest:
+    """MVP上限の32チームを使う、本番経路検証用のリーグ戦48試合を返す。"""
+
+    block_ids = tuple(chr(ord("A") + index) for index in range(8))
+    teams = tuple(
+        Team(
+            id=f"team-{index + 1:02d}",
+            name=f"チーム{index + 1}",
+            block_id=block_ids[index // 4],
+        )
+        for index in range(32)
+    )
+    matches: list[MatchSpec] = []
+    for block_id in block_ids:
+        block_teams = [team for team in teams if team.block_id == block_id]
+        for match_no, (home, away) in enumerate(combinations(block_teams, 2), start=1):
+            matches.append(
+                MatchSpec(
+                    id=f"LG-{block_id}-M{match_no}",
+                    phase="league",
+                    round=f"{block_id}ブロック",
+                    possible_home_team_ids=(home.id,),
+                    possible_away_team_ids=(away.id,),
+                )
+            )
+
+    return ScheduleRequest(
+        teams=teams,
+        courts=tuple(
+            Court(id=f"court-{letter.lower()}", name=f"{letter}コート")
+            for letter in ("A", "B", "C", "D")
+        ),
+        matches=tuple(matches),
+        day=DaySettings(max_sections=24),
+        referees=RefereeSettings(organizer_capacity=4),
+        random_seed=20260803,
+        solver=SolverSettings(max_time_seconds=20),
+    )

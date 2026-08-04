@@ -1,4 +1,7 @@
 .venv/
+.nodeenv/
+node_modules/
+*.tsbuildinfo
 .uv-cache/
 __pycache__/
 *.py[cod]
@@ -8,6 +11,9 @@ __pycache__/
 .coverage
 htmlcov/
 dist/
+web/dist/
+web/coverage/
+.wrangler-build/
 build/
 *.egg-info/
 .aws-sam/

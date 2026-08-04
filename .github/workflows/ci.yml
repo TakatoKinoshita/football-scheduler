@@ -41,3 +41,79 @@ jobs:
 
       - name: Test
         run: uv run pytest
+
+      - name: Verify 32-team production path
+        run: uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build PWA
+        run: |
+          npm run build
+          npm run build:functions
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Validate production template
+        env:
+          SAM_CLI_TELEMETRY: "0"
+        run: |
+          sam validate --lint --template-file infra/production/template.yaml
+          sam validate --lint --template-file infra/production/bootstrap.yaml
+
+      - name: Build lightweight authorizer package
+        env:
+          SAM_CLI_TELEMETRY: "0"
+        run: |
+          sam build \
+            --template-file infra/production/template.yaml \
+            --parameter-overrides \
+              SolverImageUri=000000000000.dkr.ecr.us-east-1.amazonaws.com/solver@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+              ReleaseId=ci-validation \
+              OriginVerifyValue=01234567890123456789012345678901 \
+              TurnstileSecretKey=01234567890123456789 \
+              PublicUsageApiKeyValue=01234567890123456789
+          cd /tmp
+          PYTHONPATH="$GITHUB_WORKSPACE/.aws-sam/build/ApiAuthorizerFunction" \
+            uv run --no-project --python 3.14 python -S -c "import football_scheduler.authorizer"

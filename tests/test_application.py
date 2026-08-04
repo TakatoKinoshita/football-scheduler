@@ -89,6 +89,23 @@ def test_fixture_and_solver_options_are_resolved(
     assert received[0]["solver"]["max_time_seconds"] == 2
 
 
+def test_mvp_maximum_fixture_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda request: received.append(request) or _ModelLike(_result()),
+    )
+
+    result = application.handle_request({"fixture": "mvp_maximum"})
+
+    assert result["status"] == "optimal"
+    assert len(received[0]["teams"]) == 32
+    assert len(received[0]["courts"]) == 4
+    assert len(received[0]["matches"]) == 48
+    assert received[0]["solver"]["max_time_seconds"] == 20
+
+
 def test_environment_time_limit_caps_requested_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,16 +1,9 @@
-"""地域サッカー大会スケジューラの公開API。"""
+"""地域サッカー大会スケジューラ。
 
-from football_scheduler.fixtures import make_representative_request, make_smoke_request
-from football_scheduler.models import ScheduleRequest, ScheduleResult, SolverStatus
-from football_scheduler.solver import solve_schedule
+軽量なauthorizerがOR-Toolsを読み込まないよう、package importではsolverやmodelを
+先読みしない。各機能は``football_scheduler.solver``等の明示的なmoduleからimportする。
+"""
 
-__all__ = [
-    "ScheduleRequest",
-    "ScheduleResult",
-    "SolverStatus",
-    "make_representative_request",
-    "make_smoke_request",
-    "solve_schedule",
-]
+__all__ = ["__version__"]
 
 __version__ = "0.1.0"
