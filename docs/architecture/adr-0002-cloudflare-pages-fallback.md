@@ -1,6 +1,6 @@
 # ADR-0002: Cloudflare Pagesによる公開入口の代替
 
-- 状態: 採用（AWS Lambda quotaの増枠完了まで公開不可）
+- 状態: 採用（quota条件は充足、本番設定と初回dry-runは未完了）
 - 決定日: 2026-08-05
 - 置換対象: ADR-0001の静的配信、公開入口、WAF
 - 関連: issue #6、#7、#8、#9
@@ -11,12 +11,14 @@
 
 - AWS Free Tier account planを利用中であり、CloudFront Free定額プランへ加入できない。
 - CloudFront Free plan使用数は`0 / 3`だが、account plan条件を満たさないため利用数の余裕は採否を変えない。
-- Lambda account同時実行quotaは`10`である。AWS Lambdaはreserved concurrencyを設定する場合も
-  100を未予約で残すため、solverとauthorizerへ各3を予約するには`3 + 3 + 100 = 106`以上必要である。
+- Lambda account同時実行quotaは2026年8月5日に`1000`と確認した。AWS Lambdaはreserved
+  concurrencyを設定する場合も100を未予約で残すため、solverとauthorizerへ各3を予約する
+  必要値`3 + 3 + 100 = 106`以上を満たしている。
 - CloudFront画面上の直近利用量・distribution適格性確認は、CloudFrontを採用しないため本構成の公開条件から外す。
 
 したがって、従量課金CloudFrontへ暗黙に切り替えず、ADR-0001に定めた代替条件を発動する。
-Lambda quota不足は静的配信方式では解消しないため、増枠完了まで本番公開を停止する。
+Lambda quotaのblockerは解消したが、Cloudflare、AWS bootstrap、GitHub Environmentの設定と
+実行前change set確認が完了するまでは本番公開しない。
 
 ## 2. 決定
 
@@ -84,6 +86,11 @@ quotaはbest-effortであり、月500円を金融上のhard capとして保証�
 - CORSは認証や濫用対策として利用しない。
 - CloudflareとAWSのログに大会名、チーム名、request／response本文を記録しない。
 - Cloudflare Pages deploymentとLambda versionを同じrelease ID／commit SHAで追跡する。
+- Direct UploadではCloudflare側のbranch protectionに依存せず、GitHub workflowと
+  `production` Environmentで`main`だけを許可する。
+- production workflowの`plan`と`apply`を別実行にし、それぞれEnvironment承認を必要とする。
+  planはimage push、SAM build、change set作成・表示で停止し、applyは指定されたchange setの
+  stack名、region、commit SHA、実行可能状態を再検証してから実行する。
 
 CloudFront WAFのIP rate ruleは失われる。MVPではTurnstile、全体throttle、月間quota、同時実行上限を
 優先し、Cloudflare側のrequest分析で濫用が観測された場合にrate limitingを別途再評価する。
@@ -92,7 +99,8 @@ CloudFront WAFのIP rate ruleは失われる。MVPではTurnstile、全体thrott
 
 公開前に次をすべて満たす。
 
-- Lambda account同時実行quotaを106以上へ増枠する。運用余裕を含む申請値は110以上を推奨する。
+- Lambda account同時実行quotaが106以上であることをread-only確認する。2026年8月5日の確認値は
+  `1000`であり、この条件は充足済みである。
 - Cloudflare Pages Direct Upload project、Pages Write API token、production branchを設定する。
 - Pages Functionsの3 secretとTurnstile hostname／actionを設定する。
 - Functions枠超過時の動作をfail closedにする。
