@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from itertools import pairwise
 
-from football_scheduler.fixtures import make_representative_request, make_smoke_request
+from football_scheduler.fixtures import (
+    make_maximum_mvp_request,
+    make_representative_request,
+    make_smoke_request,
+)
 from football_scheduler.models import (
     DaySettings,
     MatchSpec,
@@ -31,6 +35,16 @@ def test_smoke_fixture_is_optimal_and_json_serializable() -> None:
         if slot.match_id is not None
     )
     assert result.model_dump(mode="json")["status"] == "OPTIMAL"
+
+
+def test_maximum_mvp_fixture_uses_documented_input_limits() -> None:
+    request = make_maximum_mvp_request()
+
+    assert len(request.teams) == 32
+    assert len(request.courts) == 4
+    assert len(request.matches) == 48
+    assert request.day.max_sections == 24
+    assert request.solver.max_time_seconds == 20
 
 
 def test_representative_fixture_satisfies_core_hard_constraints() -> None:

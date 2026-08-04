@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from football_scheduler.fixtures import (
+    make_maximum_mvp_request,
     make_representative_request,
     make_smoke_request,
 )
@@ -24,7 +25,7 @@ from football_scheduler.validator import validate_schedule
 
 SCHEMA_VERSION = "0.1.0"
 MAX_REQUEST_BYTES = 1_000_000
-MAX_TEAMS = 64
+MAX_TEAMS = 32
 MAX_COURTS = 16
 MAX_MATCHES = 512
 MAX_SECTIONS = 128
@@ -107,11 +108,12 @@ def _resolve_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     factories = {
         "smoke": make_smoke_request,
         "representative": make_representative_request,
+        "mvp_maximum": make_maximum_mvp_request,
     }
     if fixture_name not in factories:
         raise _RequestError(
             "UNKNOWN_FIXTURE",
-            "指定された検証用入力が見つかりません。smokeまたはrepresentativeを指定してください。",
+            "指定された検証用入力が見つかりません。smoke、representative、mvp_maximumのいずれかを指定してください。",
             fixture=fixture_name,
         )
 
@@ -219,7 +221,7 @@ def _validate_limits(request: Mapping[str, Any]) -> None:
     ):
         raise _RequestError(
             "SECTION_LIMIT_EXCEEDED",
-            f"セクション数が検証用上限の{MAX_SECTIONS}を超えています。",
+            f"セクション数が上限の{MAX_SECTIONS}を超えています。",
             actual=max_sections,
             maximum=MAX_SECTIONS,
         )
@@ -238,7 +240,7 @@ def _validate_sequence_limit(
     if len(value) > maximum:
         raise _RequestError(
             code,
-            f"{label}が検証用上限の{maximum}を超えています。",
+            f"{label}が上限の{maximum}を超えています。",
             actual=len(value),
             maximum=maximum,
         )
