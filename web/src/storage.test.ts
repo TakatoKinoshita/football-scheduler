@@ -67,4 +67,17 @@ describe("自動保存の間引き", () => {
     expect(onError).toHaveBeenCalledWith(error);
     vi.useRealTimers();
   });
+
+  it("復元操作前に取り消した保留中の保存は実行しない", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn(async () => undefined);
+    const controller = new AutosaveController(save, 500);
+    controller.schedule(createTournamentDocument(), () => undefined, () => undefined);
+
+    controller.cancel();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(save).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });
