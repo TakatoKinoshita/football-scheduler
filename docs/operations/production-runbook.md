@@ -24,12 +24,13 @@ AWS OIDC role、CloudFormation実行role、ECR、SAM artifact bucketは
 uv run python scripts/check_production_prerequisites.py --hosting cloudflare-pages
 ```
 
-solverとauthorizerへそれぞれreserved concurrency 3を設定し、未予約枠10を残すため、account
-同時実行quotaは16以上必要である。現在値10のままreserved concurrencyを外して公開すると、
-濫用時の費用・同時実行ガードを弱めるため行わない。
+AWS Lambdaはreserved concurrencyを設定する場合も100を未予約で残す。solverとauthorizerへ
+それぞれ3を予約するため、account同時実行quotaは`3 + 3 + 100 = 106`以上必要である。現在値10の
+ままreserved concurrencyを外して公開すると、濫用時の費用・同時実行ガードを弱めるため行わない。
 
-AWS ConsoleのService Quotasで`AWS Lambda`の`Concurrent executions`を選び、16以上へ増枠申請する。
-今後の小さな関数追加余地を含め、申請値は20以上を推奨する。quota増枠自体には利用料は発生しないが、
+AWS ConsoleのService Quotasで`AWS Lambda`の`Concurrent executions`（quota code
+`L-B99A9384`）を選び、106以上へ増枠申請する。今後の小さな関数追加余地を含め、申請値は
+110以上を推奨する。quota増枠自体には利用料は発生しないが、
 実際の実行には通常のLambda料金が発生する。承認後に上記scriptを再実行し、合格を確認する。
 
 ### 2.2 Cloudflare Pages

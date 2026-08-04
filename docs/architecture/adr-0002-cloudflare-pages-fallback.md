@@ -11,7 +11,8 @@
 
 - AWS Free Tier account planを利用中であり、CloudFront Free定額プランへ加入できない。
 - CloudFront Free plan使用数は`0 / 3`だが、account plan条件を満たさないため利用数の余裕は採否を変えない。
-- Lambda account同時実行quotaは`10`である。solverとauthorizerへ各3を予約し、未予約枠10を残すには`16`以上必要である。
+- Lambda account同時実行quotaは`10`である。AWS Lambdaはreserved concurrencyを設定する場合も
+  100を未予約で残すため、solverとauthorizerへ各3を予約するには`3 + 3 + 100 = 106`以上必要である。
 - CloudFront画面上の直近利用量・distribution適格性確認は、CloudFrontを採用しないため本構成の公開条件から外す。
 
 したがって、従量課金CloudFrontへ暗黙に切り替えず、ADR-0001に定めた代替条件を発動する。
@@ -91,7 +92,7 @@ CloudFront WAFのIP rate ruleは失われる。MVPではTurnstile、全体thrott
 
 公開前に次をすべて満たす。
 
-- Lambda account同時実行quotaを16以上へ増枠する。運用余裕を含む申請値は20以上を推奨する。
+- Lambda account同時実行quotaを106以上へ増枠する。運用余裕を含む申請値は110以上を推奨する。
 - Cloudflare Pages Direct Upload project、Pages Write API token、production branchを設定する。
 - Pages Functionsの3 secretとTurnstile hostname／actionを設定する。
 - Functions枠超過時の動作をfail closedにする。

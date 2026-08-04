@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-MINIMUM_CONCURRENT_EXECUTIONS = 16
+SOLVER_RESERVED_CONCURRENCY = 3
+AUTHORIZER_RESERVED_CONCURRENCY = 3
+REQUIRED_UNRESERVED_CONCURRENCY = 100
+MINIMUM_CONCURRENT_EXECUTIONS = (
+    SOLVER_RESERVED_CONCURRENCY + AUTHORIZER_RESERVED_CONCURRENCY + REQUIRED_UNRESERVED_CONCURRENCY
+)
 
 
 @dataclass(frozen=True)
@@ -74,14 +79,19 @@ def evaluate(
     )
     if isinstance(concurrency, int) and concurrency >= MINIMUM_CONCURRENT_EXECUTIONS:
         checks.append(
-            Check("合格", f"Lambda account同時実行quotaは{concurrency}です。必要値は16以上です。")
+            Check(
+                "合格",
+                f"Lambda account同時実行quotaは{concurrency}です。"
+                f"必要値は{MINIMUM_CONCURRENT_EXECUTIONS}以上です。",
+            )
         )
     else:
         checks.append(
             Check(
                 "不合格",
                 f"Lambda account同時実行quotaは{concurrency!s}です。"
-                "solverとauthorizerへ各3を予約し、10を未予約で残すには16以上が必要です。",
+                f"solverとauthorizerへ各3を予約し、{REQUIRED_UNRESERVED_CONCURRENCY}を"
+                f"未予約で残すには{MINIMUM_CONCURRENT_EXECUTIONS}以上が必要です。",
             )
         )
     if hosting == "cloudfront":
