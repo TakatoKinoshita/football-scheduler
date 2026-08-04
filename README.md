@@ -2,14 +2,19 @@
 
 地域サッカー大会の対戦、コート、セクション、審判を、大会規則に沿って生成・検証するWebアプリの開発プロジェクトです。エンドユーザーが開発環境をインストールする必要のない提供形態を目指しています。
 
-現在のリポジトリには、Issue #1「FaaS上でOR-Toolsの技術検証」で作成した最小実装と実測結果が含まれます。PythonとOR-Tools CP-SATで代表規模の日程を生成し、独立した検証器で結果を確認できます。大会規則の全機能やWeb画面はまだ実装していません。
+現在のリポジトリには、Issue #1「FaaS上でOR-Toolsの技術検証」で作成した最小実装と実測結果が含まれます。PythonとOR-Tools CP-SATで代表規模の日程を生成し、独立した検証器で結果を確認できます。大会規則の全機能と本番用Web画面の全操作はまだ実装していません。
+
+Issue #6、#7、#9では、TypeScript／ViteのPWA app shell、IndexedDB自動保存とJSON入出力、
+本番API adapterと濫用対策のIaCを追加しました。Issue #8の手動承認付き本番release経路も
+用意しています。ただし、大会規則の詳細入力画面はまだ開発途中であり、本番AWSリソースは
+作成・公開していません。
 
 AWS LambdaとSAMは技術検証の対象として実測した後、複数候補を同じ基準で比較しました。
-MVPの本番構成は、S3とCloudFrontを公開入口とし、API GatewayからLambdaコンテナを
-同期呼出しする構成を第一候補とします。CloudFront無料定額プランを利用できない場合の
-代替構成や再評価条件を含む決定理由は、
+対象AWS accountではCloudFront Free定額プランを利用できないため、MVPはCloudflare Pagesと
+Pages Functionを公開入口とし、API GatewayからLambdaコンテナを同期呼出しします。変更理由は
+[Cloudflare Pages代替ADR](docs/architecture/adr-0002-cloudflare-pages-fallback.md)、元の比較は
 [MVP本番インフラADR](docs/architecture/adr-0001-mvp-production-infrastructure.md)に記録しています。
-本番環境はまだ構築・公開していません。
+本番環境はまだ構築・公開しておらず、Lambda同時実行quotaの増枠が公開前の必須作業です。
 
 初期リリースで想定する利用規模、保存・共有、オフライン動作、費用、性能は
 [MVP運用要件](docs/product/mvp-operational-requirements.md)にまとめています。本番インフラは
@@ -21,6 +26,7 @@ MVPの本番構成は、S3とCloudFrontを公開入口とし、API Gatewayから
 
 - [uv](https://docs.astral.sh/uv/)
 - Git
+- Node.js 22
 
 Python 3.14とプロジェクトの依存関係はuvで管理します。リポジトリのルートで次を実行してください。
 
@@ -34,6 +40,17 @@ Lambdaコンテナ用の依存一覧も、同じ変更時にlockfileから再生
 ```console
 uv export --locked --no-dev --no-emit-project --no-header --output-file requirements-lambda.txt
 ```
+
+Web画面の依存関係は`web/package-lock.json`で固定する。
+
+```console
+cd web
+npm ci
+npm run dev
+```
+
+画面に大会入力と保存済み結果を表示できる。ローカル開発で日程生成を試す場合も、Turnstileの
+site keyと同一originのAPIが必要である。secret keyを`VITE_`環境変数へ設定してはならない。
 
 ## 固定fixtureの実行
 
@@ -60,7 +77,16 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run pytest
+uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
+cd web
+npm run lint
+npm test
+npm run build
+npm run build:functions
 ```
+
+32チームの本番経路検証は2回の実行に時間がかかる。API adapter、独立制約検証、30秒上限、
+1 MB応答上限、同じseedでの再現性をまとめて確認する。
 
 ## Lambdaコンテナのローカル検証
 
@@ -113,6 +139,14 @@ restrictiveなumaskでcheckoutしたソースも実Lambdaユーザーが読め�
 
 測定条件、記録項目、成功基準は[技術検証レポート](docs/technical-spikes/faas-ortools.md)にまとめています。
 
+## 本番リリース
+
+本番構成、GitHub OIDC、Cloudflare Pages、手動承認、監視、費用停止、rollbackは
+[本番runbook](docs/operations/production-runbook.md)にまとめています。大会データの自動保存、
+JSON共有、復元範囲は[保存・共有・復元仕様](docs/product/data-save-and-recovery.md)を参照してください。
+本番リソースの作成・変更・削除はrunbookだけを根拠に自動実行せず、対象と費用を確認して
+ユーザーの明示承認を得てから行います。
+
 ## ディレクトリ構成
 
 ```text
@@ -120,10 +154,13 @@ restrictiveなumaskでcheckoutしたソースも実Lambdaユーザーが読め�
 ├── .github/workflows/       # CI
 ├── docs/architecture/       # インフラ等の設計判断（ADR）
 ├── docs/product/            # MVPの利用・運用要件
+├── docs/operations/         # 本番リリース、監視、復旧手順
 ├── docs/technical-spikes/   # 技術検証の条件と結果
 ├── events/                  # Lambda／SAMの固定入力
 ├── scripts/                 # fixtureの反復実行と測定
 ├── src/football_scheduler/
+│   ├── api_handler.py       # API Gateway REST API adapter
+│   ├── authorizer.py        # Pages proxy確認・Turnstile authorizer
 │   ├── application.py       # FaaS非依存のアプリケーション境界
 │   ├── fixtures.py          # 固定入力
 │   ├── lambda_handler.py    # Lambda用の薄いアダプター
@@ -131,6 +168,8 @@ restrictiveなumaskでcheckoutしたソースも実Lambdaユーザーが読め�
 │   ├── solver.py            # CP-SATによる日程生成
 │   └── validator.py         # ソルバーから独立した制約検証
 ├── tests/                   # 単体・結合テスト
+├── web/                     # TypeScript／Vite PWA、Pages Function、ブラウザ内保存
+├── infra/production/        # 本番bootstrapとSAM template
 ├── Dockerfile               # Lambdaコンテナ
 ├── pyproject.toml           # Pythonプロジェクト設定
 ├── requirements-lambda.txt # lockfileから生成したコンテナ用依存一覧
