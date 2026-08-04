@@ -3,12 +3,24 @@ name: 本番リリース
 on:
   workflow_dispatch:
     inputs:
-      release_id:
-        description: 空欄の場合はcommit SHAを使用します
+      operation:
+        description: planはchange set作成まで、applyは指定済みchange setを実行して公開します
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      release_sha:
+        description: apply時にplanで表示された完全なcommit SHAを指定します
+        required: false
+        type: string
+      change_set_arn:
+        description: apply時にplanで表示されたchange set ARNを指定します
         required: false
         type: string
       production_release_confirmed:
-        description: production環境への変更と失敗時rollbackを確認済み
+        description: 選択した操作の本番環境への影響を確認済み
         required: true
         default: false
         type: boolean
@@ -23,7 +35,7 @@ concurrency:
 
 jobs:
   release:
-    name: 手動承認後に本番へ反映
+    name: ${{ inputs.operation == 'plan' && '本番変更を計画' || '承認済み変更を本番へ反映' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -31,21 +43,84 @@ jobs:
       AWS_REGION: us-east-1
       STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME || 'football-scheduler-production' }}
       ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
-      RELEASE_ID: ${{ inputs.release_id || github.sha }}
+      RELEASE_ID: ${{ inputs.operation == 'plan' && github.sha || inputs.release_sha }}
+      REQUESTED_RELEASE_SHA: ${{ inputs.release_sha }}
+      CHANGE_SET_ARN: ${{ inputs.change_set_arn }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
       PUBLIC_APPLICATION_URL: ${{ vars.PUBLIC_APPLICATION_URL }}
       SAM_CLI_TELEMETRY: "0"
 
     steps:
-      - name: Reject unconfirmed release
-        if: ${{ !inputs.production_release_confirmed }}
+      - name: Check operation inputs
+        shell: bash
         run: |
-          echo "本番変更とrollbackの確認が必要です。" >&2
-          exit 1
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "本番workflowはmainからだけ実行できます。" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.production_release_confirmed }}" != "true" ]]; then
+            echo "選択した本番操作の影響確認が必要です。" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release SHAには完全な40文字のcommit SHAが必要です。" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.operation }}" == "plan" ]]; then
+            if [[ -n "$REQUESTED_RELEASE_SHA" || -n "$CHANGE_SET_ARN" ]]; then
+              echo "planではrelease_shaとchange_set_arnを指定しないでください。" >&2
+              exit 1
+            fi
+          elif [[ -z "$REQUESTED_RELEASE_SHA" || -z "$CHANGE_SET_ARN" ]]; then
+            echo "applyにはplanで表示されたrelease_shaとchange_set_arnが必要です。" >&2
+            exit 1
+          fi
 
-      - name: Check out repository
+      - name: Check deployment configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN: ${{ secrets.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}
+          BUDGET_NOTIFICATION_EMAIL: ${{ vars.BUDGET_NOTIFICATION_EMAIL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ORIGIN_VERIFY_VALUE: ${{ secrets.ORIGIN_VERIFY_VALUE }}
+          PUBLIC_USAGE_API_KEY: ${{ secrets.PUBLIC_USAGE_API_KEY }}
+          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+        run: |
+          required_values=(
+            AWS_DEPLOY_ROLE_ARN AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN
+            ECR_REPOSITORY_URI SAM_ARTIFACT_BUCKET
+            CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_PAGES_PROJECT PUBLIC_APPLICATION_URL
+            CLOUDFLARE_API_TOKEN ORIGIN_VERIFY_VALUE PUBLIC_USAGE_API_KEY
+            TURNSTILE_SECRET_KEY TURNSTILE_SITE_KEY BUDGET_NOTIFICATION_EMAIL
+          )
+          for value in "${required_values[@]}"; do
+            if [[ -z "${!value}" ]]; then
+              echo "GitHub Environmentの${value}が必要です。" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check out release commit
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.operation == 'plan' && github.sha || inputs.release_sha }}
+
+      - name: Verify release commit belongs to main
+        shell: bash
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "$RELEASE_ID" ]]; then
+            echo "checkoutしたcommitがrelease SHAと一致しません。" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$RELEASE_ID" origin/main; then
+            echo "release SHAはmainに含まれていません。" >&2
+            exit 1
+          fi
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -68,22 +143,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Check deployment configuration
-        env:
-          AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN: ${{ secrets.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ORIGIN_VERIFY_VALUE: ${{ secrets.ORIGIN_VERIFY_VALUE }}
-          PUBLIC_USAGE_API_KEY: ${{ secrets.PUBLIC_USAGE_API_KEY }}
-          SAM_ARTIFACT_BUCKET: ${{ vars.SAM_ARTIFACT_BUCKET }}
-          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
-        run: |
-          for value in AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN ECR_REPOSITORY_URI SAM_ARTIFACT_BUCKET CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_PAGES_PROJECT PUBLIC_APPLICATION_URL CLOUDFLARE_API_TOKEN ORIGIN_VERIFY_VALUE PUBLIC_USAGE_API_KEY TURNSTILE_SECRET_KEY; do
-            if [[ -z "${!value}" ]]; then
-              echo "GitHub Environmentの${value}が必要です。" >&2
-              exit 1
-            fi
-          done
 
       - name: Check AWS account prerequisites without changing resources
         run: PYTHONPATH=src python scripts/check_production_prerequisites.py --hosting cloudflare-pages
@@ -112,50 +171,40 @@ jobs:
       - name: Validate infrastructure
         run: sam validate --lint --template-file infra/production/template.yaml
 
-      - name: Record previous releases
-        id: previous
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          previous_function="$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='SolverFunctionName'].OutputValue | [0]" \
-            --output text --no-cli-pager 2>/dev/null || true)"
-          previous_version=""
-          if [[ -n "$previous_function" && "$previous_function" != "None" ]]; then
-            previous_version="$(aws lambda get-alias \
-              --function-name "$previous_function" --name live \
-              --query FunctionVersion --output text --no-cli-pager 2>/dev/null || true)"
-          fi
-          curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --output /tmp/cloudflare-deployments.json
-          previous_pages="$(uv run python scripts/find_cloudflare_production_deployment.py /tmp/cloudflare-deployments.json)"
-          echo "function=$previous_function" >> "$GITHUB_OUTPUT"
-          echo "version=$previous_version" >> "$GITHUB_OUTPUT"
-          echo "pages=$previous_pages" >> "$GITHUB_OUTPUT"
-
       - name: Log in to Amazon ECR
+        if: ${{ inputs.operation == 'plan' }}
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push immutable solver image
+      - name: Build or reuse immutable solver image
+        if: ${{ inputs.operation == 'plan' }}
         id: image
         shell: bash
         run: |
-          repository_name="${ECR_REPOSITORY_URI##*/}"
+          repository_name="${ECR_REPOSITORY_URI#*/}"
           image_tag="${ECR_REPOSITORY_URI}:${RELEASE_ID}"
-          docker build --tag "$image_tag" .
-          docker push "$image_tag"
           digest="$(aws ecr describe-images \
             --repository-name "$repository_name" \
             --image-ids imageTag="$RELEASE_ID" \
             --query 'imageDetails[0].imageDigest' \
-            --output text --no-cli-pager)"
+            --output text --no-cli-pager 2>/dev/null || true)"
+          if [[ -z "$digest" || "$digest" == "None" ]]; then
+            docker build --tag "$image_tag" .
+            docker push "$image_tag"
+            digest="$(aws ecr describe-images \
+              --repository-name "$repository_name" \
+              --image-ids imageTag="$RELEASE_ID" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text --no-cli-pager)"
+          fi
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ECR image digestを確認できませんでした。" >&2
+            exit 1
+          fi
           echo "uri=${ECR_REPOSITORY_URI}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "ECR image: ${ECR_REPOSITORY_URI}@${digest}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build and create AWS change set
+        if: ${{ inputs.operation == 'plan' }}
         run: |
           sam build \
             --template-file infra/production/template.yaml \
@@ -185,46 +234,105 @@ jobs:
               EnableBudgetNotifications=true \
               BudgetNotificationEmail="${{ vars.BUDGET_NOTIFICATION_EMAIL }}"
 
-      - name: Record infrastructure change diff
-        id: change_set
+      - name: Validate and record planned infrastructure changes
+        if: ${{ inputs.operation == 'plan' }}
+        id: planned_change_set
         shell: bash
         run: |
-          change_set_id="$(aws cloudformation list-change-sets \
+          change_set_arn="$(aws cloudformation list-change-sets \
             --stack-name "$STACK_NAME" \
             --query 'reverse(sort_by(Summaries[?Status==`CREATE_COMPLETE`], &CreationTime))[0].ChangeSetId' \
             --output text --no-cli-pager)"
-          if [[ -z "$change_set_id" || "$change_set_id" == "None" ]]; then
+          if [[ -z "$change_set_arn" || "$change_set_arn" == "None" ]]; then
             echo "実行可能なCloudFormation change setが見つかりません。" >&2
             exit 1
           fi
+          aws cloudformation describe-change-set \
+            --change-set-name "$change_set_arn" \
+            --output json --no-cli-pager > /tmp/production-change-set.json
           stack_status="$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' \
             --output text --no-cli-pager)"
+          validation_options=()
+          if [[ "$stack_status" == "REVIEW_IN_PROGRESS" ]]; then
+            validation_options+=(--require-add-only)
+          fi
+          validated_arn="$(uv run python scripts/check_production_change_set.py \
+            /tmp/production-change-set.json \
+            --stack-name "$STACK_NAME" \
+            --release-id "$RELEASE_ID" \
+            --region "$AWS_REGION" \
+            --summary-output /tmp/production-change-set-summary.md \
+            "${validation_options[@]}")"
+          cat /tmp/production-change-set-summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "change_set_arn=$validated_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Validate supplied change set for apply
+        if: ${{ inputs.operation == 'apply' }}
+        id: approved_change_set
+        shell: bash
+        run: |
           aws cloudformation describe-change-set \
-            --change-set-name "$change_set_id" \
-            --query 'Changes[].ResourceChange.{Action:Action,LogicalId:LogicalResourceId,Type:ResourceType,Replacement:Replacement}' \
-            --output table --no-cli-pager | tee /tmp/cloudformation-change-set.txt
-          {
-            echo "## CloudFormation change set"
-            echo '```text'
-            cat /tmp/cloudformation-change-set.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "id=$change_set_id" >> "$GITHUB_OUTPUT"
-          echo "previous_stack_status=$stack_status" >> "$GITHUB_OUTPUT"
+            --change-set-name "$CHANGE_SET_ARN" \
+            --output json --no-cli-pager > /tmp/production-change-set.json
+          validated_arn="$(uv run python scripts/check_production_change_set.py \
+            /tmp/production-change-set.json \
+            --stack-name "$STACK_NAME" \
+            --release-id "$RELEASE_ID" \
+            --region "$AWS_REGION" \
+            --summary-output /tmp/production-change-set-summary.md)"
+          change_set_type="$(aws cloudformation describe-change-set \
+            --change-set-name "$validated_arn" \
+            --query ChangeSetType --output text --no-cli-pager)"
+          if [[ "$change_set_type" != "CREATE" && "$change_set_type" != "UPDATE" ]]; then
+            echo "change set typeがCREATEまたはUPDATEではありません。" >&2
+            exit 1
+          fi
+          cat /tmp/production-change-set-summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "change_set_arn=$validated_arn" >> "$GITHUB_OUTPUT"
+          echo "type=$change_set_type" >> "$GITHUB_OUTPUT"
+
+      - name: Record previous releases
+        if: ${{ inputs.operation == 'apply' }}
+        id: previous
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          previous_function="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SolverFunctionName'].OutputValue | [0]" \
+            --output text --no-cli-pager 2>/dev/null || true)"
+          previous_version=""
+          if [[ -n "$previous_function" && "$previous_function" != "None" ]]; then
+            previous_version="$(aws lambda get-alias \
+              --function-name "$previous_function" --name live \
+              --query FunctionVersion --output text --no-cli-pager 2>/dev/null || true)"
+          fi
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/cloudflare-deployments.json
+          previous_pages="$(uv run python scripts/find_cloudflare_production_deployment.py /tmp/cloudflare-deployments.json)"
+          echo "function=$previous_function" >> "$GITHUB_OUTPUT"
+          echo "version=$previous_version" >> "$GITHUB_OUTPUT"
+          echo "pages=$previous_pages" >> "$GITHUB_OUTPUT"
 
       - name: Execute approved infrastructure change
+        if: ${{ inputs.operation == 'apply' }}
         id: stack_deploy
         run: |
           aws cloudformation execute-change-set \
-            --change-set-name "${{ steps.change_set.outputs.id }}" --no-cli-pager
-          if [[ "${{ steps.change_set.outputs.previous_stack_status }}" == "REVIEW_IN_PROGRESS" ]]; then
+            --change-set-name "${{ steps.approved_change_set.outputs.change_set_arn }}" \
+            --no-cli-pager
+          if [[ "${{ steps.approved_change_set.outputs.type }}" == "CREATE" ]]; then
             aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" --no-cli-pager
           else
             aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" --no-cli-pager
           fi
 
       - name: Read new AWS endpoints
+        if: ${{ inputs.operation == 'apply' }}
         id: stack
         shell: bash
         run: |
@@ -240,6 +348,7 @@ jobs:
           echo "api_origin=$api_origin" >> "$GITHUB_OUTPUT"
 
       - name: Smoke-test new Lambda alias
+        if: ${{ inputs.operation == 'apply' }}
         run: |
           uv run python scripts/write_lambda_smoke_event.py /tmp/lambda-smoke-event.json
           aws lambda invoke \
@@ -252,6 +361,7 @@ jobs:
             /tmp/lambda-smoke-response.json --release-id "$RELEASE_ID"
 
       - name: Update Pages Function secrets
+        if: ${{ inputs.operation == 'apply' }}
         working-directory: web
         env:
           API_ORIGIN: ${{ steps.stack.outputs.api_origin }}
@@ -264,6 +374,7 @@ jobs:
           printf '%s' "$API_USAGE_KEY" | npx --no-install wrangler pages secret put API_USAGE_KEY --project-name "$CLOUDFLARE_PAGES_PROJECT"
 
       - name: Deploy Cloudflare Pages release
+        if: ${{ inputs.operation == 'apply' }}
         id: pages
         working-directory: web
         env:
@@ -272,18 +383,19 @@ jobs:
           npx --no-install wrangler pages deploy dist \
             --project-name "$CLOUDFLARE_PAGES_PROJECT" \
             --branch main \
-            --commit-hash "$GITHUB_SHA" \
+            --commit-hash "$RELEASE_ID" \
             --commit-message "release ${RELEASE_ID}" \
             --commit-dirty=false
 
       - name: Smoke-test public application shell
+        if: ${{ inputs.operation == 'apply' }}
         run: |
           response_headers="$(curl --fail --silent --show-error --head "$PUBLIC_APPLICATION_URL")"
           echo "$response_headers" | grep --ignore-case "x-release-id: $RELEASE_ID"
           curl --fail --silent --show-error "$PUBLIC_APPLICATION_URL" | grep "大会日程スケジューラー"
 
       - name: Roll back Cloudflare Pages after failure
-        if: ${{ failure() && steps.pages.outcome == 'success' && steps.previous.outputs.pages != '' }}
+        if: ${{ failure() && inputs.operation == 'apply' && steps.pages.outcome == 'success' && steps.previous.outputs.pages != '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -295,7 +407,7 @@ jobs:
             --data '{}'
 
       - name: Roll back Lambda alias after failure
-        if: ${{ failure() && steps.stack_deploy.outcome == 'success' && steps.previous.outputs.version != '' && steps.previous.outputs.version != 'None' }}
+        if: ${{ failure() && inputs.operation == 'apply' && steps.stack_deploy.outcome == 'success' && steps.previous.outputs.version != '' && steps.previous.outputs.version != 'None' }}
         run: |
           aws lambda update-alias \
             --function-name "${{ steps.previous.outputs.function }}" \
