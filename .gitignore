@@ -13,6 +13,8 @@ htmlcov/
 dist/
 web/dist/
 web/coverage/
+web/playwright-report/
+web/test-results/
 .wrangler-build/
 build/
 *.egg-info/
