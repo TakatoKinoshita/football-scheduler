@@ -1,0 +1,310 @@
+{
+  "benchmark_schema_version": "0.1.0",
+  "measured_service": "AWS Lambda",
+  "region": "us-east-1",
+  "function_name": "football-scheduler-faas-probe--SolverProbeFunction-And1cMJ7Ftys",
+  "repeat": 1,
+  "input": {
+    "path": "events/representative.json",
+    "bytes": 34,
+    "sha256": "99d61d9b301c775675a4abce89a7cb07a9a6bdd5b5b8bb5abc2f54c4012dc2d7"
+  },
+  "summary": {
+    "median_duration_ms": 1950.25,
+    "p95_duration_ms": 1950.25,
+    "median_billed_duration_ms": 2876,
+    "maximum_memory_used_mb": 189,
+    "cold_start_count": 1,
+    "determinism_hash": "2d48384f139e49cda6db9b8eaab3ec6461e8c9adf0d4f973a5c4f99a79f4bea1",
+    "deterministic": true,
+    "successful_count": 1
+  },
+  "runs": [
+    {
+      "run_no": 1,
+      "measured_at": "2026-08-04T15:54:05.023225+00:00",
+      "client_duration_seconds": 4.4018671339981665,
+      "status_code": 200,
+      "executed_version": "$LATEST",
+      "function_error": null,
+      "report": {
+        "duration_ms": 1950.25,
+        "billed_duration_ms": 2876,
+        "memory_size_mb": 2048,
+        "max_memory_used_mb": 189,
+        "init_duration_ms": 925.33,
+        "init_phase": null,
+        "init_status": null
+      },
+      "determinism_hash": "2d48384f139e49cda6db9b8eaab3ec6461e8c9adf0d4f973a5c4f99a79f4bea1",
+      "log": "START RequestId: ac282725-a888-4ea3-9f6e-4c90276a3d13 Version: $LATEST\nEND RequestId: ac282725-a888-4ea3-9f6e-4c90276a3d13\nREPORT RequestId: ac282725-a888-4ea3-9f6e-4c90276a3d13\tDuration: 1950.25 ms\tBilled Duration: 2876 ms\tMemory Size: 2048 MB\tMax Memory Used: 189 MB\tInit Duration: 925.33 ms\t\n",
+      "response": {
+        "schema_version": "0.1.0",
+        "status": "OPTIMAL",
+        "slots": [
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "LG-C-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "LG-A-M6",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 1,
+            "court_id": "court-c",
+            "match_id": "LG-A-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "team_id": null
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 2,
+            "court_id": "court-a",
+            "match_id": "LG-D-M5",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-15"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 2,
+            "court_id": "court-b",
+            "match_id": "LG-C-M6",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-10"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 2,
+            "court_id": "court-c",
+            "match_id": "LG-B-M2",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-06"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 3,
+            "court_id": "court-a",
+            "match_id": "LG-D-M2",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-05"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 3,
+            "court_id": "court-b",
+            "match_id": "LG-A-M4",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-06"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 3,
+            "court_id": "court-c",
+            "match_id": "LG-A-M3",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-07"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 4,
+            "court_id": "court-a",
+            "match_id": "LG-C-M3",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-01"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 4,
+            "court_id": "court-b",
+            "match_id": "LG-B-M4",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-02"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 4,
+            "court_id": "court-c",
+            "match_id": "LG-B-M3",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-03"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 5,
+            "court_id": "court-a",
+            "match_id": "LG-D-M4",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-09"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 5,
+            "court_id": "court-b",
+            "match_id": "LG-D-M3",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-07"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 5,
+            "court_id": "court-c",
+            "match_id": "LG-C-M4",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-01"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 6,
+            "court_id": "court-a",
+            "match_id": "LG-B-M5",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-05"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 6,
+            "court_id": "court-b",
+            "match_id": "LG-A-M5",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-07"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 6,
+            "court_id": "court-c",
+            "match_id": "LG-A-M2",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-09"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 7,
+            "court_id": "court-a",
+            "match_id": "LG-D-M6",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-08"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 7,
+            "court_id": "court-b",
+            "match_id": "LG-C-M5",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-01"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 7,
+            "court_id": "court-c",
+            "match_id": "LG-C-M2",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-02"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 8,
+            "court_id": "court-a",
+            "match_id": "LG-D-M1",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-01"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 8,
+            "court_id": "court-b",
+            "match_id": "LG-B-M6",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-02"
+            }
+          },
+          {
+            "day_id": "day1",
+            "section_no": 8,
+            "court_id": "court-c",
+            "match_id": "LG-B-M1",
+            "referee_assignment": {
+              "kind": "team",
+              "team_id": "team-03"
+            }
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 30.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 1.7972165230000001,
+          "used_sections": 8,
+          "objective_value": 8.0,
+          "best_objective_bound": 8.0,
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "checked_match_count": 24,
+            "checked_slot_count": 24,
+            "error_count": 0
+          }
+        }
+      }
+    }
+  ]
+}
