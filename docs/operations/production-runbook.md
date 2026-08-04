@@ -6,8 +6,9 @@
 CloudWatch、AWS Budgetsを使用する。大会データはbrowserのIndexedDBとJSONファイルだけに
 保存し、CloudflareとAWSには永続保存しない。
 
-現時点では本番リソースを作成・公開していない。また、対象AWS accountのLambda同時実行quotaが
-`10`であるため、`16`以上への増枠が完了するまで本番workflowは事前確認で停止する。
+現時点では本番リソースを作成・公開していない。対象AWS accountのLambda同時実行quotaは
+2026年8月5日に`1000`と確認できており、必要値`106`以上の条件を満たしている。quotaによる
+公開blockerは解消済みである。
 
 本番templateは[infra/production/template.yaml](../../infra/production/template.yaml)、初回だけ必要な
 AWS OIDC role、CloudFormation実行role、ECR、SAM artifact bucketは
@@ -25,20 +26,19 @@ uv run python scripts/check_production_prerequisites.py --hosting cloudflare-pag
 ```
 
 AWS Lambdaはreserved concurrencyを設定する場合も100を未予約で残す。solverとauthorizerへ
-それぞれ3を予約するため、account同時実行quotaは`3 + 3 + 100 = 106`以上必要である。現在値10の
-ままreserved concurrencyを外して公開すると、濫用時の費用・同時実行ガードを弱めるため行わない。
+それぞれ3を予約するため、account同時実行quotaは`3 + 3 + 100 = 106`以上必要である。現在値は
+`1000`であり、上記scriptで合格を確認済みである。公開前とquota変更後は同じread-only確認を
+再実行し、reserved concurrencyを外して費用・同時実行ガードを弱めない。
 
-AWS ConsoleのService Quotasで`AWS Lambda`の`Concurrent executions`（quota code
-`L-B99A9384`）を選び、106以上へ増枠申請する。今後の小さな関数追加余地を含め、申請値は
-110以上を推奨する。quota増枠自体には利用料は発生しないが、
-実際の実行には通常のLambda料金が発生する。承認後に上記scriptを再実行し、合格を確認する。
+AWS Console上の対象は`AWS Lambda`の`Concurrent executions`（quota code `L-B99A9384`）である。
+quota増枠自体には利用料は発生しないが、実際の実行には通常のLambda料金が発生する。
 
 ### 2.2 Cloudflare Pages
 
 Cloudflare dashboardで次を確認する。
 
 - Workers & PagesのFree planを利用し、Direct Upload projectを作成済みである。
-- production branchは`main`である。
+- production branchは`main`として作成している。
 - Pages Functionsの利用上限到達時は`fail closed`である。
 - Turnstile widgetのhostnameにPagesの公開hostnameを登録し、actionは`generate_schedule`である。
 - Pages Writeだけを対象accountへ許可したAPI tokenを発行している。
@@ -47,6 +47,11 @@ Cloudflare dashboardで次を確認する。
 CloudFront Free plan使用数`0 / 3`とCloudFront画面上の適格性は、この構成では確認不要である。
 AWS Free Tier account planでもCloudflare Pagesを利用できる。CloudFront従量課金へ自動的に
 切り替えない。
+
+Direct UploadではCloudflare dashboard側のbranch protectionを公開制御として利用できない。
+`.github/workflows/production.yml`を`main`からの実行だけに制限し、GitHub `production`
+Environmentのdeployment branchも`main`だけにする。Wranglerにも`--branch main`と完全な
+commit SHAを渡し、この3か所の一致を確認する。
 
 ### 2.3 API Gateway account設定
 
@@ -62,7 +67,8 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
    存在することを確認する。audienceは`sts.amazonaws.com`とする。
 2. `bootstrap.yaml`を管理者が`us-east-1`へ一度だけデプロイする。
 3. 出力値をGitHubの`production` Environmentへ登録する。
-4. Environmentへrequired reviewerを設定する。
+4. Environmentのdeployment branchを`main`だけにし、required reviewerをrepository所有者にする。
+   唯一のcollaborator本人が承認するため、prevent self-reviewは無効にする。
 
 ### 3.2 Cloudflare
 
@@ -105,18 +111,72 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 
 ## 4. リリース
 
-`.github/workflows/production.yml`を手動起動し、本番変更とrollbackの確認欄を選択する。
-GitHub Environmentのreviewerがcommit、CloudFormation change set、費用、変更対象を確認する。
+`.github/workflows/production.yml`は、`plan`と`apply`を別々の手動実行に分ける。どちらもworkflow
+自体を`main`から起動し、各実行でGitHub `production` Environmentの承認を受ける。release IDは
+常に実行対象の完全な40文字のcommit SHAとし、任意のrelease名は使用しない。
 
-workflowは次の順で進む。
+### 4.1 Plan: change setの作成と確認
 
-1. OIDCで一時AWS credentialを取得し、AWS account前提をread-only確認する。
-2. Python、Web、Pages Function、最大32チーム経路、SAM templateを検証する。
-3. release ID付きLambda imageをECRへpushし、digest固定のchange setを表示してstackを更新する。
-4. 新Lambda `live` aliasを直接invokeし、schemaと独立制約検証を確認する。
-5. stack出力とGitHub secretsをPages Function secretへ同期する。
-6. Wranglerで静的assetとPages Functionを同時配信する。
-7. 公開画面の`X-Release-Id`とapp shellを確認する。
+1. `main`から`operation: plan`を選び、`release_sha`と`change_set_arn`は空欄にする。
+2. 影響確認欄を選択し、Environment承認後に実行する。
+3. workflowは設定値とquotaを確認し、Python、Web、Pages Function、最大32チーム経路、SAM
+   templateを検証する。
+4. commit SHAをtagにしたsolver imageをECRへpushし、SAM artifactをS3へuploadする。
+5. CloudFormation change setを作成するが実行しない。初回planでは本番stackは
+   `REVIEW_IN_PROGRESS`となり、template内のLambda、API Gateway、Budget、SNSなどはまだ作成されない。
+6. Actions summaryでECR image digest、change set ARN、release SHA、Action、Logical ID、resource type、
+   replacement有無を確認する。秘密parameterはsummaryへ表示しない。
+
+初回planでは全resourceが`Add`で、`Remove`、`Modify`、replacementがないことを必須とする。
+change setが`CREATE_COMPLETE`かつ`AVAILABLE`であることを確認し、ARNとrelease SHAをapply用に
+記録する。今回の初回dry-runはここで停止し、change setを実行しない。
+
+### 4.2 Apply: 承認済みchange setの実行と公開
+
+applyはplanの確認後に別作業として明示承認を得てから行う。
+
+1. `main`から`operation: apply`を選ぶ。
+2. planで表示された完全なcommit SHAを`release_sha`、change set ARNを`change_set_arn`へ指定する。
+3. Environmentで再度承認する。
+4. workflowはSHAが`main`に含まれること、stack名、region、change set状態、`ReleaseId`を再検証する。
+5. change setを実行し、新Lambda `live` aliasを直接invokeしてschemaと独立制約検証を確認する。
+6. stack出力とGitHub secretsをPages Function secretへ同期し、Wranglerで静的assetとFunctionを
+   同時配信する。
+7. 公開画面の`X-Release-Id`とapp shellを確認する。失敗時は直前のPages deploymentとLambda
+   aliasへrollbackする。
+
+### 4.3 Planを取り消す場合
+
+change setを実行しないと決めた場合は、対象stack、region、ARN、状態をread-only確認してから
+change setを削除する。
+
+```console
+aws cloudformation describe-change-set \
+  --change-set-name CHANGE_SET_ARN \
+  --region us-east-1 \
+  --no-cli-pager
+aws cloudformation delete-change-set \
+  --change-set-name CHANGE_SET_ARN \
+  --region us-east-1 \
+  --no-cli-pager
+```
+
+初回作成でchange set削除後もstackが`REVIEW_IN_PROGRESS`として残る場合は、stack名と状態を
+再確認する。`delete-stack`は回復困難な操作なので、実行前にユーザーの個別の明示承認を得る。
+
+```console
+aws cloudformation describe-stacks \
+  --stack-name football-scheduler-production \
+  --region us-east-1 \
+  --no-cli-pager
+aws cloudformation delete-stack \
+  --stack-name football-scheduler-production \
+  --region us-east-1 \
+  --no-cli-pager
+```
+
+planでpushしたECR imageとSAM artifactは実行resourceではないため、直ちに手動削除しない。
+bootstrapで定義したECRの直近10 image保持とS3の30日expirationに委ねる。
 
 browserはAPI keyを持たず、同一originのPages Functionだけを呼ぶ。Pages Functionは1 MB上限を
 確認し、origin確認secretとusage keyをAWSへ付与する。Lambda adapterでもdecoded body sizeを
@@ -134,6 +194,9 @@ token、secretは記録しない。Cloudflare側でもrequest body loggingを追
 - Lambda: `Errors`、`Duration` p95、`Throttles`、`ConcurrentExecutions`、最大メモリ
 - API Gateway: 5xx、4xx、latency、月3,000回usage quota
 - AWS Budgets: 月額2.84 USD基準のforecast 50%、actual 80%、actual 100%
+
+既存のaccount全体の月額5 USD Budgetは維持し、本番templateの月額2.84 USD Budgetを別名で
+併設する。前者はaccount全体、後者は本アプリの想定費用に対する早期通知として扱う。
 
 費用試算は次で再計算する。
 
