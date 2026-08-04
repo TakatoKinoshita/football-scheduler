@@ -12,6 +12,10 @@ def test_sam_probe_has_no_public_http_entrypoint() -> None:
     assert "PackageType: Image" in template
     assert "AWS::Serverless::Api" not in template
     assert "FunctionUrlConfig" not in template
+    assert "RetentionInDays: 1" in template
+    assert "DeletionPolicy: Delete" in template
+    assert "Purpose: faas-ortools-spike" in template
+    assert "ReservedConcurrentExecutions" not in template
 
 
 def test_lambda_image_installs_locked_dependencies_with_hashes() -> None:
@@ -22,6 +26,7 @@ def test_lambda_image_installs_locked_dependencies_with_hashes() -> None:
     assert "--require-hashes" in dockerfile
     assert "--only-binary=:all:" in dockerfile
     assert "COPY src/football_scheduler /asset/football_scheduler" in dockerfile
+    assert "chmod -R a+rX /asset" in dockerfile
     assert "pip install" in dockerfile
     assert "pip install ." not in dockerfile
     assert "ortools==9.15.6755" in requirements

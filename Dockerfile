@@ -18,6 +18,10 @@ RUN python -m pip install \
 # implicit build-backend dependency resolution during the image build.
 COPY src/football_scheduler /asset/football_scheduler
 
+# Git does not preserve read bits, and a restrictive checkout umask may leave
+# copied sources unreadable by Lambda's least-privileged runtime user.
+RUN chmod -R a+rX /asset
+
 FROM public.ecr.aws/lambda/python:3.14
 
 COPY --from=build /asset ${LAMBDA_TASK_ROOT}
