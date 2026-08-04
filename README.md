@@ -4,11 +4,16 @@
 
 現在のリポジトリには、Issue #1「FaaS上でOR-Toolsの技術検証」で作成した最小実装と実測結果が含まれます。PythonとOR-Tools CP-SATで代表規模の日程を生成し、独立した検証器で結果を確認できます。大会規則の全機能やWeb画面はまだ実装していません。
 
-AWS LambdaとSAMは検証対象の一例であり、本番インフラとして採用済みではありません。静的配信、計算基盤、保存方式を含む本番構成は、実測結果と利用要件を基に後で再評価します。
+AWS LambdaとSAMは技術検証の対象として実測した後、複数候補を同じ基準で比較しました。
+MVPの本番構成は、S3とCloudFrontを公開入口とし、API GatewayからLambdaコンテナを
+同期呼出しする構成を第一候補とします。CloudFront無料定額プランを利用できない場合の
+代替構成や再評価条件を含む決定理由は、
+[MVP本番インフラADR](docs/architecture/adr-0001-mvp-production-infrastructure.md)に記録しています。
+本番環境はまだ構築・公開していません。
 
 初期リリースで想定する利用規模、保存・共有、オフライン動作、費用、性能は
 [MVP運用要件](docs/product/mvp-operational-requirements.md)にまとめています。本番インフラは
-この要件を基に複数候補を比較して決定します。
+この要件と実測値を基に複数候補を比較し、上記ADRで決定しています。
 
 ## 開発環境の準備
 
@@ -113,6 +118,7 @@ restrictiveなumaskでcheckoutしたソースも実Lambdaユーザーが読め�
 ```text
 .
 ├── .github/workflows/       # CI
+├── docs/architecture/       # インフラ等の設計判断（ADR）
 ├── docs/product/            # MVPの利用・運用要件
 ├── docs/technical-spikes/   # 技術検証の条件と結果
 ├── events/                  # Lambda／SAMの固定入力
