@@ -85,6 +85,23 @@ sam local invoke SolverProbeFunction --event 'events\smoke.json'
 
 実AWS環境へのデプロイは、アカウント、リージョン、費用監視、作成資源、削除手順を確認し、課金が発生し得る操作への承認を得てから行います。検証のためにHTTP公開が必要になった場合も、CORSだけに依存せず、認証、レート制限、濫用対策を先に設計してください。
 
+デプロイ済みの非公開LambdaをAWS CLI経由で測定する場合は、物理関数名を確認して
+次のように実行します。出力にはLambdaの処理時間、課金時間、最大使用メモリ、
+初期化時間、正規化結果hashが含まれます。
+
+```console
+uv run python scripts/run_lambda_benchmark.py \
+  --function-name FUNCTION_NAME \
+  --event events/representative.json \
+  --repeat 10 \
+  --region us-east-1 \
+  --json-output benchmark-results/representative-lambda.json
+```
+
+restrictiveなumaskでcheckoutしたソースも実Lambdaユーザーが読めるよう、Docker build
+では成果物へ読み取り・directory traversal権限を明示しています。ローカル検証でも
+可能なら非rootユーザーによるimportを確認してください。
+
 測定条件、記録項目、成功基準は[技術検証レポート](docs/technical-spikes/faas-ortools.md)にまとめています。
 
 ## ディレクトリ構成
