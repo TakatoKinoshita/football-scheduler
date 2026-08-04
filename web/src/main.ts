@@ -421,6 +421,7 @@ for (const input of [teamsInput, courtsInput]) {
 
 requiredElement<HTMLButtonElement>("#confirm-save").addEventListener("click", () => {
   updateDraft();
+  autosave.cancel();
   void storage
     .confirm(documentState)
     .then(() => {
@@ -460,6 +461,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
         backupStatus.textContent = "読み込みを取り消しました。現在の内容は変わっていません。";
         return;
       }
+      autosave.cancel();
       documentState = imported;
       return storage.replaceImported(imported).then(() => {
         render();
@@ -479,6 +481,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
 
 requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
   if (!window.confirm("現在の内容を、ひとつ前に確定した状態へ戻しますか？")) return;
+  autosave.cancel();
   void storage.restorePrevious().then((previous) => {
     if (previous === undefined) {
       backupStatus.textContent = "戻せる状態がありません。";
@@ -492,6 +495,7 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
 
 requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
   if (!window.confirm("この端末に保存した現在の大会データを削除しますか？\n削除後も「ひとつ前の状態へ戻す」で一度だけ元に戻せます。")) return;
+  autosave.cancel();
   void storage.deleteCurrent().then(() => {
     documentState = createTournamentDocument();
     render();
@@ -510,6 +514,7 @@ generateButton.addEventListener("click", () => {
         updatedAt: new Date().toISOString(),
         tournament: { ...documentState.tournament, result },
       };
+      autosave.cancel();
       return storage.confirm(documentState).then(() => {
         generationStatus.textContent = "日程を生成し、この端末へ保存しました。";
         render();

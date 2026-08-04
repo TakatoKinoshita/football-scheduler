@@ -78,6 +78,34 @@ jobs:
           npm run build
           npm run build:functions
 
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test production PWA in Chromium
+        run: npm run test:e2e
+
   infrastructure:
     runs-on: ubuntu-latest
     timeout-minutes: 10
