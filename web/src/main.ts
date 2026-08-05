@@ -91,8 +91,8 @@ root.innerHTML = `
           <p>安全確認後、最大30秒で結果を表示します。通信中も入力は失われません。</p>
         </div>
       </div>
-      <div id="turnstile" class="turnstile-box" aria-label="安全確認"></div>
-      <button id="generate" class="primary" type="button">日程を生成する</button>
+      <div id="turnstile-widget" class="turnstile-box" aria-label="安全確認">安全確認を読み込んでいます…</div>
+      <button id="generate" class="primary" type="button" disabled>日程を生成する</button>
       <p id="generation-status" class="status-message" role="status" aria-live="polite"></p>
     </section>
 
@@ -155,6 +155,24 @@ const backupStatus = requiredElement<HTMLElement>("#backup-status");
 const generationStatus = requiredElement<HTMLElement>("#generation-status");
 const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
+
+type TurnstileApi = NonNullable<Window["turnstile"]>;
+
+function turnstileApi(): TurnstileApi | undefined {
+  const candidate = window.turnstile;
+  return candidate !== undefined &&
+    typeof candidate.render === "function" &&
+    typeof candidate.reset === "function"
+    ? candidate
+    : undefined;
+}
+
+function requireTurnstileConfirmation(message: string): void {
+  turnstileToken = "";
+  generateButton.disabled = true;
+  generationStatusOwner = "turnstile";
+  generationStatus.textContent = message;
+}
 
 function lines(value: string): string[] {
   return value
@@ -505,6 +523,10 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
 });
 
 generateButton.addEventListener("click", () => {
+  if (turnstileToken.length === 0) {
+    requireTurnstileConfirmation("安全確認を完了してから日程を生成してください。");
+    return;
+  }
   updateDraft();
   generateButton.disabled = true;
   generationStatusOwner = "generation";
@@ -529,9 +551,22 @@ generateButton.addEventListener("click", () => {
           : "日程を生成できませんでした。入力は保存されています。もう一度お試しください。";
     })
     .finally(() => {
-      generateButton.disabled = false;
       turnstileToken = "";
-      if (turnstileWidgetId !== undefined) window.turnstile?.reset(turnstileWidgetId);
+      generateButton.disabled = true;
+      const api = turnstileApi();
+      if (turnstileWidgetId === undefined || api === undefined) {
+        requireTurnstileConfirmation(
+          "安全確認を再開できませんでした。画面を再読み込みしてください。",
+        );
+        return;
+      }
+      try {
+        api.reset(turnstileWidgetId);
+      } catch {
+        requireTurnstileConfirmation(
+          "安全確認を再開できませんでした。画面を再読み込みしてください。",
+        );
+      }
     });
 });
 
@@ -553,10 +588,13 @@ updateConnectionStatus();
 
 function setupTurnstile(): void {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const container = requiredElement<HTMLElement>("#turnstile");
+  const container = requiredElement<HTMLElement>("#turnstile-widget");
+  generateButton.disabled = true;
   if (!siteKey) {
     container.textContent = "安全確認の設定が完了していないため、現在は日程を生成できません。";
-    generateButton.disabled = true;
+    requireTurnstileConfirmation(
+      "安全確認の設定が完了していないため、現在は日程を生成できません。",
+    );
     return;
   }
   const script = window.document.createElement("script");
@@ -564,30 +602,57 @@ function setupTurnstile(): void {
   script.async = true;
   script.defer = true;
   script.addEventListener("load", () => {
-    if (window.turnstile === undefined) return;
-    turnstileWidgetId = window.turnstile.render(container, {
-      sitekey: siteKey,
-      action: "generate_schedule",
-      callback: (token) => {
-        turnstileToken = token;
-        if (generationStatusOwner === "turnstile") {
-          generationStatus.textContent = "安全確認が完了しました。";
-        }
-      },
-      "expired-callback": () => {
-        turnstileToken = "";
-        generationStatusOwner = "turnstile";
-        generationStatus.textContent = "安全確認の期限が切れました。もう一度確認してください。";
-      },
-      "error-callback": () => {
-        turnstileToken = "";
-        generationStatusOwner = "turnstile";
-        generationStatus.textContent = "安全確認を完了できませんでした。通信状態を確認してください。";
-      },
-    });
+    const api = turnstileApi();
+    if (api === undefined) {
+      container.textContent =
+        "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+      requireTurnstileConfirmation(
+        "安全確認を初期化できませんでした。画面を再読み込みしてください。",
+      );
+      return;
+    }
+    try {
+      container.replaceChildren();
+      turnstileWidgetId = api.render(container, {
+        sitekey: siteKey,
+        action: "generate_schedule",
+        callback: (token) => {
+          if (token.length === 0) {
+            requireTurnstileConfirmation(
+              "安全確認を完了できませんでした。もう一度お試しください。",
+            );
+            return;
+          }
+          turnstileToken = token;
+          generateButton.disabled = false;
+          if (generationStatusOwner === "turnstile") {
+            generationStatus.textContent = "安全確認が完了しました。";
+          }
+        },
+        "expired-callback": () => {
+          requireTurnstileConfirmation(
+            "安全確認の期限が切れました。もう一度確認してください。",
+          );
+        },
+        "error-callback": () => {
+          requireTurnstileConfirmation(
+            "安全確認を完了できませんでした。通信状態を確認してください。",
+          );
+        },
+      });
+    } catch {
+      container.textContent =
+        "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+      requireTurnstileConfirmation(
+        "安全確認を初期化できませんでした。画面を再読み込みしてください。",
+      );
+    }
   });
   script.addEventListener("error", () => {
     container.textContent = "安全確認を読み込めませんでした。通信状態を確認してください。";
+    requireTurnstileConfirmation(
+      "安全確認を読み込めませんでした。通信状態を確認してください。",
+    );
   });
   window.document.head.append(script);
 }

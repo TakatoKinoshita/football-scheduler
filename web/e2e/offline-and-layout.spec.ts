@@ -32,9 +32,63 @@ test("初回online表示後はofflineでも保存済み結果と印刷内容を�
   await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
   await expect(page.locator("#result-content")).toContainText("青空FC 対 みどりSC");
   await expect(page.locator("#result-content")).toContainText("チーム別予定");
-  await expect(page.locator("#turnstile")).toContainText("安全確認を読み込めませんでした");
-  await page.getByRole("button", { name: "日程を生成する" }).click();
-  await expect(page.locator("#generation-status")).toContainText("安全確認を完了してから");
+  await expect(page.locator("#turnstile-widget")).toContainText(
+    "安全確認を読み込めませんでした",
+  );
+  await expect(page.locator("#generation-status")).toContainText(
+    "安全確認を読み込めませんでした",
+  );
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+});
+
+test("Turnstile APIの読込み中は生成できず、安全確認後だけ生成できる", async ({ page }) => {
+  await mockExternalServices(page, { completeTurnstile: false });
+  await page.goto("/");
+
+  await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+  await page.evaluate(() => {
+    const options = (
+      window as Window & {
+        __e2eTurnstileOptions?: { callback: (token: string) => void };
+      }
+    ).__e2eTurnstileOptions;
+    if (options === undefined) throw new Error("Turnstile E2E options are unavailable");
+    options.callback("e2e-turnstile-token");
+  });
+  await expect(page.locator("#generation-status")).toContainText("安全確認が完了しました");
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+});
+
+test("Turnstile APIを初期化できない場合は日本語で案内して生成を無効にする", async ({
+  page,
+}) => {
+  await page.route(TURNSTILE_SCRIPT, async (route) => {
+    await route.fulfill({ contentType: "application/javascript", body: "window.turnstile = {};" });
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#turnstile-widget")).toContainText("安全確認を初期化できませんでした");
+  await expect(page.locator("#generation-status")).toContainText(
+    "安全確認を初期化できませんでした",
+  );
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+});
+
+test("安全確認の期限が切れたら生成を無効にして再確認を案内する", async ({ page }) => {
+  await openReadyApp(page);
+  await page.evaluate(() => {
+    const options = (
+      window as Window & {
+        __e2eTurnstileOptions?: { "expired-callback": () => void };
+      }
+    ).__e2eTurnstileOptions;
+    if (options === undefined) throw new Error("Turnstile E2E options are unavailable");
+    options["expired-callback"]();
+  });
+
+  await expect(page.locator("#generation-status")).toContainText("安全確認の期限が切れました");
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
 });
 
 for (const viewport of [
