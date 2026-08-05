@@ -6,23 +6,36 @@ export const TURNSTILE_SCRIPT =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 export const GENERATE_API = "**/api/v1/schedules:generate";
 
-export async function mockExternalServices(page: Page): Promise<void> {
+export async function mockExternalServices(
+  page: Page,
+  { completeTurnstile = true }: { completeTurnstile?: boolean } = {},
+): Promise<void> {
   await page.route(TURNSTILE_SCRIPT, async (route) => {
     await route.fulfill({
       contentType: "application/javascript",
       body: `
-        window.turnstile = {
-          render: function (_element, options) {
-            window.__e2eTurnstileOptions = options;
-            setTimeout(function () { options.callback("e2e-turnstile-token"); }, 0);
-            return "e2e-widget";
-          },
-          reset: function () {
-            setTimeout(function () {
-              window.__e2eTurnstileOptions.callback("e2e-turnstile-token");
-            }, 0);
-          }
-        };
+        if (window.turnstile === undefined) {
+          window.turnstile = {
+            render: function (element, options) {
+              window.__e2eTurnstileOptions = options;
+              var marker = document.createElement("div");
+              marker.dataset.testid = "turnstile-widget-mock";
+              marker.textContent = "安全確認";
+              element.append(marker);
+              if (${completeTurnstile}) {
+                setTimeout(function () {
+                  options.callback("e2e-turnstile-token");
+                }, 0);
+              }
+              return "e2e-widget";
+            },
+            reset: function () {
+              setTimeout(function () {
+                window.__e2eTurnstileOptions.callback("e2e-turnstile-token");
+              }, 0);
+            }
+          };
+        }
       `,
     });
   });
@@ -39,7 +52,9 @@ export async function openReadyApp(page: Page): Promise<void> {
   await mockExternalServices(page);
   await page.goto("/");
   await expect(page.locator("#save-state")).not.toHaveText("読み込み中…");
+  await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
   await expect(page.locator("#generation-status")).toContainText("安全確認が完了しました");
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
 }
 
 export async function importDocument(page: Page, document: unknown): Promise<void> {

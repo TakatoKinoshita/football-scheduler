@@ -109,6 +109,21 @@ def test_release_uses_pages_without_exposing_usage_key_to_vite() -> None:
     assert "VITE_API_USAGE_KEY" not in browser_api
 
 
+def test_public_pages_smoke_test_has_bounded_propagation_retry() -> None:
+    workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
+    smoke_step = workflow.split("      - name: Smoke-test public application shell\n", maxsplit=1)[
+        1
+    ].split("\n      - name: Roll back Cloudflare Pages after failure", maxsplit=1)[0]
+
+    assert "for attempt in {1..6}; do" in smoke_step
+    assert 'if [[ "$attempt" -lt 6 ]]; then' in smoke_step
+    assert "sleep 10" in smoke_step
+    assert smoke_step.count("--max-time 20") == 2
+    assert "while" not in smoke_step
+    assert 'grep --ignore-case "x-release-id: $RELEASE_ID"' in smoke_step
+    assert "大会日程スケジューラー" in smoke_step
+
+
 def test_production_workflow_separates_plan_from_apply() -> None:
     workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
 
