@@ -133,13 +133,21 @@ export async function proxyScheduleRequest(
       method: "POST",
       headers,
       body,
-      redirect: "error",
+      redirect: "manual",
     });
   } catch {
     return errorResponse(
       502,
       "UPSTREAM_UNAVAILABLE",
       "日程生成サービスへ接続できませんでした。入力は保存されています。時間をおいて再度お試しください。",
+    );
+  }
+
+  if (upstream.status >= 300 && upstream.status < 400) {
+    return errorResponse(
+      502,
+      "UPSTREAM_REDIRECT_REJECTED",
+      "日程生成サービスから予期しない応答がありました。入力は保存されています。時間をおいて再度お試しください。",
     );
   }
 
