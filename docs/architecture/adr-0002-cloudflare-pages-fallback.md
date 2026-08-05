@@ -1,6 +1,6 @@
 # ADR-0002: Cloudflare Pagesによる公開入口の代替
 
-- 状態: 採用（quota条件は充足、本番設定と初回dry-runは未完了）
+- 状態: 採用・本番公開済み（制御されたrollback演習はissue #35で追跡）
 - 決定日: 2026-08-05
 - 置換対象: ADR-0001の静的配信、公開入口、WAF
 - 関連: issue #6、#7、#8、#9
@@ -17,8 +17,9 @@
 - CloudFront画面上の直近利用量・distribution適格性確認は、CloudFrontを採用しないため本構成の公開条件から外す。
 
 したがって、従量課金CloudFrontへ暗黙に切り替えず、ADR-0001に定めた代替条件を発動する。
-Lambda quotaのblockerは解消したが、Cloudflare、AWS bootstrap、GitHub Environmentの設定と
-実行前change set確認が完了するまでは本番公開しない。
+Lambda quotaのblocker解消後、Cloudflare、AWS bootstrap、GitHub Environmentを設定し、
+Planでchange setを確認してからApplyを実行した。2026年8月6日に本番公開と1日目リーグ日程の
+生成を確認済みである。
 
 ## 2. 決定
 
