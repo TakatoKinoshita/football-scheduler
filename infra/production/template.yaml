@@ -39,6 +39,7 @@ Parameters:
     AllowedValues: ["true", "false"]
   BudgetNotificationEmail:
     Type: String
+    NoEcho: true
     Default: ""
     Description: AWS BudgetsとCloudWatch alarmの通知先
   MonthlyBudgetUsd:
@@ -67,10 +68,33 @@ Globals:
       ReleaseId: !Ref ReleaseId
 
 Resources:
+  ApiAuthorizerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-authorizer-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXrayWriteOnlyAccess"
+      Tags:
+        - Key: Project
+          Value: football-scheduler
+        - Key: Environment
+          Value: production
+        - Key: ReleaseId
+          Value: !Ref ReleaseId
+
   ApiAuthorizerFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-authorizer"
+      Role: !GetAtt ApiAuthorizerFunctionRole.Arn
       Runtime: python3.14
       CodeUri: ../../src
       Handler: football_scheduler.authorizer.lambda_handler
@@ -102,10 +126,33 @@ Resources:
           MetricValue: "1"
           Unit: Count
 
+  SolverFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-solver-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXrayWriteOnlyAccess"
+      Tags:
+        - Key: Project
+          Value: football-scheduler
+        - Key: Environment
+          Value: production
+        - Key: ReleaseId
+          Value: !Ref ReleaseId
+
   SolverFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-solver"
+      Role: !GetAtt SolverFunctionRole.Arn
       PackageType: Image
       ImageUri: !Ref SolverImageUri
       ImageConfig:
@@ -130,6 +177,7 @@ Resources:
   ApiGatewayCloudWatchRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub "${AWS::StackName}-apigateway-cloudwatch-role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -152,6 +200,13 @@ Resources:
                   - logs:GetLogEvents
                   - logs:FilterLogEvents
                 Resource: "*"
+      Tags:
+        - Key: Project
+          Value: football-scheduler
+        - Key: Environment
+          Value: production
+        - Key: ReleaseId
+          Value: !Ref ReleaseId
 
   ApiGatewayAccount:
     Type: AWS::ApiGateway::Account
