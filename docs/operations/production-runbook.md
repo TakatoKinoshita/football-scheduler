@@ -102,6 +102,9 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
    - CloudFormation実行roleは、本番templateのresourceに必要なservice操作に加え、SAM transformの
      `cloudformation:CreateChangeSet`を
      `arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31`だけへ許可する。
+   - ECR repository policyは、`lambda.amazonaws.com`による`ecr:BatchGetImage`と
+     `ecr:GetDownloadUrlForLayer`だけを、同一account、同一region、
+     `${ProductionStackName}-*`のLambda関数へ許可する。TLSを使わない通信の拒否も維持する。
    - 本番templateへresource typeを追加するときは、CloudFormation実行roleの権限も同時に更新する。
 5. 出力値をGitHubの`production` Environmentへ登録する。
 6. Environmentのdeployment branchを`main`だけにし、required reviewerをrepository所有者にする。
@@ -326,3 +329,4 @@ bootstrap stackの削除は回復困難な操作を含む。対象、残すJSON 
 - [Pages rollback](https://developers.cloudflare.com/pages/configuration/rollbacks/)
 - [Pages rollback API](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/rollback/)
 - [Lambda reserved concurrency](https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html)
+- [Lambda container imageのECR権限](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html#images-permissions)
