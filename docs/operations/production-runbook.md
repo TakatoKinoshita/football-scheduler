@@ -314,6 +314,29 @@ workflowは配信前のproduction deployment IDとLambda alias versionを記録�
 失敗した場合、Cloudflare Pages rollback APIで直前deploymentへ戻し、Lambda `live` aliasも
 直前versionへ戻す。
 
+### 7.1 承認付きrelease切替workflow
+
+計画的なrollbackと復帰には`.github/workflows/production-release-switch.yml`を使用する。workflowは
+`main`からだけ実行し、`plan`と`apply`の各実行でGitHub `production` Environmentの承認を受ける。
+
+1. `operation: plan`で`direction`、現在公開中の完全なcommit SHA、対象releaseの完全なcommit SHAを
+   指定し、`plan_id`は空欄にする。
+2. Actions summaryで現在・対象のPages deployment、solver version、stack、region、Plan IDを確認する。
+3. 本番への影響について別途明示承認を得る。
+4. `operation: apply`へ同じdirectionとrelease SHA、Planで表示されたPlan IDを指定する。
+5. Environment承認後、workflowが状態を再検証してPagesとsolver aliasを切り替える。
+
+`rollback`では対象releaseが現在releaseの祖先、`restore`では対象releaseが現在releaseの子孫である
+ことを必須とする。CloudFormation templateまたは未version化のauthorizerに差分があるrelease間は、
+Pagesとsolver aliasだけを切り替えると構成が混在するため、このworkflowでは拒否する。その場合は
+対象templateを使う通常のPlan／Applyと影響確認を行う。
+
+Applyは切替前に対象solver versionを直接smoke testする。切替途中または切替後のsmoke testに失敗した
+場合は、Planで記録した元のPages deploymentとsolver versionへ補償復帰する。`restore`成功後は
+CloudFormation driftが`IN_SYNC`であることも確認する。
+
+### 7.2 緊急時の手動操作
+
 手動の場合、Cloudflare dashboardのPages project > Deploymentsから成功済みproduction
 deploymentを選び、`Rollback to this deployment`を実行する。APIでは次のendpointを使う。
 
