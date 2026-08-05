@@ -178,6 +178,10 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
 2. planで表示された完全なcommit SHAを`release_sha`、change set ARNを`change_set_arn`へ指定する。
 3. Environmentで再度承認する。
 4. workflowはSHAが`main`に含まれること、stack名、region、change set状態、`ReleaseId`を再検証する。
+   `DescribeChangeSet`の応答には作成時の`ChangeSetType`が含まれないため、stackが
+   `REVIEW_IN_PROGRESS`なら初回`CREATE`、`CREATE_COMPLETE`、`UPDATE_COMPLETE`、
+   `UPDATE_ROLLBACK_COMPLETE`なら`UPDATE`として完了待機方法を選ぶ。それ以外の不安定な状態では
+   change setを実行しない。
 5. change setを実行し、新Lambda `live` aliasを直接invokeしてschemaと独立制約検証を確認する。
 6. stack出力とGitHub secretsをPages Function secretへ同期し、Wranglerで静的assetとFunctionを
    同時配信する。
