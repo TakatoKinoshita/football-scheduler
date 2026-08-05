@@ -143,6 +143,14 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:PassRole
                 Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProductionStackName}-*"
+              - Sid: CreateApiGatewayServiceLinkedRole
+                Effect: Allow
+                Action: iam:CreateServiceLinkedRole
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ops.apigateway.amazonaws.com/AWSServiceRoleForAPIGateway
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: ops.apigateway.amazonaws.com
 
   GitHubDeployRole:
     Type: AWS::IAM::Role
