@@ -2,6 +2,14 @@ import { registerSW } from "virtual:pwa-register";
 
 import { generateSchedule, ScheduleApiError } from "./api";
 import {
+  issuesFromApiDetails,
+  isDay1LeagueInput,
+  normalizeDocument,
+  validateDay1LeagueDocument,
+  type FieldIssue,
+  type WizardStep,
+} from "./day1-form";
+import {
   ImportValidationError,
   parseTournamentJson,
   safeFileName,
@@ -46,67 +54,168 @@ root.innerHTML = `
     <div class="connection" id="connection" role="status" aria-live="polite"></div>
   </header>
   <main>
+    <div class="scope-notice no-print" role="note">
+      <strong>現在生成できるのは1日目のリーグ日程です。</strong>
+      リーグ結果入力と2日目トーナメントは今後追加します。
+    </div>
+    <div id="legacy-banner" class="notice no-print" role="note" hidden>
+      従来形式の大会データを互換モードで開いています。内容を壊さないため大会設定は変更できませんが、日程の再生成と保存・印刷は利用できます。
+    </div>
+
     <nav class="steps no-print" aria-label="作成手順">
-      <span class="step active"><b>1</b> 大会</span>
-      <span class="step"><b>2</b> チーム・会場</span>
-      <span class="step"><b>3</b> 日程生成</span>
-      <span class="step"><b>4</b> 確認・印刷</span>
+      <button class="step" type="button" data-step="1"><b>1</b><span>大会・チーム</span></button>
+      <button class="step" type="button" data-step="2"><b>2</b><span>ブロック・会場</span></button>
+      <button class="step" type="button" data-step="3"><b>3</b><span>時刻・生成</span></button>
+      <button class="step" type="button" data-step="4"><b>4</b><span>確認・印刷</span></button>
     </nav>
 
-    <section class="panel no-print" aria-labelledby="tournament-heading">
+    <section class="panel wizard-panel no-print" data-panel="1" aria-labelledby="step1-heading">
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 1–2</p>
-          <h2 id="tournament-heading">大会の基本情報</h2>
-          <p>入力内容はこの端末へ自動保存されます。</p>
+          <p class="section-number">手順 1 / 4</p>
+          <h2 id="step1-heading">大会名と参加チーム</h2>
+          <p>参加チームは、組合せ抽選に使う順番で1行に1チームずつ入力します。</p>
         </div>
         <span class="save-state" id="save-state" role="status">読み込み中…</span>
       </div>
-      <div class="form-grid">
-        <label class="field field-wide">
+      <div class="form-grid single-column">
+        <label class="field" for="tournament-name">
           <span>大会名 <em>必須</em></span>
           <input id="tournament-name" autocomplete="organization-title" placeholder="例：○○地区 夏季サッカー大会" maxlength="200" />
+          <small>印刷物と保存ファイルの名前に使います。</small>
+          <span id="tournament-name-error" class="field-error" role="alert"></span>
         </label>
-        <label class="field">
-          <span>参加チーム <small>1行に1チーム</small></span>
-          <textarea id="teams" rows="8" placeholder="例：&#10;青空FC&#10;みどりSC&#10;中央キッカーズ"></textarea>
+        <label class="field" for="teams">
+          <span>参加チーム <em>必須</em> <small>1行に1チーム・2〜32チーム</small></span>
+          <textarea id="teams" rows="12" placeholder="例：&#10;青空FC&#10;みどりSC&#10;中央キッカーズ"></textarea>
           <small id="team-count">0 / 32チーム</small>
-        </label>
-        <label class="field">
-          <span>使用コート <small>1行に1コート</small></span>
-          <textarea id="courts" rows="8" placeholder="例：&#10;Aコート&#10;Bコート"></textarea>
-          <small id="court-count">0 / 16コート</small>
+          <span id="teams-error" class="field-error" role="alert"></span>
         </label>
       </div>
-      <div class="notice" role="note">
-        大会規則の詳細入力画面は段階的に実装中です。以前に書き出した完全な大会データを読み込んだ場合は、生成APIを利用できます。
+      <div class="wizard-actions">
+        <span></span>
+        <button id="step1-next" class="primary" type="button">次へ：ブロック・会場</button>
       </div>
     </section>
 
-    <section class="panel no-print" aria-labelledby="generate-heading">
+    <section class="panel wizard-panel no-print" data-panel="2" aria-labelledby="step2-heading" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 3</p>
-          <h2 id="generate-heading">日程を生成</h2>
-          <p>安全確認後、最大30秒で結果を表示します。通信中も入力は失われません。</p>
+          <p class="section-number">手順 2 / 4</p>
+          <h2 id="step2-heading">ブロックと使用コート</h2>
+          <p>ブロック数を選び、会場で同時に使えるコートを入力します。</p>
         </div>
       </div>
-      <div id="turnstile-widget" class="turnstile-box" aria-label="安全確認">安全確認を読み込んでいます…</div>
-      <button id="generate" class="primary" type="button" disabled>日程を生成する</button>
-      <p id="generation-status" class="status-message" role="status" aria-live="polite"></p>
+      <div class="form-grid">
+        <label class="field" for="block-count">
+          <span>ブロック数 <em>必須</em></span>
+          <select id="block-count"><option value="">選択してください</option></select>
+          <small>大会要項に記載された数を選んでください。自動決定はしません。</small>
+          <span id="block-count-error" class="field-error" role="alert"></span>
+        </label>
+        <label class="field" for="assignment-mode">
+          <span>チームの分け方 <em>必須</em></span>
+          <select id="assignment-mode">
+            <option value="random">抽選で均等に分ける</option>
+            <option value="seeded_snake">入力順をシード順として均等に分ける</option>
+          </select>
+          <small id="assignment-help">同じ抽選番号なら、同じブロック分けを再現できます。</small>
+          <span id="assignment-mode-error" class="field-error" role="alert"></span>
+        </label>
+        <label class="field field-wide" for="courts">
+          <span>使用コート <em>必須</em> <small>1行に1コート・1〜16コート</small></span>
+          <textarea id="courts" rows="8" placeholder="例：&#10;Aコート&#10;Bコート"></textarea>
+          <small id="court-count">0 / 16コート</small>
+          <span id="courts-error" class="field-error" role="alert"></span>
+        </label>
+      </div>
+      <div class="wizard-actions">
+        <button id="step2-back" class="secondary" type="button">戻る</button>
+        <button id="step2-next" class="primary" type="button">次へ：時刻・生成</button>
+      </div>
     </section>
 
-    <section class="panel results" aria-labelledby="results-heading">
+    <section class="panel wizard-panel no-print" data-panel="3" aria-labelledby="step3-heading" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 4</p>
-          <h2 id="results-heading">保存済みの結果</h2>
+          <p class="section-number">手順 3 / 4</p>
+          <h2 id="step3-heading">開催時刻を確認して生成</h2>
+          <p>安全確認後、最大30秒で1日目の結果を表示します。通信中も入力は失われません。</p>
+        </div>
+      </div>
+      <div class="form-grid three-columns">
+        <label class="field" for="start-time">
+          <span>開始時刻 <em>必須</em></span>
+          <input id="start-time" type="time" step="60" />
+          <span id="start-time-error" class="field-error" role="alert"></span>
+        </label>
+        <label class="field" for="game-duration">
+          <span>1試合の時間（分） <em>必須</em></span>
+          <input id="game-duration" type="number" min="1" max="240" inputmode="numeric" />
+          <span id="game-duration-error" class="field-error" role="alert"></span>
+        </label>
+        <label class="field" for="margin-minutes">
+          <span>試合間隔（分） <em>必須</em></span>
+          <input id="margin-minutes" type="number" min="0" max="240" inputmode="numeric" />
+          <span id="margin-minutes-error" class="field-error" role="alert"></span>
+        </label>
+      </div>
+      <details class="advanced-settings">
+        <summary>詳細設定を表示</summary>
+        <div class="form-grid">
+          <label class="field" for="organizer-capacity">
+            <span>同時に担当できる主催者審判数</span>
+            <input id="organizer-capacity" type="number" min="0" max="16" inputmode="numeric" />
+            <small>変更するまでは、使用コート数と同じ値になります。</small>
+            <span id="organizer-capacity-error" class="field-error" role="alert"></span>
+          </label>
+          <label class="field" for="max-sections">
+            <span>最大セクション数 <small>任意</small></span>
+            <input id="max-sections" type="number" min="1" max="128" inputmode="numeric" placeholder="指定しない" />
+            <small>空欄の場合は、必要な数を自動で使います。</small>
+            <span id="max-sections-error" class="field-error" role="alert"></span>
+          </label>
+          <label class="field" for="random-seed">
+            <span>抽選番号</span>
+            <input id="random-seed" type="number" step="1" inputmode="numeric" />
+            <small>同じ入力と番号なら同じ抽選結果になります。</small>
+            <span id="random-seed-error" class="field-error" role="alert"></span>
+          </label>
+          <label class="check-field field-wide" for="team-referees">
+            <input id="team-referees" type="checkbox" />
+            <span>第2セクション以降は、空いている参加チームにも審判を割り当てる</span>
+          </label>
+          <span id="team-referees-error" class="field-error field-wide" role="alert"></span>
+        </div>
+      </details>
+      <div class="generation-box">
+        <h3>入力確認と安全確認</h3>
+        <p id="generation-review">入力内容を確認しています。</p>
+        <div id="turnstile-widget" class="turnstile-box" aria-label="安全確認">この手順を開くと安全確認を読み込みます。</div>
+        <button id="generate" class="primary" type="button" disabled>1日目の日程を生成する</button>
+        <p id="generation-status" class="status-message" role="status" aria-live="polite"></p>
+      </div>
+      <div class="wizard-actions">
+        <button id="step3-back" class="secondary" type="button">戻る</button>
+        <span></span>
+      </div>
+    </section>
+
+    <section class="panel results" data-panel="4" aria-labelledby="results-heading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="section-number">手順 4 / 4</p>
+          <h2 id="results-heading">1日目のリーグ日程</h2>
           <p id="result-summary">まだ生成結果はありません。</p>
         </div>
         <button id="print" class="secondary no-print" type="button" disabled>印刷する</button>
       </div>
       <div id="result-content" class="result-content empty">
-        日程を生成すると、試合数や終了予定などをここで確認できます。
+        日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。
+      </div>
+      <div class="wizard-actions no-print">
+        <button id="step4-back" class="secondary" type="button">設定へ戻る</button>
+        <span></span>
       </div>
     </section>
 
@@ -140,16 +249,69 @@ function requiredElement<T extends HTMLElement>(selector: string): T {
   return element;
 }
 
+function lines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function asObject(value: unknown): JsonObject | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : undefined;
+}
+
+function asObjectArray(value: unknown): JsonObject[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is JsonObject =>
+          typeof item === "object" && item !== null && !Array.isArray(item),
+      )
+    : [];
+}
+
+function inputNumber(input: HTMLInputElement): number | null {
+  if (input.value.trim() === "") return null;
+  return Number(input.value);
+}
+
+function appendTextElement<K extends keyof HTMLElementTagNameMap>(
+  parent: HTMLElement,
+  tagName: K,
+  text: string,
+  className?: string,
+): HTMLElementTagNameMap[K] {
+  const element = window.document.createElement(tagName);
+  element.textContent = text;
+  if (className !== undefined) element.className = className;
+  parent.append(element);
+  return element;
+}
+
 const storage = new TournamentStorage();
 const autosave = new AutosaveController((value) => storage.saveDraft(value));
 let documentState = createTournamentDocument();
+let currentStep: WizardStep = 1;
+let legacyCompatibility = false;
+let organizerCapacityTouched = false;
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
+let turnstileSetupStarted = false;
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 
 const nameInput = requiredElement<HTMLInputElement>("#tournament-name");
 const teamsInput = requiredElement<HTMLTextAreaElement>("#teams");
 const courtsInput = requiredElement<HTMLTextAreaElement>("#courts");
+const blockCountInput = requiredElement<HTMLSelectElement>("#block-count");
+const assignmentModeInput = requiredElement<HTMLSelectElement>("#assignment-mode");
+const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
+const gameDurationInput = requiredElement<HTMLInputElement>("#game-duration");
+const marginInput = requiredElement<HTMLInputElement>("#margin-minutes");
+const organizerCapacityInput = requiredElement<HTMLInputElement>("#organizer-capacity");
+const maxSectionsInput = requiredElement<HTMLInputElement>("#max-sections");
+const randomSeedInput = requiredElement<HTMLInputElement>("#random-seed");
+const teamRefereesInput = requiredElement<HTMLInputElement>("#team-referees");
 const saveState = requiredElement<HTMLElement>("#save-state");
 const backupStatus = requiredElement<HTMLElement>("#backup-status");
 const generationStatus = requiredElement<HTMLElement>("#generation-status");
@@ -167,43 +329,26 @@ function turnstileApi(): TurnstileApi | undefined {
     : undefined;
 }
 
+function refreshGenerateEnabled(): void {
+  generateButton.disabled =
+    turnstileToken.length === 0 || !navigator.onLine || currentStep !== 3;
+}
+
 function requireTurnstileConfirmation(message: string): void {
   turnstileToken = "";
-  generateButton.disabled = true;
   generationStatusOwner = "turnstile";
   generationStatus.textContent = message;
-}
-
-function lines(value: string): string[] {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function asObjectArray(value: unknown): JsonObject[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is JsonObject => typeof item === "object" && item !== null && !Array.isArray(item))
-    : [];
+  refreshGenerateEnabled();
 }
 
 function namesFromInput(field: "teams" | "courts"): string[] {
   return asObjectArray(documentState.tournament.input[field]).map((item) =>
-    typeof item.name === "string" ? item.name : typeof item.id === "string" ? item.id : "名称未設定",
+    typeof item.name === "string"
+      ? item.name
+      : typeof item.id === "string"
+        ? item.id
+        : "名称未設定",
   );
-}
-
-function appendTextElement<K extends keyof HTMLElementTagNameMap>(
-  parent: HTMLElement,
-  tagName: K,
-  text: string,
-  className?: string,
-): HTMLElementTagNameMap[K] {
-  const element = window.document.createElement(tagName);
-  element.textContent = text;
-  if (className !== undefined) element.className = className;
-  parent.append(element);
-  return element;
 }
 
 function idNameMap(field: "teams" | "courts"): Map<string, string> {
@@ -228,36 +373,46 @@ function exactTeamId(match: JsonObject | undefined, side: "home" | "away"): stri
 }
 
 function sectionLabel(sectionNumber: number): string {
-  const day = documentState.tournament.input.day;
-  if (typeof day !== "object" || day === null || Array.isArray(day)) return `第${sectionNumber}`;
-  const settings = day as JsonObject;
+  const settings = asObject(documentState.tournament.input.day);
   if (
-    typeof settings.start_time !== "string" ||
+    typeof settings?.start_time !== "string" ||
     typeof settings.game_duration_minutes !== "number" ||
     typeof settings.margin_minutes !== "number"
   ) {
-    return `第${sectionNumber}`;
+    return `第${sectionNumber}セクション`;
   }
   const [hoursText, minutesText] = settings.start_time.split(":");
   const hours = Number(hoursText);
   const minutes = Number(minutesText);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return `第${sectionNumber}`;
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return `第${sectionNumber}セクション`;
   const totalMinutes =
     hours * 60 +
     minutes +
-    (sectionNumber - 1) * (settings.game_duration_minutes + settings.margin_minutes);
+    (sectionNumber - 1) *
+      (settings.game_duration_minutes + settings.margin_minutes);
   const time = `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
   return `第${sectionNumber}・${time}`;
+}
+
+function resultLeaguePlan(): JsonObject | undefined {
+  return asObject(documentState.tournament.result?.league_plan);
+}
+
+function resultMatches(): JsonObject[] {
+  const planned = asObjectArray(resultLeaguePlan()?.matches);
+  return planned.length > 0
+    ? planned
+    : asObjectArray(documentState.tournament.input.matches);
 }
 
 function renderResult(): void {
   const summary = requiredElement<HTMLElement>("#result-summary");
   const content = requiredElement<HTMLElement>("#result-content");
-
   const result = documentState.tournament.result;
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
-    content.textContent = "日程を生成すると、試合数や終了予定などをここで確認できます。";
+    content.textContent =
+      "日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。";
     content.classList.add("empty");
     printButton.disabled = true;
     return;
@@ -273,37 +428,56 @@ function renderResult(): void {
   const teamNames = idNameMap("teams");
   const courtNames = idNameMap("courts");
   const matches = new Map(
-    asObjectArray(documentState.tournament.input.matches)
+    resultMatches()
       .filter((match) => typeof match.id === "string")
       .map((match) => [match.id as string, match]),
   );
-  const status = typeof result.status === "string" ? result.status : "完了";
-  summary.textContent = `生成状態：${status}／配置済み ${slots.length}試合`;
+  const status = result.status === "OPTIMAL" || result.status === "FEASIBLE" ? "生成完了" : String(result.status ?? "完了");
+  summary.textContent = `${status}／配置済み ${slots.length}試合`;
   content.replaceChildren();
   content.classList.remove("empty");
 
   const overview = window.document.createElement("dl");
-  const overviewItems: Array<readonly [string, string]> = [
+  for (const [label, value] of [
     ["大会名", documentState.tournament.name || "名称未設定"],
     ["参加チーム", `${teamNames.size}チーム`],
     ["配置済み試合", `${slots.length}試合`],
     ["保存日時", new Date(documentState.updatedAt).toLocaleString("ja-JP")],
-  ];
-  for (const [label, value] of overviewItems) {
+  ] as Array<readonly [string, string]>) {
     const wrapper = window.document.createElement("div");
     appendTextElement(wrapper, "dt", label);
     appendTextElement(wrapper, "dd", value);
     overview.append(wrapper);
   }
   content.append(overview);
-  const validation = result.validation;
-  if (
-    typeof validation === "object" &&
-    validation !== null &&
-    !Array.isArray(validation) &&
-    (validation as JsonObject).valid === true
-  ) {
+
+  const validation = asObject(result.validation);
+  if (validation?.valid === true) {
     appendTextElement(content, "p", "大会規則の独立チェックに合格しています。", "validation-ok");
+  }
+
+  const leaguePlan = resultLeaguePlan();
+  const blocks = asObjectArray(leaguePlan?.blocks);
+  if (blocks.length > 0) {
+    appendTextElement(content, "h3", "ブロック分け");
+    const blockGrid = window.document.createElement("div");
+    blockGrid.className = "block-grid";
+    const rounds = asObjectArray(leaguePlan?.logical_rounds);
+    for (const block of blocks) {
+      const card = window.document.createElement("section");
+      card.className = "block-card";
+      const blockId = String(block.id ?? "-");
+      appendTextElement(card, "h4", `${blockId}ブロック`);
+      const list = window.document.createElement("ol");
+      for (const teamId of Array.isArray(block.team_ids) ? block.team_ids : []) {
+        appendTextElement(list, "li", teamNames.get(String(teamId)) ?? "名称未設定");
+      }
+      card.append(list);
+      const roundCount = rounds.filter((round) => round.block_id === block.id).length;
+      appendTextElement(card, "p", `総当たり ${roundCount}ラウンド`, "muted");
+      blockGrid.append(card);
+    }
+    content.append(blockGrid);
   }
 
   appendTextElement(content, "h3", "日程表");
@@ -333,12 +507,7 @@ function renderResult(): void {
     appendTextElement(row, "td", sectionLabel(sectionNumber));
     appendTextElement(row, "td", courtName);
     appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
-    const assignment =
-      typeof slot.referee_assignment === "object" &&
-      slot.referee_assignment !== null &&
-      !Array.isArray(slot.referee_assignment)
-        ? (slot.referee_assignment as JsonObject)
-        : undefined;
+    const assignment = asObject(slot.referee_assignment);
     const kind = assignment?.kind ?? assignment?.type;
     const refereeTeamId = typeof assignment?.team_id === "string" ? assignment.team_id : undefined;
     const refereeName =
@@ -357,9 +526,7 @@ function renderResult(): void {
       teamSchedules.get(awayId)?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${homeName}`);
     }
     if (refereeTeamId !== undefined) {
-      teamSchedules
-        .get(refereeTeamId)
-        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　審判`);
+      teamSchedules.get(refereeTeamId)?.push(`${sectionLabel(sectionNumber)}　${courtName}　審判`);
     }
   }
   table.append(body);
@@ -387,34 +554,150 @@ function renderResult(): void {
   printButton.disabled = false;
 }
 
+function renderBlockCountOptions(selected: unknown): void {
+  const teamCount = lines(teamsInput.value).length;
+  blockCountInput.replaceChildren();
+  const placeholder = window.document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "選択してください";
+  blockCountInput.append(placeholder);
+  for (let value = 1; value <= Math.max(1, teamCount); value += 1) {
+    const option = window.document.createElement("option");
+    option.value = String(value);
+    option.textContent = `${value}ブロック`;
+    blockCountInput.append(option);
+  }
+  blockCountInput.value = typeof selected === "number" ? String(selected) : "";
+}
+
+function setLegacyControlsDisabled(disabled: boolean): void {
+  for (const control of [
+    teamsInput,
+    courtsInput,
+    blockCountInput,
+    assignmentModeInput,
+    startTimeInput,
+    gameDurationInput,
+    marginInput,
+    organizerCapacityInput,
+    maxSectionsInput,
+    randomSeedInput,
+    teamRefereesInput,
+  ]) {
+    control.disabled = disabled;
+  }
+  requiredElement<HTMLElement>("#legacy-banner").hidden = !disabled;
+}
+
+function updateReview(): void {
+  const teamCount = lines(teamsInput.value).length;
+  const courtCount = lines(courtsInput.value).length;
+  const blockText = blockCountInput.value === "" ? "未選択" : `${blockCountInput.value}ブロック`;
+  requiredElement<HTMLElement>("#generation-review").textContent = legacyCompatibility
+    ? "従来形式の大会設定をそのまま使って日程を再生成します。"
+    : `${teamCount}チーム／${blockText}／${courtCount}コート／${startTimeInput.value}開始で生成します。`;
+}
+
+function renderStep(): void {
+  for (const panel of document.querySelectorAll<HTMLElement>("[data-panel]")) {
+    panel.hidden = Number(panel.dataset.panel) !== currentStep;
+  }
+  for (const step of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
+    const active = Number(step.dataset.step) === currentStep;
+    step.classList.toggle("active", active);
+    if (active) step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  }
+  updateReview();
+  refreshGenerateEnabled();
+  if (currentStep === 3) setupTurnstile();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function render(): void {
+  const input = documentState.tournament.input;
+  const league = asObject(input.league);
+  const day = asObject(input.day);
+  const referees = asObject(input.referees);
   nameInput.value = documentState.tournament.name;
   teamsInput.value = namesFromInput("teams").join("\n");
   courtsInput.value = namesFromInput("courts").join("\n");
+  renderBlockCountOptions(league?.block_count);
+  assignmentModeInput.value =
+    league?.assignment_mode === "seeded_snake" ? "seeded_snake" : "random";
+  startTimeInput.value = typeof day?.start_time === "string" ? day.start_time : "09:30";
+  gameDurationInput.value = String(day?.game_duration_minutes ?? 35);
+  marginInput.value = String(day?.margin_minutes ?? 5);
+  organizerCapacityInput.value = String(
+    referees?.organizer_capacity ?? Math.max(1, lines(courtsInput.value).length),
+  );
+  maxSectionsInput.value =
+    typeof day?.max_sections === "number" ? String(day.max_sections) : "";
+  randomSeedInput.value = String(input.random_seed ?? 20260803);
+  teamRefereesInput.checked = referees?.team_referees_required_after_first !== false;
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
+  setLegacyControlsDisabled(legacyCompatibility);
+  clearFieldIssues();
   renderResult();
+  renderStep();
 }
 
-function updateDraft(): void {
-  const teamNames = lines(teamsInput.value).slice(0, 32);
-  const courtNames = lines(courtsInput.value).slice(0, 16);
-  const previousInput = documentState.tournament.input;
-  documentState = {
-    ...cloneDocument(documentState),
-    updatedAt: new Date().toISOString(),
-    tournament: {
-      name: nameInput.value.trim(),
-      input: {
-        ...previousInput,
-        teams: teamNames.map((name, index) => ({ id: `team-${String(index + 1).padStart(2, "0")}`, name })),
-        courts: courtNames.map((name, index) => ({ id: `court-${String(index + 1).padStart(2, "0")}`, name })),
+function updateDraft(invalidateResult = false): void {
+  const previous = cloneDocument(documentState);
+  const now = new Date().toISOString();
+  if (legacyCompatibility) {
+    documentState = {
+      ...previous,
+      updatedAt: now,
+      tournament: { ...previous.tournament, name: nameInput.value.trim() },
+    };
+  } else {
+    const teamNames = lines(teamsInput.value).slice(0, 32);
+    const courtNames = lines(courtsInput.value).slice(0, 16);
+    const seeded = assignmentModeInput.value === "seeded_snake";
+    documentState = {
+      ...previous,
+      updatedAt: now,
+      tournament: {
+        name: nameInput.value.trim(),
+        input: {
+          schema_version: "0.1.0",
+          request_kind: "day1_league",
+          teams: teamNames.map((name, index) => ({
+            id: `team-${String(index + 1).padStart(2, "0")}`,
+            name,
+            ...(seeded ? { seed: index + 1 } : {}),
+          })),
+          courts: courtNames.map((name, index) => ({
+            id: `court-${String(index + 1).padStart(2, "0")}`,
+            name,
+          })),
+          league: {
+            block_count: blockCountInput.value === "" ? null : Number(blockCountInput.value),
+            assignment_mode: assignmentModeInput.value,
+          },
+          day: {
+            id: "day1",
+            start_time: startTimeInput.value,
+            game_duration_minutes: inputNumber(gameDurationInput),
+            margin_minutes: inputNumber(marginInput),
+            max_sections: inputNumber(maxSectionsInput),
+          },
+          referees: {
+            organizer_capacity: inputNumber(organizerCapacityInput),
+            team_referees_required_after_first: teamRefereesInput.checked,
+          },
+          random_seed: inputNumber(randomSeedInput),
+          solver: { max_time_seconds: 30 },
+        },
+        result: invalidateResult ? undefined : previous.tournament.result,
       },
-      result: documentState.tournament.result,
-    },
-  };
-  requiredElement<HTMLElement>("#team-count").textContent = `${teamNames.length} / 32チーム`;
-  requiredElement<HTMLElement>("#court-count").textContent = `${courtNames.length} / 16コート`;
+    };
+  }
+  requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
+  requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
+  updateReview();
   saveState.textContent = "保存しています…";
   autosave.schedule(
     documentState,
@@ -428,18 +711,98 @@ function updateDraft(): void {
   );
 }
 
-nameInput.addEventListener("input", updateDraft);
-for (const input of [teamsInput, courtsInput]) {
-  input.addEventListener("input", () => {
-    documentState.tournament.result = undefined;
-    renderResult();
-    generationStatus.textContent = "チームまたはコートを変更したため、以前の生成結果を取り消しました。";
-    updateDraft();
-  });
+function clearFieldIssues(): void {
+  for (const error of document.querySelectorAll<HTMLElement>(".field-error")) {
+    error.textContent = "";
+  }
+  for (const invalid of document.querySelectorAll<HTMLElement>("[aria-invalid='true']")) {
+    invalid.removeAttribute("aria-invalid");
+  }
 }
 
+function showFieldIssues(issues: FieldIssue[]): void {
+  clearFieldIssues();
+  for (const issue of issues) {
+    const field = document.getElementById(issue.field);
+    const error = document.getElementById(`${issue.field}-error`);
+    field?.setAttribute("aria-invalid", "true");
+    if (error !== null) error.textContent = issue.message;
+  }
+}
+
+function goToStep(step: WizardStep, validateForward = true): boolean {
+  updateDraft(false);
+  if (validateForward && !legacyCompatibility && step > currentStep) {
+    const through = Math.min(step - 1, 3) as 1 | 2 | 3;
+    const issues = validateDay1LeagueDocument(documentState, through);
+    if (issues.length > 0) {
+      const first = issues[0];
+      currentStep = first?.step ?? currentStep;
+      showFieldIssues(issues);
+      generationStatus.textContent =
+        "入力を修正してください。赤字の説明に、必要な対応を表示しています。";
+      renderStep();
+      document.getElementById(first?.field ?? "")?.focus();
+      return false;
+    }
+  }
+  clearFieldIssues();
+  currentStep = step;
+  renderStep();
+  return true;
+}
+
+function onConfigurationChanged(options: { courtsChanged?: boolean } = {}): void {
+  if (legacyCompatibility) return;
+  if (options.courtsChanged && !organizerCapacityTouched) {
+    organizerCapacityInput.value = String(Math.max(1, lines(courtsInput.value).length));
+  }
+  const selectedBlock = blockCountInput.value === "" ? undefined : Number(blockCountInput.value);
+  if (teamsInput === document.activeElement) renderBlockCountOptions(selectedBlock);
+  const hadResult = documentState.tournament.result !== undefined;
+  updateDraft(hadResult);
+  if (hadResult) {
+    renderResult();
+    generationStatus.textContent =
+      "大会設定を変更したため、以前の生成結果を取り消しました。もう一度生成してください。";
+  }
+}
+
+nameInput.addEventListener("input", () => updateDraft(false));
+teamsInput.addEventListener("input", () => onConfigurationChanged());
+courtsInput.addEventListener("input", () => onConfigurationChanged({ courtsChanged: true }));
+for (const control of [
+  blockCountInput,
+  assignmentModeInput,
+  startTimeInput,
+  gameDurationInput,
+  marginInput,
+  maxSectionsInput,
+  randomSeedInput,
+  teamRefereesInput,
+]) {
+  control.addEventListener("input", () => onConfigurationChanged());
+  control.addEventListener("change", () => onConfigurationChanged());
+}
+organizerCapacityInput.addEventListener("input", () => {
+  organizerCapacityTouched = true;
+  onConfigurationChanged();
+});
+
+for (const stepButton of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
+  stepButton.addEventListener("click", () => {
+    const step = Number(stepButton.dataset.step) as WizardStep;
+    goToStep(step, step > currentStep);
+  });
+}
+requiredElement<HTMLButtonElement>("#step1-next").addEventListener("click", () => goToStep(2));
+requiredElement<HTMLButtonElement>("#step2-back").addEventListener("click", () => goToStep(1, false));
+requiredElement<HTMLButtonElement>("#step2-next").addEventListener("click", () => goToStep(3));
+requiredElement<HTMLButtonElement>("#step3-back").addEventListener("click", () => goToStep(2, false));
+requiredElement<HTMLButtonElement>("#step4-back").addEventListener("click", () => goToStep(3, false));
+
 requiredElement<HTMLButtonElement>("#confirm-save").addEventListener("click", () => {
-  updateDraft();
+  updateDraft(false);
   autosave.cancel();
   void storage
     .confirm(documentState)
@@ -453,7 +816,7 @@ requiredElement<HTMLButtonElement>("#confirm-save").addEventListener("click", ()
 });
 
 requiredElement<HTMLButtonElement>("#export").addEventListener("click", () => {
-  updateDraft();
+  updateDraft(false);
   const blob = new Blob([serializeTournamentJson(documentState)], { type: "application/json" });
   const link = window.document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -471,20 +834,28 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
     .text()
     .then((text) => {
       const imported = parseTournamentJson(text);
-      const teams = asObjectArray(imported.tournament.input.teams).length;
-      const matches = asObjectArray(imported.tournament.input.matches).length;
+      const mode = normalizeDocument(imported);
+      const teams = asObjectArray(mode.document.tournament.input.teams).length;
+      const matches =
+        asObjectArray(mode.document.tournament.input.matches).length ||
+        asObjectArray(asObject(mode.document.tournament.result?.league_plan)?.matches).length;
       const confirmed = window.confirm(
-        `「${imported.tournament.name}」を読み込みます。\nチーム：${teams}／試合：${matches}\n\n現在の内容はひとつ前の状態として残ります。よろしいですか？`,
+        `「${mode.document.tournament.name}」を読み込みます。\nチーム：${teams}／生成済み試合：${matches}\n\n現在の内容はひとつ前の状態として残ります。よろしいですか？`,
       );
       if (!confirmed) {
         backupStatus.textContent = "読み込みを取り消しました。現在の内容は変わっていません。";
         return;
       }
       autosave.cancel();
-      documentState = imported;
-      return storage.replaceImported(imported).then(() => {
+      documentState = mode.document;
+      legacyCompatibility = mode.legacyCompatibility;
+      organizerCapacityTouched = inferOrganizerCapacityTouched();
+      currentStep = documentState.tournament.result === undefined ? 1 : 4;
+      return storage.replaceImported(documentState).then(() => {
         render();
-        backupStatus.textContent = "ファイルから復元しました。内容を確認してください。";
+        backupStatus.textContent = mode.migrated
+          ? "以前の下書きを1日目リーグ形式へ移行して復元しました。"
+          : "ファイルから復元しました。内容を確認してください。";
       });
     })
     .catch((error: unknown) => {
@@ -506,31 +877,80 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
       backupStatus.textContent = "戻せる状態がありません。";
       return;
     }
-    documentState = previous;
+    const mode = normalizeDocument(previous);
+    documentState = mode.document;
+    legacyCompatibility = mode.legacyCompatibility;
+    organizerCapacityTouched = inferOrganizerCapacityTouched();
+    currentStep = documentState.tournament.result === undefined ? 1 : 4;
     render();
     backupStatus.textContent = "ひとつ前の状態へ戻しました。";
   });
 });
 
 requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
-  if (!window.confirm("この端末に保存した現在の大会データを削除しますか？\n削除後も「ひとつ前の状態へ戻す」で一度だけ元に戻せます。")) return;
+  if (
+    !window.confirm(
+      "この端末に保存した現在の大会データを削除しますか？\n削除後も「ひとつ前の状態へ戻す」で一度だけ元に戻せます。",
+    )
+  ) {
+    return;
+  }
   autosave.cancel();
   void storage.deleteCurrent().then(() => {
     documentState = createTournamentDocument();
+    legacyCompatibility = false;
+    organizerCapacityTouched = false;
+    currentStep = 1;
     render();
-    backupStatus.textContent = "現在のデータを削除しました。「ひとつ前の状態へ戻す」で取り消せます。";
+    backupStatus.textContent =
+      "現在のデータを削除しました。「ひとつ前の状態へ戻す」で取り消せます。";
   });
 });
 
+function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
+  const issues = issuesFromApiDetails(error.details);
+  if (issues.length > 0) return issues;
+  if (error.code === "INVALID_BLOCK_COUNT") {
+    return [
+      {
+        field: "block-count",
+        step: 2,
+        message: "ブロック数を参加チーム数以下にしてください。",
+      },
+    ];
+  }
+  return [];
+}
+
 generateButton.addEventListener("click", () => {
+  updateDraft(false);
+  if (!legacyCompatibility) {
+    const issues = validateDay1LeagueDocument(documentState);
+    if (issues.length > 0) {
+      const first = issues[0];
+      showFieldIssues(issues);
+      currentStep = first?.step ?? 3;
+      generationStatus.textContent =
+        "日程を生成する前に入力を修正してください。赤字の説明に、必要な対応を表示しています。";
+      renderStep();
+      document.getElementById(first?.field ?? "")?.focus();
+      return;
+    }
+  }
+  if (!navigator.onLine) {
+    generationStatus.textContent =
+      "オフラインでは新しい日程を生成できません。保存済み結果の確認と印刷は利用できます。";
+    refreshGenerateEnabled();
+    return;
+  }
   if (turnstileToken.length === 0) {
     requireTurnstileConfirmation("安全確認を完了してから日程を生成してください。");
     return;
   }
-  updateDraft();
+
   generateButton.disabled = true;
   generationStatusOwner = "generation";
-  generationStatus.textContent = "日程を生成しています。画面を閉じずにお待ちください…";
+  generationStatus.textContent = "1日目の日程を生成しています。画面を閉じずにお待ちください…";
   void generateSchedule(documentState.tournament.input, turnstileToken)
     .then((result) => {
       documentState = {
@@ -540,19 +960,33 @@ generateButton.addEventListener("click", () => {
       };
       autosave.cancel();
       return storage.confirm(documentState).then(() => {
-        generationStatus.textContent = "日程を生成し、この端末へ保存しました。";
-        render();
+        generationStatus.textContent = "1日目の日程を生成し、この端末へ保存しました。";
+        currentStep = 4;
+        renderResult();
+        renderStep();
       });
     })
     .catch((error: unknown) => {
-      generationStatus.textContent =
-        error instanceof ScheduleApiError
-          ? error.message
-          : "日程を生成できませんでした。入力は保存されています。もう一度お試しください。";
+      if (error instanceof ScheduleApiError) {
+        const issues = apiFieldIssues(error);
+        if (issues.length > 0) {
+          showFieldIssues(issues);
+          currentStep = issues[0]?.step ?? 3;
+          generationStatus.textContent =
+            "日程を生成できませんでした。赤字の説明に沿って入力を修正してください。";
+          renderStep();
+          document.getElementById(issues[0]?.field ?? "")?.focus();
+        } else {
+          generationStatus.textContent = error.message;
+        }
+      } else {
+        generationStatus.textContent =
+          "日程を生成できませんでした。入力は保存されています。もう一度お試しください。";
+      }
     })
     .finally(() => {
       turnstileToken = "";
-      generateButton.disabled = true;
+      refreshGenerateEnabled();
       const api = turnstileApi();
       if (turnstileWidgetId === undefined || api === undefined) {
         requireTurnstileConfirmation(
@@ -581,17 +1015,21 @@ function updateConnectionStatus(): void {
     connection.textContent = "オフライン：保存済みの内容を確認できます";
     connection.className = "connection offline";
   }
+  refreshGenerateEnabled();
 }
 window.addEventListener("online", updateConnectionStatus);
 window.addEventListener("offline", updateConnectionStatus);
 updateConnectionStatus();
 
 function setupTurnstile(): void {
+  if (turnstileSetupStarted) return;
+  turnstileSetupStarted = true;
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
   const container = requiredElement<HTMLElement>("#turnstile-widget");
   generateButton.disabled = true;
   if (!siteKey) {
-    container.textContent = "安全確認の設定が完了していないため、現在は日程を生成できません。";
+    container.textContent =
+      "安全確認の設定が完了していないため、現在は日程を生成できません。";
     requireTurnstileConfirmation(
       "安全確認の設定が完了していないため、現在は日程を生成できません。",
     );
@@ -624,7 +1062,7 @@ function setupTurnstile(): void {
             return;
           }
           turnstileToken = token;
-          generateButton.disabled = false;
+          refreshGenerateEnabled();
           if (generationStatusOwner === "turnstile") {
             generationStatus.textContent = "安全確認が完了しました。";
           }
@@ -649,12 +1087,21 @@ function setupTurnstile(): void {
     }
   });
   script.addEventListener("error", () => {
-    container.textContent = "安全確認を読み込めませんでした。通信状態を確認してください。";
+    container.textContent =
+      "安全確認を読み込めませんでした。通信状態を確認してください。";
     requireTurnstileConfirmation(
       "安全確認を読み込めませんでした。通信状態を確認してください。",
     );
   });
   window.document.head.append(script);
+}
+
+function inferOrganizerCapacityTouched(): boolean {
+  const input = documentState.tournament.input;
+  const referees = asObject(input.referees);
+  const capacity = referees?.organizer_capacity;
+  const courtCount = asObjectArray(input.courts).length;
+  return typeof capacity === "number" && capacity !== Math.max(1, courtCount);
 }
 
 registerSW({
@@ -664,20 +1111,30 @@ registerSW({
     }
   },
   onOfflineReady() {
-    backupStatus.textContent = "オフラインでも保存済みの内容を確認できる準備が整いました。";
+    backupStatus.textContent =
+      "オフラインでも保存済みの内容を確認できる準備が整いました。";
   },
 });
 
 void storage
   .loadLatest()
   .then((saved) => {
-    documentState = saved ?? createTournamentDocument();
+    const mode = normalizeDocument(saved ?? createTournamentDocument());
+    documentState = mode.document;
+    legacyCompatibility = mode.legacyCompatibility;
+    organizerCapacityTouched = inferOrganizerCapacityTouched();
+    currentStep = documentState.tournament.result === undefined ? 1 : 4;
     render();
-    saveState.textContent = saved === undefined ? "新しい大会" : "この端末の保存内容を復元しました";
+    if (mode.migrated) {
+      void storage.saveDraft(documentState);
+      saveState.textContent = "以前の下書きを新しい形式へ移行しました";
+    } else {
+      saveState.textContent = saved === undefined ? "新しい大会" : "この端末の保存内容を復元しました";
+    }
   })
   .catch(() => {
     render();
     saveState.textContent = "保存内容を読み込めませんでした";
-    backupStatus.textContent = "JSONファイルのバックアップがある場合は「ファイルから復元」をお試しください。";
+    backupStatus.textContent =
+      "JSONファイルのバックアップがある場合は「ファイルから復元」をお試しください。";
   });
-setupTurnstile();

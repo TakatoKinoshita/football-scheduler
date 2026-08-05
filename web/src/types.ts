@@ -23,9 +23,26 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
       name: "",
       input: {
         schema_version: SCHEMA_VERSION,
+        request_kind: "day1_league",
         teams: [],
         courts: [],
-        matches: [],
+        league: {
+          block_count: null,
+          assignment_mode: "random",
+        },
+        day: {
+          id: "day1",
+          start_time: "09:30",
+          game_duration_minutes: 35,
+          margin_minutes: 5,
+          max_sections: null,
+        },
+        referees: {
+          organizer_capacity: 1,
+          team_referees_required_after_first: true,
+        },
+        random_seed: 20260803,
+        solver: { max_time_seconds: 30 },
       },
     },
   };

@@ -2,19 +2,23 @@
 
 地域サッカー大会の対戦、コート、セクション、審判を、大会規則に沿って生成・検証するWebアプリの開発プロジェクトです。エンドユーザーが開発環境をインストールする必要のない提供形態を目指しています。
 
-現在のリポジトリには、Issue #1「FaaS上でOR-Toolsの技術検証」で作成した最小実装と実測結果が含まれます。PythonとOR-Tools CP-SATで代表規模の日程を生成し、独立した検証器で結果を確認できます。大会規則の全機能と本番用Web画面の全操作はまだ実装していません。
+現在のリポジトリでは、通常のWeb画面から大会名、2〜32チーム、ブロック数、分け方、
+1〜16コート、開催時刻を段階的に入力し、1日目のリーグ日程を生成できる。Pythonのdomain層で
+ブロックと総当たり対戦を生成し、OR-Tools CP-SATでコート、セクション、審判を配置した後、
+独立した検証器で結果を確認する。
 
-Issue #6、#7、#9では、TypeScript／ViteのPWA app shell、IndexedDB自動保存とJSON入出力、
-本番API adapterと濫用対策のIaCを追加しました。Issue #8の手動承認付き本番release経路も
-用意しています。ただし、大会規則の詳細入力画面はまだ開発途中であり、本番AWSリソースは
-作成・公開していません。
+TypeScript／ViteのPWA、ブラウザ内自動保存、JSON入出力、オフラインでの保存済み結果閲覧、
+本番API adapter、濫用対策のIaC、手動承認付きrelease経路も用意している。画面で現在利用できる
+範囲は1日目リーグ日程までであり、リーグ結果入力、順位計算、2日目の完全順位決定トーナメント、
+2日間の統合配置は後続issueで実装する。
 
 AWS LambdaとSAMは技術検証の対象として実測した後、複数候補を同じ基準で比較しました。
 対象AWS accountではCloudFront Free定額プランを利用できないため、MVPはCloudflare Pagesと
 Pages Functionを公開入口とし、API GatewayからLambdaコンテナを同期呼出しします。変更理由は
 [Cloudflare Pages代替ADR](docs/architecture/adr-0002-cloudflare-pages-fallback.md)、元の比較は
 [MVP本番インフラADR](docs/architecture/adr-0001-mvp-production-infrastructure.md)に記録しています。
-本番環境はまだ構築・公開しておらず、Lambda同時実行quotaの増枠が公開前の必須作業です。
+本番環境はCloudflare PagesとAWSの初期構成を公開済みである。公開環境の変更は、production
+workflowのplanでchange setを確認し、別の手動承認を経たapplyで行う。
 
 初期リリースで想定する利用規模、保存・共有、オフライン動作、費用、性能は
 [MVP運用要件](docs/product/mvp-operational-requirements.md)にまとめています。本番インフラは
@@ -49,8 +53,13 @@ npm ci
 npm run dev
 ```
 
-画面に大会入力と保存済み結果を表示できる。ローカル開発で日程生成を試す場合も、Turnstileの
-site keyと同一originのAPIが必要である。secret keyを`VITE_`環境変数へ設定してはならない。
+画面では4手順のウィザード、入力項目別の日本語エラー、ブロック分け、日程表、チーム別予定を
+確認できる。ローカル開発で日程生成を試す場合も、Turnstileのsite keyと同一originのAPIが
+必要である。secret keyを`VITE_`環境変数へ設定してはならない。
+
+生成APIは通常画面から`request_kind: "day1_league"`を付けた大会設定を受け付ける。
+`random`と`seeded_snake`のブロック分けを利用でき、完成済み試合を含む従来の
+`ScheduleRequest` JSONも互換経路として受け付ける。サーバー側へ大会データは永続保存しない。
 
 ## 固定fixtureの実行
 
@@ -83,6 +92,7 @@ npm run lint
 npm test
 npm run build
 npm run build:functions
+npm run test:e2e
 ```
 
 32チームの本番経路検証は2回の実行に時間がかかる。API adapter、独立制約検証、30秒上限、
@@ -162,8 +172,10 @@ JSON共有、復元範囲は[保存・共有・復元仕様](docs/product/data-s
 │   ├── api_handler.py       # API Gateway REST API adapter
 │   ├── authorizer.py        # Pages proxy確認・Turnstile authorizer
 │   ├── application.py       # FaaS非依存のアプリケーション境界
+│   ├── day1_league.py       # 1日目リーグ入力と既存ソルバーの接続
 │   ├── fixtures.py          # 固定入力
 │   ├── lambda_handler.py    # Lambda用の薄いアダプター
+│   ├── league.py            # ブロック分けと総当たり対戦生成
 │   ├── models.py            # JSON互換の入力・出力モデル
 │   ├── solver.py            # CP-SATによる日程生成
 │   └── validator.py         # ソルバーから独立した制約検証

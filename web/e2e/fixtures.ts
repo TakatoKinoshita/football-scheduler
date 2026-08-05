@@ -6,6 +6,25 @@ export interface TournamentFixtureOptions {
 export const scheduleResult = {
   schema_version: "0.1.0",
   status: "OPTIMAL",
+  schedule_scope: "day1_league",
+  league_plan: {
+    schema_version: "0.1.0",
+    assignment_mode: "random",
+    random_seed: 20260803,
+    blocks: [{ id: "A", team_ids: ["team-01", "team-02"] }],
+    logical_rounds: [{ block_id: "A", round_no: 1, match_ids: ["LG-A-M1"] }],
+    matches: [
+      {
+        id: "LG-A-M1",
+        phase: "league",
+        round: "Aブロック 第1ラウンド",
+        possible_home_team_ids: ["team-01"],
+        possible_away_team_ids: ["team-02"],
+        prerequisite_match_ids: [],
+        organizer_referee_required: false,
+      },
+    ],
+  },
   slots: [
     {
       day_id: "day1",
@@ -38,28 +57,26 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
       name: options.name ?? "E2E地区大会",
       input: {
         schema_version: "0.1.0",
+        request_kind: "day1_league",
         teams: [
           { id: "team-01", name: "青空FC" },
           { id: "team-02", name: "みどりSC" },
         ],
         courts: [{ id: "court-a", name: "Aコート" }],
-        matches: [
-          {
-            id: "LG-A-M1",
-            phase: "league",
-            possible_home_team_ids: ["team-01"],
-            possible_away_team_ids: ["team-02"],
-            prerequisite_match_ids: [],
-          },
-        ],
+        league: { block_count: 1, assignment_mode: "random" },
         day: {
+          id: "day1",
           start_time: "09:30",
           game_duration_minutes: 35,
           margin_minutes: 5,
           max_sections: 4,
         },
-        organizer_capacity: 1,
+        referees: {
+          organizer_capacity: 1,
+          team_referees_required_after_first: true,
+        },
         random_seed: 20260803,
+        solver: { max_time_seconds: 30 },
       },
     },
   };

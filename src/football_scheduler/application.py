@@ -15,11 +15,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from football_scheduler.day1_league import prepare_day1_league_schedule
 from football_scheduler.fixtures import (
     make_maximum_mvp_request,
     make_representative_request,
     make_smoke_request,
 )
+from football_scheduler.league import LeagueGenerationError
 from football_scheduler.solver import solve_schedule
 from football_scheduler.validator import validate_schedule
 
@@ -58,23 +60,31 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         _validate_json_size(payload)
-        request_data = _resolve_request(payload)
+        request_data, response_metadata, fallback_request_data = _resolve_request(payload)
         _validate_limits(request_data)
         request_data = _apply_solver_time_limit(request_data)
+        if fallback_request_data is not None:
+            fallback_request_data = _apply_solver_time_limit(fallback_request_data)
 
         result = solve_schedule(request_data)
         result_data = _to_json_object(result)
+        if result_data.get("status") == "INFEASIBLE" and fallback_request_data is not None:
+            request_data = fallback_request_data
+            result = solve_schedule(request_data)
+            result_data = _to_json_object(result)
         document = _build_validation_document(request_data, result_data)
         validation = _to_json_object(validate_schedule(document))
 
-        response = {**result_data, "validation": validation}
+        response = {**result_data, **response_metadata, "validation": validation}
         return _json_round_trip(response)
     except _RequestError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except LeagueGenerationError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         return _error_response(
             "INPUT_SCHEMA_INVALID",
-            "大会設定に入力不備があります。表示された項目を確認してください。",
+            "大会設定の一部を読み取れませんでした。項目別の説明に沿って修正してください。",
             {"errors": _pydantic_errors(exc)},
         )
     except (TypeError, ValueError) as exc:
@@ -91,10 +101,28 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
 
-def _resolve_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_request(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    if payload.get("request_kind") == "day1_league":
+        prepared = prepare_day1_league_schedule(payload)
+        fallback_request = (
+            _to_json_object(prepared.fallback_request)
+            if prepared.fallback_request is not None
+            else None
+        )
+        return (
+            _to_json_object(prepared.request),
+            {
+                "schedule_scope": "day1_league",
+                "league_plan": _to_json_object(prepared.league_plan),
+            },
+            fallback_request,
+        )
+
     fixture_name = payload.get("fixture")
     if fixture_name is None:
-        return _json_round_trip(payload)
+        return _json_round_trip(payload), {}, None
 
     allowed_keys = {"fixture", "solver_options"}
     unknown_keys = sorted(str(key) for key in payload if key not in allowed_keys)
@@ -130,7 +158,7 @@ def _resolve_request(payload: Mapping[str, Any]) -> dict[str, Any]:
             **(dict(current) if isinstance(current, Mapping) else {}),
             **dict(overrides),
         }
-    return _json_round_trip(request)
+    return _json_round_trip(request), {}, None
 
 
 def _apply_solver_time_limit(request: Mapping[str, Any]) -> dict[str, Any]:

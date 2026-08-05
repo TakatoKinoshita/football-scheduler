@@ -101,6 +101,7 @@ def test_technical_fixture_is_not_exposed_by_public_api(
     ("code", "expected_status"),
     [
         ("INPUT_SCHEMA_INVALID", 400),
+        ("INVALID_BLOCK_COUNT", 400),
         ("TEAM_LIMIT_EXCEEDED", 413),
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),
