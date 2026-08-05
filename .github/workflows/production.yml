@@ -418,7 +418,9 @@ jobs:
               && grep --ignore-case "x-release-id: $RELEASE_ID" /tmp/public-response-headers \
               && curl --fail --silent --show-error --max-time 20 \
                 "$PUBLIC_APPLICATION_URL" --output /tmp/public-response-body \
-              && grep "大会日程スケジューラー" /tmp/public-response-body; then
+              && grep --fixed-strings --quiet \
+                "<title>地域サッカー大会スケジューラー</title>" \
+                /tmp/public-response-body; then
               exit 0
             fi
             if [[ "$attempt" -lt 6 ]]; then
