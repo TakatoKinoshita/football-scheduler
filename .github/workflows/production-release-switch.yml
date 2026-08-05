@@ -1,0 +1,360 @@
+name: 本番release切替
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: planは状態確認だけ、applyは検証済みreleaseへ切り替えます
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      direction:
+        description: rollbackは旧版へ、restoreはCloudFormation管理中の版へ戻します
+        required: true
+        default: rollback
+        type: choice
+        options:
+          - rollback
+          - restore
+      expected_current_release_sha:
+        description: 現在公開中と確認した完全なcommit SHA
+        required: true
+        type: string
+      target_release_sha:
+        description: 切替先の完全なcommit SHA
+        required: true
+        type: string
+      plan_id:
+        description: apply時にplanで表示された64文字のPlan ID
+        required: false
+        type: string
+      production_switch_confirmed:
+        description: 選択した本番release切替の影響を確認済み
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    name: ${{ inputs.operation == 'plan' && '本番release切替を計画' || '承認済みreleaseへ切替' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME || 'football-scheduler-production' }}
+      CURRENT_RELEASE: ${{ inputs.expected_current_release_sha }}
+      TARGET_RELEASE: ${{ inputs.target_release_sha }}
+      REQUESTED_PLAN_ID: ${{ inputs.plan_id }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+      PUBLIC_APPLICATION_URL: ${{ vars.PUBLIC_APPLICATION_URL }}
+
+    steps:
+      - name: Check operation inputs
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "本番release切替workflowはmainからだけ実行できます。" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.production_switch_confirmed }}" != "true" ]]; then
+            echo "本番release切替の影響確認が必要です。" >&2
+            exit 1
+          fi
+          if [[ ! "$CURRENT_RELEASE" =~ ^[0-9a-f]{40}$ || ! "$TARGET_RELEASE" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "現在releaseと対象releaseには完全な40文字のcommit SHAが必要です。" >&2
+            exit 1
+          fi
+          if [[ "$CURRENT_RELEASE" == "$TARGET_RELEASE" ]]; then
+            echo "現在releaseと対象releaseが同じです。" >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.operation }}" == "plan" ]]; then
+            if [[ -n "$REQUESTED_PLAN_ID" ]]; then
+              echo "planではplan_idを指定しないでください。" >&2
+              exit 1
+            fi
+          elif [[ ! "$REQUESTED_PLAN_ID" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "applyにはplanで表示された64文字のPlan IDが必要です。" >&2
+            exit 1
+          fi
+
+      - name: Check release switch configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          required_values=(
+            AWS_DEPLOY_ROLE_ARN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+            CLOUDFLARE_PAGES_PROJECT PUBLIC_APPLICATION_URL STACK_NAME
+          )
+          for value in "${required_values[@]}"; do
+            if [[ -z "${!value}" ]]; then
+              echo "GitHub Environmentの${value}が必要です。" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "$PUBLIC_APPLICATION_URL" =~ ^https://[A-Za-z0-9][A-Za-z0-9.-]*/?$ ]]; then
+            echo "PUBLIC_APPLICATION_URLはhttpsの公開URLで指定してください。" >&2
+            exit 1
+          fi
+
+      - name: Check out main history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify release direction and compatibility
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          for release in "$CURRENT_RELEASE" "$TARGET_RELEASE"; do
+            if ! git merge-base --is-ancestor "$release" origin/main; then
+              echo "release SHAはmainに含まれている必要があります: $release" >&2
+              exit 1
+            fi
+          done
+          if [[ "${{ inputs.direction }}" == "rollback" ]]; then
+            if ! git merge-base --is-ancestor "$TARGET_RELEASE" "$CURRENT_RELEASE"; then
+              echo "rollback対象は現在releaseの祖先である必要があります。" >&2
+              exit 1
+            fi
+          elif ! git merge-base --is-ancestor "$CURRENT_RELEASE" "$TARGET_RELEASE"; then
+            echo "restore対象は現在releaseの子孫である必要があります。" >&2
+            exit 1
+          fi
+          if ! git diff --quiet "$CURRENT_RELEASE" "$TARGET_RELEASE" -- \
+              infra/production/template.yaml src/football_scheduler/authorizer.py; then
+            echo "IaCまたは未version化authorizerに差分があるrelease間は簡易切替できません。" >&2
+            exit 1
+          fi
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install locked Python dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Authenticate to AWS with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Inspect current and target releases
+        id: inspect
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --output json --no-cli-pager > /tmp/release-switch-stacks.json
+          solver_function="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='SolverFunctionName'].OutputValue | [0]" \
+            --output text --no-cli-pager)"
+          aws lambda get-alias \
+            --function-name "$solver_function" --name live --region "$AWS_REGION" \
+            --output json --no-cli-pager > /tmp/release-switch-alias.json
+          aws lambda list-versions-by-function \
+            --function-name "$solver_function" --region "$AWS_REGION" \
+            --max-items 100 --output json --no-cli-pager > /tmp/release-switch-versions.json
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/release-switch-project.json
+          curl --fail --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments?env=production&per_page=100" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --output /tmp/release-switch-deployments.json
+          curl --fail --silent --show-error --head --max-time 20 \
+            "$PUBLIC_APPLICATION_URL" --output /tmp/release-switch-public-headers
+          plan_id="$(uv run python scripts/production_release_switch.py plan \
+            --project /tmp/release-switch-project.json \
+            --deployments /tmp/release-switch-deployments.json \
+            --versions /tmp/release-switch-versions.json \
+            --alias /tmp/release-switch-alias.json \
+            --stacks /tmp/release-switch-stacks.json \
+            --public-headers /tmp/release-switch-public-headers \
+            --direction "${{ inputs.direction }}" \
+            --expected-current-release "$CURRENT_RELEASE" \
+            --target-release "$TARGET_RELEASE" \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --project-name "$CLOUDFLARE_PAGES_PROJECT" \
+            --public-url "$PUBLIC_APPLICATION_URL" \
+            --plan-output /tmp/release-switch-plan.json \
+            --summary-output /tmp/release-switch-summary.md \
+            --github-output "$GITHUB_OUTPUT")"
+          cat /tmp/release-switch-summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ inputs.operation }}" == "apply" && "$plan_id" != "$REQUESTED_PLAN_ID" ]]; then
+            echo "現在状態がplan作成時から変化したため、releaseを切り替えません。" >&2
+            exit 1
+          fi
+
+      - name: Smoke-test target solver version before switching
+        if: ${{ inputs.operation == 'apply' }}
+        shell: bash
+        run: |
+          uv run python scripts/write_lambda_smoke_event.py /tmp/release-switch-smoke-event.json
+          aws lambda invoke \
+            --function-name "${{ steps.inspect.outputs.solver_function }}" \
+            --qualifier "${{ steps.inspect.outputs.target_solver_version }}" \
+            --payload fileb:///tmp/release-switch-smoke-event.json \
+            --cli-binary-format raw-in-base64-out --region "$AWS_REGION" \
+            --no-cli-pager /tmp/release-switch-target-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/release-switch-target-response.json --release-id "$TARGET_RELEASE"
+
+      - name: Switch solver live alias
+        if: ${{ inputs.operation == 'apply' }}
+        id: alias_switch
+        run: |
+          aws lambda update-alias \
+            --function-name "${{ steps.inspect.outputs.solver_function }}" \
+            --name live \
+            --function-version "${{ steps.inspect.outputs.target_solver_version }}" \
+            --revision-id "${{ steps.inspect.outputs.current_alias_revision }}" \
+            --region "$AWS_REGION" --no-cli-pager > /tmp/release-switch-alias-update.json
+
+      - name: Switch Cloudflare Pages deployment
+        if: ${{ inputs.operation == 'apply' }}
+        id: pages_switch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          curl --fail --silent --show-error --request POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${{ steps.inspect.outputs.target_pages_id }}/rollback" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{}' --output /tmp/release-switch-pages-response.json
+          uv run python scripts/production_release_switch.py check-cloudflare-response \
+            /tmp/release-switch-pages-response.json \
+            --deployment-id "${{ steps.inspect.outputs.target_pages_id }}"
+
+      - name: Verify switched public and solver releases
+        if: ${{ inputs.operation == 'apply' }}
+        shell: bash
+        run: |
+          public_ready=false
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --head --max-time 20 \
+                "$PUBLIC_APPLICATION_URL" --output /tmp/release-switch-new-public-headers \
+              && grep --ignore-case "x-release-id: $TARGET_RELEASE" \
+                /tmp/release-switch-new-public-headers; then
+              public_ready=true
+              break
+            fi
+            if [[ "$attempt" -lt 6 ]]; then
+              echo "公開URLのrelease切替を待っています（${attempt}/6）。"
+              sleep 10
+            fi
+          done
+          if [[ "$public_ready" != "true" ]]; then
+            echo "公開URLのrelease IDが対象releaseへ切り替わりませんでした。" >&2
+            exit 1
+          fi
+          aws lambda invoke \
+            --function-name "${{ steps.inspect.outputs.solver_function }}" \
+            --qualifier live \
+            --payload fileb:///tmp/release-switch-smoke-event.json \
+            --cli-binary-format raw-in-base64-out --region "$AWS_REGION" \
+            --no-cli-pager /tmp/release-switch-live-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/release-switch-live-response.json --release-id "$TARGET_RELEASE"
+          alarm_count="$(aws cloudwatch describe-alarms --region "$AWS_REGION" \
+            --state-value ALARM --query 'length(MetricAlarms)' --output text --no-cli-pager)"
+          if [[ "$alarm_count" != "0" ]]; then
+            echo "release切替後にALARM状態の監視項目があります。" >&2
+            exit 1
+          fi
+
+      - name: Compensate failed release switch
+        if: ${{ failure() && inputs.operation == 'apply' && steps.alias_switch.outcome == 'success' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          compensation_status=0
+          current_revision="$(aws lambda get-alias \
+            --function-name "${{ steps.inspect.outputs.solver_function }}" \
+            --name live --region "$AWS_REGION" --query RevisionId \
+            --output text --no-cli-pager)"
+          aws lambda update-alias \
+            --function-name "${{ steps.inspect.outputs.solver_function }}" \
+            --name live \
+            --function-version "${{ steps.inspect.outputs.current_solver_version }}" \
+            --revision-id "$current_revision" --region "$AWS_REGION" \
+            --no-cli-pager > /tmp/release-switch-alias-compensation.json \
+            || compensation_status=1
+          curl --fail --silent --show-error --request POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${{ steps.inspect.outputs.current_pages_id }}/rollback" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{}' --output /tmp/release-switch-pages-compensation.json \
+            || compensation_status=1
+          if [[ -s /tmp/release-switch-pages-compensation.json ]]; then
+            uv run python scripts/production_release_switch.py check-cloudflare-response \
+              /tmp/release-switch-pages-compensation.json \
+              --deployment-id "${{ steps.inspect.outputs.current_pages_id }}" \
+              || compensation_status=1
+          fi
+          exit "$compensation_status"
+
+      - name: Verify CloudFormation drift after restore
+        if: ${{ inputs.operation == 'apply' && inputs.direction == 'restore' }}
+        shell: bash
+        run: |
+          detection_id="$(aws cloudformation detect-stack-drift \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --query StackDriftDetectionId --output text --no-cli-pager)"
+          detection_status=""
+          stack_drift_status=""
+          for attempt in {1..12}; do
+            detection_status="$(aws cloudformation describe-stack-drift-detection-status \
+              --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
+              --query DetectionStatus --output text --no-cli-pager)"
+            if [[ "$detection_status" == "DETECTION_COMPLETE" ]]; then
+              stack_drift_status="$(aws cloudformation describe-stack-drift-detection-status \
+                --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
+                --query StackDriftStatus --output text --no-cli-pager)"
+              break
+            fi
+            if [[ "$detection_status" == "DETECTION_FAILED" ]]; then
+              break
+            fi
+            if [[ "$attempt" -lt 12 ]]; then
+              sleep 5
+            fi
+          done
+          if [[ "$detection_status" != "DETECTION_COMPLETE" || "$stack_drift_status" != "IN_SYNC" ]]; then
+            echo "restore後のCloudFormation driftを解消できていません。" >&2
+            exit 1
+          fi
+
+      - name: Record successful release switch
+        if: ${{ inputs.operation == 'apply' && success() }}
+        run: |
+          echo "## 本番release切替完了" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 操作: \`${{ inputs.direction }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 公開release: \`$TARGET_RELEASE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pages deployment: \`${{ steps.inspect.outputs.target_pages_id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Solver version: \`${{ steps.inspect.outputs.target_solver_version }}\`" >> "$GITHUB_STEP_SUMMARY"

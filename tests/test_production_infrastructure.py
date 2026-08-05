@@ -93,6 +93,34 @@ def test_bootstrap_allows_production_lambda_to_retrieve_solver_image() -> None:
     assert "Sid: DenyNonTLS" in repository_policy
 
 
+def test_bootstrap_allows_controlled_release_switch_checks() -> None:
+    template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
+    deploy_policy = template.split("        - PolicyName: DeployFootballScheduler\n", maxsplit=1)[
+        1
+    ].split("\n\nOutputs:", maxsplit=1)[0]
+
+    deployment_statement = deploy_policy.split(
+        "              - Sid: CloudFormationDeployment\n", maxsplit=1
+    )[1].split("              - Sid: ReadProductionStackDriftStatus\n", maxsplit=1)[0]
+    drift_status_statement = deploy_policy.split(
+        "              - Sid: ReadProductionStackDriftStatus\n", maxsplit=1
+    )[1].split("              - Sid: PassExecutionRole\n", maxsplit=1)[0]
+    lambda_statement = deploy_policy.split(
+        "              - Sid: LambdaReleaseChecksAndRollback\n", maxsplit=1
+    )[1].split("              - Sid: ReadProductionAlarms\n", maxsplit=1)[0]
+    alarm_statement = deploy_policy.split(
+        "              - Sid: ReadProductionAlarms\n", maxsplit=1
+    )[1].split("              - Sid: AccountPrerequisiteChecks\n", maxsplit=1)[0]
+
+    assert "- cloudformation:DetectStackDrift" in deployment_statement
+    assert "stack/${ProductionStackName}/*" in deployment_statement
+    assert "Action: cloudformation:DescribeStackDriftDetectionStatus" in drift_status_statement
+    assert 'Resource: "*"' in drift_status_statement
+    assert "- lambda:ListVersionsByFunction" in lambda_statement
+    assert "Action: cloudwatch:DescribeAlarms" in alarm_statement
+    assert 'Resource: "*"' in alarm_statement
+
+
 def test_pages_function_is_only_invoked_for_api_routes() -> None:
     routes = json.loads((_ROOT / "web/public/_routes.json").read_text(encoding="utf-8"))
 
