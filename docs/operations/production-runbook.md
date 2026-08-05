@@ -129,13 +129,13 @@ Pagesを配信する。以後も同じ手順で値を同期する。
 | secret | `TURNSTILE_SECRET_KEY` | Turnstile Siteverify用secret |
 | secret | `PUBLIC_USAGE_API_KEY` | AWSとPages Functionだけで共有するusage key |
 | secret | `CLOUDFLARE_API_TOKEN` | 対象Pages projectへのPages Write token |
+| secret | `BUDGET_NOTIFICATION_EMAIL` | 予算・alarm通知先。workflow logで個人情報をmaskするためsecretとして登録する |
 | variable | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
 | variable | `CLOUDFLARE_PAGES_PROJECT` | Direct Upload project名 |
 | variable | `PUBLIC_APPLICATION_URL` | `https://<project>.pages.dev`等の公開URL。本番Turnstile検証の許可hostnameにも使用する |
 | variable | `ECR_REPOSITORY_URI` | bootstrap出力のECR URI |
 | variable | `SAM_ARTIFACT_BUCKET` | bootstrap出力のartifact bucket名 |
 | variable | `TURNSTILE_SITE_KEY` | browserへ埋め込むTurnstile site key |
-| variable | `BUDGET_NOTIFICATION_EMAIL` | 予算・alarm通知先 |
 | variable | `PRODUCTION_STACK_NAME` | 既定は`football-scheduler-production` |
 
 secret値をチャット、issue、workflow log、commitへ貼り付けない。`PUBLIC_USAGE_API_KEY`は既存名を
