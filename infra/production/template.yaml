@@ -24,6 +24,10 @@ Parameters:
     NoEcho: true
     MinLength: 20
     Description: Cloudflare Turnstile Siteverify用secret
+  TurnstileExpectedHostname:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]|[A-Za-z0-9]"
+    Description: Turnstile検証で許可する本番フロントエンドhostname
   PublicUsageApiKeyValue:
     Type: String
     NoEcho: true
@@ -77,6 +81,7 @@ Resources:
         Variables:
           ORIGIN_VERIFY_VALUE: !Ref OriginVerifyValue
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          TURNSTILE_EXPECTED_HOSTNAME: !Ref TurnstileExpectedHostname
 
   ApiAuthorizerLogGroup:
     Type: AWS::Logs::LogGroup

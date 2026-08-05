@@ -76,6 +76,8 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
    `cd web && npx wrangler pages project create`を利用できる。
 2. Pages Write権限だけを持つAPI tokenを作る。
 3. Turnstile widgetを作り、公開hostnameとactionを設定する。
+   widgetにはローカル検証用の`localhost`と`127.0.0.1`も登録できるが、本番authorizerは
+   `PUBLIC_APPLICATION_URL`のhostnameだけを許可し、ローカルhostnameを受け付けない。
 4. Pages projectのSettings > Runtimeでfail closedを選ぶ。
 
 初回release workflowはAWS stackを作成した後、次の3値をPages Function secretへ設定してから
@@ -97,7 +99,7 @@ Pagesを配信する。以後も同じ手順で値を同期する。
 | secret | `CLOUDFLARE_API_TOKEN` | 対象Pages projectへのPages Write token |
 | variable | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
 | variable | `CLOUDFLARE_PAGES_PROJECT` | Direct Upload project名 |
-| variable | `PUBLIC_APPLICATION_URL` | `https://<project>.pages.dev`等の公開URL |
+| variable | `PUBLIC_APPLICATION_URL` | `https://<project>.pages.dev`等の公開URL。本番Turnstile検証の許可hostnameにも使用する |
 | variable | `ECR_REPOSITORY_URI` | bootstrap出力のECR URI |
 | variable | `SAM_ARTIFACT_BUCKET` | bootstrap出力のartifact bucket名 |
 | variable | `TURNSTILE_SITE_KEY` | browserへ埋め込むTurnstile site key |

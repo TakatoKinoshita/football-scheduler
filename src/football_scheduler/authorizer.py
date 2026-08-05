@@ -84,7 +84,13 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
 
     origin = headers.get("origin", "")
     parsed_origin = urlparse(origin)
-    if parsed_origin.scheme != "https" or not parsed_origin.hostname:
+    expected_hostname = os.getenv("TURNSTILE_EXPECTED_HOSTNAME", "").strip().casefold()
+    if (
+        parsed_origin.scheme != "https"
+        or not parsed_origin.hostname
+        or not expected_hostname
+        or parsed_origin.hostname.casefold() != expected_hostname
+    ):
         return _policy("anonymous", "Deny", method_arn, "BROWSER_ORIGIN_REJECTED")
 
     token = headers.get("x-turnstile-token", "")
@@ -104,7 +110,7 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
     if (
         result.get("success") is not True
         or not isinstance(hostname, str)
-        or hostname.casefold() != parsed_origin.hostname.casefold()
+        or hostname.casefold() != expected_hostname
         or action != _EXPECTED_ACTION
     ):
         return _policy("anonymous", "Deny", method_arn, "BOT_CHECK_REJECTED")

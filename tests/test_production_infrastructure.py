@@ -75,3 +75,12 @@ def test_release_checks_all_required_environment_configuration() -> None:
         "TURNSTILE_SECRET_KEY",
     }
     assert all(name in workflow for name in required_names)
+    assert 'echo "TURNSTILE_EXPECTED_HOSTNAME=$public_application_hostname"' in workflow
+    assert workflow.count('TurnstileExpectedHostname="$TURNSTILE_EXPECTED_HOSTNAME"') == 2
+
+
+def test_production_authorizer_receives_expected_frontend_hostname() -> None:
+    template = (_ROOT / "infra/production/template.yaml").read_text(encoding="utf-8")
+
+    assert "TurnstileExpectedHostname:" in template
+    assert "TURNSTILE_EXPECTED_HOSTNAME: !Ref TurnstileExpectedHostname" in template

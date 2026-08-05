@@ -16,6 +16,7 @@ web/coverage/
 web/playwright-report/
 web/test-results/
 .wrangler-build/
+.wrangler/
 build/
 *.egg-info/
 .aws-sam/

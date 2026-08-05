@@ -25,6 +25,11 @@ def _effect(result: dict[str, Any]) -> str:
     return str(result["policyDocument"]["Statement"][0]["Effect"])
 
 
+@pytest.fixture(autouse=True)
+def _set_production_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TURNSTILE_EXPECTED_HOSTNAME", "schedule.example.jp")
+
+
 def test_valid_proxy_header_and_turnstile_token_are_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -132,5 +137,61 @@ def test_http_browser_origin_is_denied(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         object(),
     )
+    assert _effect(result) == "Deny"
+    assert result["context"] == {"authorizationCode": "BROWSER_ORIGIN_REJECTED"}
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["https://localhost", "https://127.0.0.1", "https://other.example.jp"],
+)
+def test_non_production_origin_is_denied_before_turnstile(
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
+) -> None:
+    monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
+    monkeypatch.setattr(
+        authorizer,
+        "_verify_turnstile",
+        lambda *_: pytest.fail("Turnstile must not be called"),
+    )
+
+    result = authorizer.lambda_handler(
+        _event(
+            **{
+                "X-Origin-Verify": "origin-secret",
+                "Origin": origin,
+                "X-Turnstile-Token": "token",
+            }
+        ),
+        object(),
+    )
+
+    assert _effect(result) == "Deny"
+    assert result["context"] == {"authorizationCode": "BROWSER_ORIGIN_REJECTED"}
+
+
+def test_missing_expected_hostname_is_denied_before_turnstile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
+    monkeypatch.delenv("TURNSTILE_EXPECTED_HOSTNAME")
+    monkeypatch.setattr(
+        authorizer,
+        "_verify_turnstile",
+        lambda *_: pytest.fail("Turnstile must not be called"),
+    )
+
+    result = authorizer.lambda_handler(
+        _event(
+            **{
+                "X-Origin-Verify": "origin-secret",
+                "Origin": "https://schedule.example.jp",
+                "X-Turnstile-Token": "token",
+            }
+        ),
+        object(),
+    )
+
     assert _effect(result) == "Deny"
     assert result["context"] == {"authorizationCode": "BROWSER_ORIGIN_REJECTED"}
