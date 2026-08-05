@@ -60,6 +60,21 @@ def test_bootstrap_service_role_can_expand_sam_and_manage_alarms() -> None:
     ) in template
 
 
+def test_bootstrap_scopes_apigateway_service_linked_role_creation() -> None:
+    template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
+    statement = template.split(
+        "              - Sid: CreateApiGatewayServiceLinkedRole\n", maxsplit=1
+    )[1].split("\n\n  GitHubDeployRole:", maxsplit=1)[0]
+
+    assert "Action: iam:CreateServiceLinkedRole" in statement
+    assert (
+        "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/"
+        "ops.apigateway.amazonaws.com/AWSServiceRoleForAPIGateway"
+    ) in statement
+    assert "iam:AWSServiceName: ops.apigateway.amazonaws.com" in statement
+    assert "role/aws-service-role/*" not in statement
+
+
 def test_bootstrap_allows_production_lambda_to_retrieve_solver_image() -> None:
     template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
     repository_policy = template.split("      RepositoryPolicyText:\n", maxsplit=1)[1].split(

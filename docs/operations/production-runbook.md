@@ -102,6 +102,10 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
    - CloudFormation実行roleは、本番templateのresourceに必要なservice操作に加え、SAM transformの
      `cloudformation:CreateChangeSet`を
      `arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31`だけへ許可する。
+   - CloudFormation実行roleの`iam:CreateServiceLinkedRole`は、API Gatewayのservice principal
+     `ops.apigateway.amazonaws.com`とrole `AWSServiceRoleForAPIGateway`だけへ許可する。初回API
+     作成時にAPI Gatewayがこのaccount共通roleを自動作成するために必要であり、他serviceの
+     Service-Linked Role作成へ拡張しない。
    - ECR repository policyは、`lambda.amazonaws.com`による`ecr:BatchGetImage`と
      `ecr:GetDownloadUrlForLayer`だけを、同一account、同一region、
      `${ProductionStackName}-*`のLambda関数へ許可する。TLSを使わない通信の拒否も維持する。
@@ -330,3 +334,5 @@ bootstrap stackの削除は回復困難な操作を含む。対象、残すJSON 
 - [Pages rollback API](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/rollback/)
 - [Lambda reserved concurrency](https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html)
 - [Lambda container imageのECR権限](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html#images-permissions)
+- [API GatewayのService-Linked Role](https://docs.aws.amazon.com/apigateway/latest/developerguide/using-service-linked-roles.html)
+- [Service-Linked Roleの作成権限](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create-service-linked-role.html)
