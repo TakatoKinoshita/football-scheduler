@@ -295,13 +295,21 @@ jobs:
             --release-id "$RELEASE_ID" \
             --region "$AWS_REGION" \
             --summary-output /tmp/production-change-set-summary.md)"
-          change_set_type="$(aws cloudformation describe-change-set \
-            --change-set-name "$validated_arn" \
-            --query ChangeSetType --output text --no-cli-pager)"
-          if [[ "$change_set_type" != "CREATE" && "$change_set_type" != "UPDATE" ]]; then
-            echo "change set typeがCREATEまたはUPDATEではありません。" >&2
-            exit 1
-          fi
+          stack_status="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].StackStatus' --output text --no-cli-pager)"
+          case "$stack_status" in
+            REVIEW_IN_PROGRESS)
+              change_set_type="CREATE"
+              ;;
+            CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)
+              change_set_type="UPDATE"
+              ;;
+            *)
+              echo "本番stackがchange setを実行できる安定状態ではありません: $stack_status" >&2
+              exit 1
+              ;;
+          esac
           cat /tmp/production-change-set-summary.md >> "$GITHUB_STEP_SUMMARY"
           echo "change_set_arn=$validated_arn" >> "$GITHUB_OUTPUT"
           echo "type=$change_set_type" >> "$GITHUB_OUTPUT"

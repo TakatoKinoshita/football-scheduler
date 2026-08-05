@@ -86,6 +86,18 @@ def test_apply_requires_main_release_sha_and_validated_change_set() -> None:
     assert '--region "$AWS_REGION"' in workflow
 
 
+def test_apply_chooses_waiter_from_stable_stack_state() -> None:
+    workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
+
+    assert "--query ChangeSetType" not in workflow
+    assert 'stack_status="$(aws cloudformation describe-stacks' in workflow
+    assert "REVIEW_IN_PROGRESS)" in workflow
+    assert 'change_set_type="CREATE"' in workflow
+    assert "CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)" in workflow
+    assert 'change_set_type="UPDATE"' in workflow
+    assert "本番stackがchange setを実行できる安定状態ではありません" in workflow
+
+
 def test_release_checks_all_required_environment_configuration() -> None:
     workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
 
