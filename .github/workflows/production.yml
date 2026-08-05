@@ -102,6 +102,17 @@ jobs:
               exit 1
             fi
           done
+          if [[ "$PUBLIC_APPLICATION_URL" =~ ^https://([A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]|[A-Za-z0-9])/?$ ]]; then
+            public_application_hostname="${BASH_REMATCH[1],,}"
+          else
+            echo "PUBLIC_APPLICATION_URLはhttpsの公開URLで指定してください。" >&2
+            exit 1
+          fi
+          if [[ "$public_application_hostname" == "localhost" || "$public_application_hostname" == "127.0.0.1" ]]; then
+            echo "PUBLIC_APPLICATION_URLには本番hostnameが必要です。" >&2
+            exit 1
+          fi
+          echo "TURNSTILE_EXPECTED_HOSTNAME=$public_application_hostname" >> "$GITHUB_ENV"
 
       - name: Check out release commit
         uses: actions/checkout@v6
@@ -213,6 +224,7 @@ jobs:
               ReleaseId="$RELEASE_ID" \
               OriginVerifyValue="${{ secrets.ORIGIN_VERIFY_VALUE }}" \
               TurnstileSecretKey="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+              TurnstileExpectedHostname="$TURNSTILE_EXPECTED_HOSTNAME" \
               PublicUsageApiKeyValue="${{ secrets.PUBLIC_USAGE_API_KEY }}" \
               EnableBudgetNotifications=true \
               BudgetNotificationEmail="${{ vars.BUDGET_NOTIFICATION_EMAIL }}"
@@ -230,6 +242,7 @@ jobs:
               ReleaseId="$RELEASE_ID" \
               OriginVerifyValue="${{ secrets.ORIGIN_VERIFY_VALUE }}" \
               TurnstileSecretKey="${{ secrets.TURNSTILE_SECRET_KEY }}" \
+              TurnstileExpectedHostname="$TURNSTILE_EXPECTED_HOSTNAME" \
               PublicUsageApiKeyValue="${{ secrets.PUBLIC_USAGE_API_KEY }}" \
               EnableBudgetNotifications=true \
               BudgetNotificationEmail="${{ vars.BUDGET_NOTIFICATION_EMAIL }}"

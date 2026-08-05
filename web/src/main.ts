@@ -145,6 +145,7 @@ const autosave = new AutosaveController((value) => storage.saveDraft(value));
 let documentState = createTournamentDocument();
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
+let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 
 const nameInput = requiredElement<HTMLInputElement>("#tournament-name");
 const teamsInput = requiredElement<HTMLTextAreaElement>("#teams");
@@ -506,6 +507,7 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
 generateButton.addEventListener("click", () => {
   updateDraft();
   generateButton.disabled = true;
+  generationStatusOwner = "generation";
   generationStatus.textContent = "日程を生成しています。画面を閉じずにお待ちください…";
   void generateSchedule(documentState.tournament.input, turnstileToken)
     .then((result) => {
@@ -568,14 +570,18 @@ function setupTurnstile(): void {
       action: "generate_schedule",
       callback: (token) => {
         turnstileToken = token;
-        generationStatus.textContent = "安全確認が完了しました。";
+        if (generationStatusOwner === "turnstile") {
+          generationStatus.textContent = "安全確認が完了しました。";
+        }
       },
       "expired-callback": () => {
         turnstileToken = "";
+        generationStatusOwner = "turnstile";
         generationStatus.textContent = "安全確認の期限が切れました。もう一度確認してください。";
       },
       "error-callback": () => {
         turnstileToken = "";
+        generationStatusOwner = "turnstile";
         generationStatus.textContent = "安全確認を完了できませんでした。通信状態を確認してください。";
       },
     });
