@@ -36,6 +36,19 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("新しい1日目リーグ形式はmatchesなしで読み込む", () => {
+    const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("未知のschema versionを利用者向けメッセージで拒否する", () => {
     const document = validDocument() as unknown as Record<string, unknown>;
     document.schemaVersion = "9.9.9";

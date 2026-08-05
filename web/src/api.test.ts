@@ -47,4 +47,30 @@ describe("日程生成API", () => {
       message: "時間内に日程を生成できませんでした。",
     });
   });
+
+  it("API診断の項目別詳細を表示用エラーに保持する", async () => {
+    const details = {
+      errors: [{ field: "league.block_count", type: "missing" }],
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "error",
+          diagnostics: [
+            {
+              code: "INPUT_SCHEMA_INVALID",
+              message: "大会設定を修正してください。",
+              details,
+            },
+          ],
+        }),
+        { status: 400 },
+      ),
+    );
+
+    await expect(generateSchedule({}, "token", fetchMock)).rejects.toMatchObject({
+      code: "INPUT_SCHEMA_INVALID",
+      details,
+    });
+  });
 });

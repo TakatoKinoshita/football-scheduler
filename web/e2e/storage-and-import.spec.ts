@@ -3,12 +3,15 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 import { tournamentFixture } from "./fixtures";
-import { importDocument, openReadyApp } from "./helpers";
+import { importDocument, mockExternalServices, openApp } from "./helpers";
 
 test("自動保存後の再読み込みで入力を復元する", async ({ page }) => {
-  await openReadyApp(page);
+  await mockExternalServices(page);
+  await openApp(page);
   await page.locator("#tournament-name").fill("自動保存大会");
   await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("1");
   await page.locator("#courts").fill("Aコート");
   await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
 
@@ -20,7 +23,8 @@ test("自動保存後の再読み込みで入力を復元する", async ({ page 
 });
 
 test("直前確定状態への復元と削除取消しができる", async ({ page }) => {
-  await openReadyApp(page);
+  await mockExternalServices(page);
+  await openApp(page);
   const name = page.locator("#tournament-name");
 
   await name.fill("第1版");
@@ -49,9 +53,12 @@ test("直前確定状態への復元と削除取消しができる", async ({ pa
 });
 
 test("JSONを書き出し、別の有効な大会を読み込める", async ({ page }) => {
-  await openReadyApp(page);
+  await mockExternalServices(page);
+  await openApp(page);
   await page.locator("#tournament-name").fill("書き出し大会");
   await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("1");
   await page.locator("#courts").fill("Aコート");
 
   const downloadPromise = page.waitForEvent("download");
@@ -71,7 +78,8 @@ test("JSONを書き出し、別の有効な大会を読み込める", async ({ p
 });
 
 test("不正JSONでは現在の大会を変更しない", async ({ page }) => {
-  await openReadyApp(page);
+  await mockExternalServices(page);
+  await openApp(page);
   await page.locator("#tournament-name").fill("変更前の大会");
   await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
 

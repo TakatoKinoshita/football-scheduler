@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { tournamentFixture } from "./fixtures";
 import {
   GENERATE_API,
+  advanceToGeneration,
   importDocument,
   mockExternalServices,
   openReadyApp,
@@ -15,7 +16,8 @@ test("初回online表示後はofflineでも保存済み結果と印刷内容を�
 }) => {
   await openReadyApp(page);
   await importDocument(page, tournamentFixture());
-  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await advanceToGeneration(page);
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
   await expect(page.locator("#generation-status")).toContainText("この端末へ保存しました");
   await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
 
@@ -32,21 +34,28 @@ test("初回online表示後はofflineでも保存済み結果と印刷内容を�
   await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
   await expect(page.locator("#result-content")).toContainText("青空FC 対 みどりSC");
   await expect(page.locator("#result-content")).toContainText("チーム別予定");
+  await page.getByRole("button", { name: "設定へ戻る" }).click();
   await expect(page.locator("#turnstile-widget")).toContainText(
     "安全確認を読み込めませんでした",
   );
   await expect(page.locator("#generation-status")).toContainText(
     "安全確認を読み込めませんでした",
   );
-  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeDisabled();
 });
 
 test("Turnstile APIの読込み中は生成できず、安全確認後だけ生成できる", async ({ page }) => {
   await mockExternalServices(page, { completeTurnstile: false });
   await page.goto("/");
+  await page.locator("#tournament-name").fill("安全確認大会");
+  await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("1");
+  await page.locator("#courts").fill("Aコート");
+  await advanceToGeneration(page);
 
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
-  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeDisabled();
   await page.evaluate(() => {
     const options = (
       window as Window & {
@@ -57,7 +66,7 @@ test("Turnstile APIの読込み中は生成できず、安全確認後だけ生�
     options.callback("e2e-turnstile-token");
   });
   await expect(page.locator("#generation-status")).toContainText("安全確認が完了しました");
-  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
 });
 
 test("Turnstile APIを初期化できない場合は日本語で案内して生成を無効にする", async ({
@@ -67,12 +76,18 @@ test("Turnstile APIを初期化できない場合は日本語で案内して生�
     await route.fulfill({ contentType: "application/javascript", body: "window.turnstile = {};" });
   });
   await page.goto("/");
+  await page.locator("#tournament-name").fill("安全確認大会");
+  await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("1");
+  await page.locator("#courts").fill("Aコート");
+  await advanceToGeneration(page);
 
   await expect(page.locator("#turnstile-widget")).toContainText("安全確認を初期化できませんでした");
   await expect(page.locator("#generation-status")).toContainText(
     "安全確認を初期化できませんでした",
   );
-  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeDisabled();
 });
 
 test("安全確認の期限が切れたら生成を無効にして再確認を案内する", async ({ page }) => {
@@ -88,7 +103,7 @@ test("安全確認の期限が切れたら生成を無効にして再確認を�
   });
 
   await expect(page.locator("#generation-status")).toContainText("安全確認の期限が切れました");
-  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeDisabled();
 });
 
 for (const viewport of [

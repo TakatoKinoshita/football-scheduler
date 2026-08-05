@@ -4,6 +4,7 @@ import {
   type JsonObject,
   type TournamentDocument,
 } from "./types";
+import { isDay1LeagueInput, normalizeDocument } from "./day1-form";
 
 export const MAX_JSON_BYTES = 1_000_000;
 export const LIMITS = {
@@ -159,7 +160,9 @@ export function parseTournamentJson(text: string): TournamentDocument {
   const teams = arrayValue(input.teams, "チーム", LIMITS.teams);
   const courts = arrayValue(input.courts, "コート", LIMITS.courts);
   uniqueIds(courts, "コート");
-  const matches = arrayValue(input.matches, "試合", LIMITS.matches);
+  const matches = isDay1LeagueInput(input)
+    ? []
+    : arrayValue(input.matches, "試合", LIMITS.matches);
   validateReferences(input, teams, matches);
   if (tournament.result !== undefined) {
     objectValue(tournament.result, "生成結果を読み取れませんでした。");
@@ -168,7 +171,8 @@ export function parseTournamentJson(text: string): TournamentDocument {
     throw new ImportValidationError("INVALID_DOCUMENT", "保存日時を読み取れませんでした。");
   }
 
-  return structuredClone(root) as unknown as TournamentDocument;
+  const document = structuredClone(root) as unknown as TournamentDocument;
+  return normalizeDocument(document).document;
 }
 
 export function serializeTournamentJson(document: TournamentDocument): string {

@@ -8,6 +8,7 @@ export class ScheduleApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
+    public readonly details?: JsonObject,
   ) {
     super(message);
     this.name = "ScheduleApiError";
@@ -64,6 +65,11 @@ export async function generateSchedule(
           typeof diagnostic.message === "string"
             ? diagnostic.message
             : "日程を生成できませんでした。入力内容を確認してください。",
+          typeof diagnostic.details === "object" &&
+            diagnostic.details !== null &&
+            !Array.isArray(diagnostic.details)
+            ? (diagnostic.details as JsonObject)
+            : undefined,
         );
       }
       throw new ScheduleApiError("GENERATION_FAILED", "日程を生成できませんでした。時間をおいて再度お試しください。");
