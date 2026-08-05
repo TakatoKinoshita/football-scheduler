@@ -27,6 +27,17 @@ def test_bootstrap_uses_immutable_github_oidc_subject() -> None:
     assert "repo:${GitHubOwner}/${GitHubRepository}:environment:production" not in template
 
 
+def test_bootstrap_service_role_can_expand_sam_and_manage_alarms() -> None:
+    template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
+
+    assert "- cloudwatch:*" in template
+    assert "Sid: ExpandServerlessTransform" in template
+    assert "Action: cloudformation:CreateChangeSet" in template
+    assert (
+        "arn:${AWS::Partition}:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
+    ) in template
+
+
 def test_pages_function_is_only_invoked_for_api_routes() -> None:
     routes = json.loads((_ROOT / "web/public/_routes.json").read_text(encoding="utf-8"))
 
