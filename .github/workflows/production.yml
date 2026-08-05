@@ -412,9 +412,22 @@ jobs:
       - name: Smoke-test public application shell
         if: ${{ inputs.operation == 'apply' }}
         run: |
-          response_headers="$(curl --fail --silent --show-error --head "$PUBLIC_APPLICATION_URL")"
-          echo "$response_headers" | grep --ignore-case "x-release-id: $RELEASE_ID"
-          curl --fail --silent --show-error "$PUBLIC_APPLICATION_URL" | grep "大会日程スケジューラー"
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --head --max-time 20 \
+                "$PUBLIC_APPLICATION_URL" --output /tmp/public-response-headers \
+              && grep --ignore-case "x-release-id: $RELEASE_ID" /tmp/public-response-headers \
+              && curl --fail --silent --show-error --max-time 20 \
+                "$PUBLIC_APPLICATION_URL" --output /tmp/public-response-body \
+              && grep "大会日程スケジューラー" /tmp/public-response-body; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 6 ]]; then
+              echo "公開URLの反映を待っています（${attempt}/6）。"
+              sleep 10
+            fi
+          done
+          echo "公開URLでrelease IDとアプリケーション画面を確認できませんでした。" >&2
+          exit 1
 
       - name: Roll back Cloudflare Pages after failure
         if: ${{ failure() && inputs.operation == 'apply' && steps.pages.outcome == 'success' && steps.previous.outputs.pages != '' }}
