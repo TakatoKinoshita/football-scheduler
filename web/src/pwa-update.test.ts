@@ -30,26 +30,32 @@ function registrationFixture(): {
 describe("setupPwaUpdates", () => {
   it("利用者が更新を承認したら待機中のservice workerを有効化する", () => {
     const fixture = registrationFixture();
+    const confirmRefresh = vi.fn(() => true);
 
     setupPwaUpdates(fixture.register, {
-      confirmRefresh: () => true,
+      confirmRefresh,
       onOfflineReady: vi.fn(),
     });
     fixture.callbacks().onNeedRefresh();
+    fixture.callbacks().onNeedRefresh();
 
+    expect(confirmRefresh).toHaveBeenCalledOnce();
     expect(fixture.update).toHaveBeenCalledOnce();
     expect(fixture.update).toHaveBeenCalledWith(true);
   });
 
   it("利用者が更新を保留したら現在の画面を維持する", () => {
     const fixture = registrationFixture();
+    const confirmRefresh = vi.fn(() => false);
 
     setupPwaUpdates(fixture.register, {
-      confirmRefresh: () => false,
+      confirmRefresh,
       onOfflineReady: vi.fn(),
     });
     fixture.callbacks().onNeedRefresh();
+    fixture.callbacks().onNeedRefresh();
 
+    expect(confirmRefresh).toHaveBeenCalledOnce();
     expect(fixture.update).not.toHaveBeenCalled();
   });
 
