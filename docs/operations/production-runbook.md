@@ -65,9 +65,41 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
 
 1. GitHub Actions用OIDC provider `token.actions.githubusercontent.com`が対象AWS accountに
    存在することを確認する。audienceは`sts.amazonaws.com`とする。
-2. `bootstrap.yaml`を管理者が`us-east-1`へ一度だけデプロイする。
-3. 出力値をGitHubの`production` Environmentへ登録する。
-4. Environmentのdeployment branchを`main`だけにし、required reviewerをrepository所有者にする。
+2. GitHub repositoryのOIDC設定とimmutable subjectに使うIDを確認する。
+
+   ```console
+   gh api repos/OWNER/REPOSITORY/actions/oidc/customization/sub
+   gh api repos/OWNER/REPOSITORY --jq '{owner_id: .owner.id, repository_id: .id}'
+   ```
+
+   GitHubのimmutable subjectを使用するrepositoryでは、`sub_claim_prefix`が
+   `repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`形式になっていることを確認する。本番roleが
+   許可する完全なsubjectは、このprefixに`:environment:production`を加えた値とする。表示名だけの
+   旧形式やワイルドカードを追加して認証エラーを回避してはならない。
+3. `bootstrap.yaml`を管理者が`us-east-1`へ一度だけデプロイする。GitHub APIで確認したowner IDと
+   repository IDをparameterへ指定する。
+
+   ```console
+   aws cloudformation deploy \
+     --template-file infra/production/bootstrap.yaml \
+     --stack-name football-scheduler-production-bootstrap \
+     --region us-east-1 \
+     --capabilities CAPABILITY_IAM \
+     --parameter-overrides \
+       GitHubOidcProviderArn=OIDC_PROVIDER_ARN \
+       GitHubOwner=OWNER \
+       GitHubOwnerId=OWNER_ID \
+       GitHubRepository=REPOSITORY \
+       GitHubRepositoryId=REPOSITORY_ID \
+       ProductionStackName=football-scheduler-production \
+     --no-fail-on-empty-changeset \
+     --no-cli-pager
+   ```
+
+4. 作成されたGitHub deploy roleの信頼policyが、上記の完全なsubjectと
+   audience `sts.amazonaws.com`だけを許可していることを確認する。
+5. 出力値をGitHubの`production` Environmentへ登録する。
+6. Environmentのdeployment branchを`main`だけにし、required reviewerをrepository所有者にする。
    唯一のcollaborator本人が承認するため、prevent self-reviewは無効にする。
 
 ### 3.2 Cloudflare

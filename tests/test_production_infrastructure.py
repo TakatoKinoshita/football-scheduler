@@ -15,6 +15,18 @@ def test_production_template_contains_only_aws_api_backend() -> None:
     assert "AWS::S3::Bucket" not in template
 
 
+def test_bootstrap_uses_immutable_github_oidc_subject() -> None:
+    template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
+
+    assert "GitHubOwnerId:" in template
+    assert "GitHubRepositoryId:" in template
+    assert (
+        "repo:${GitHubOwner}@${GitHubOwnerId}/"
+        "${GitHubRepository}@${GitHubRepositoryId}:environment:production"
+    ) in template
+    assert "repo:${GitHubOwner}/${GitHubRepository}:environment:production" not in template
+
+
 def test_pages_function_is_only_invoked_for_api_routes() -> None:
     routes = json.loads((_ROOT / "web/public/_routes.json").read_text(encoding="utf-8"))
 
