@@ -87,8 +87,17 @@ def test_release_checks_all_required_environment_configuration() -> None:
         "TURNSTILE_SECRET_KEY",
     }
     assert all(name in workflow for name in required_names)
+    assert "BUDGET_NOTIFICATION_EMAIL: ${{ secrets.BUDGET_NOTIFICATION_EMAIL }}" in workflow
+    assert "${{ vars.BUDGET_NOTIFICATION_EMAIL }}" not in workflow
+    assert workflow.count('BudgetNotificationEmail="$BUDGET_NOTIFICATION_EMAIL"') == 2
     assert 'echo "TURNSTILE_EXPECTED_HOSTNAME=$public_application_hostname"' in workflow
     assert workflow.count('TurnstileExpectedHostname="$TURNSTILE_EXPECTED_HOSTNAME"') == 2
+
+
+def test_sam_deploy_uses_bootstrap_ecr_repository() -> None:
+    workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
+
+    assert '--image-repository "$ECR_REPOSITORY_URI"' in workflow
 
 
 def test_production_authorizer_receives_expected_frontend_hostname() -> None:
