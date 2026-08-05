@@ -235,7 +235,7 @@ jobs:
             --s3-bucket "${{ vars.SAM_ARTIFACT_BUCKET }}" \
             --image-repository "$ECR_REPOSITORY_URI" \
             --role-arn "${{ secrets.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}" \
-            --capabilities CAPABILITY_IAM \
+            --capabilities CAPABILITY_NAMED_IAM \
             --no-execute-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \

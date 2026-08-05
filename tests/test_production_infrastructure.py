@@ -15,6 +15,28 @@ def test_production_template_contains_only_aws_api_backend() -> None:
     assert "AWS::S3::Bucket" not in template
 
 
+def test_production_roles_have_names_within_execution_role_scope() -> None:
+    template = (_ROOT / "infra/production/template.yaml").read_text(encoding="utf-8")
+    workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
+
+    assert 'RoleName: !Sub "${AWS::StackName}-authorizer-role"' in template
+    assert 'RoleName: !Sub "${AWS::StackName}-solver-role"' in template
+    assert 'RoleName: !Sub "${AWS::StackName}-apigateway-cloudwatch-role"' in template
+    assert "Role: !GetAtt ApiAuthorizerFunctionRole.Arn" in template
+    assert "Role: !GetAtt SolverFunctionRole.Arn" in template
+    assert "--capabilities CAPABILITY_NAMED_IAM" in workflow
+    assert "--capabilities CAPABILITY_IAM" not in workflow
+
+
+def test_budget_notification_email_is_masked_by_cloudformation() -> None:
+    template = (_ROOT / "infra/production/template.yaml").read_text(encoding="utf-8")
+
+    parameter = template.split("  BudgetNotificationEmail:\n", maxsplit=1)[1].split(
+        "  MonthlyBudgetUsd:\n", maxsplit=1
+    )[0]
+    assert "    NoEcho: true\n" in parameter
+
+
 def test_bootstrap_uses_immutable_github_oidc_subject() -> None:
     template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
 

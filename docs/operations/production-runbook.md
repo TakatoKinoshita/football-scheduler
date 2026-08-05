@@ -147,6 +147,8 @@ secret値をチャット、issue、workflow log、commitへ貼り付けない。
 維持しているが、代替構成ではbrowserへ公開しない。secret rotationは通常releaseと分けて行い、
 AWSとPages Functionを同時に切り替えて疎通確認する。rotation中は旧Lambda versionだけへ戻すと
 secretが不一致になるため、旧値を安全に保持した手順を別途準備する。
+`BudgetNotificationEmail`もCloudFormationの`NoEcho` parameterとして扱い、stack照会やeventで
+通知先を平文表示しない。
 
 ## 4. リリース
 
@@ -188,6 +190,11 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
 7. 公開画面の`X-Release-Id`とapp shellを確認する。失敗時は直前のPages deploymentとLambda
    aliasへrollbackする。
 
+本番template内のLambda実行roleとAPI Gateway CloudWatch roleは、
+`football-scheduler-production-*`形式の明示名を使用する。これによりCloudFormation実行roleの
+IAM scope内に限定し、SAMやCloudFormationによる自動生成名の短縮へ依存しない。named IAM resourceを
+含むため、planでは`CAPABILITY_NAMED_IAM`を指定する。
+
 ### 4.3 Planを取り消す場合
 
 change setを実行しないと決めた場合は、対象stack、region、ARN、状態をread-only確認してから
@@ -220,6 +227,16 @@ aws cloudformation delete-stack \
 
 planでpushしたECR imageとSAM artifactは実行resourceではないため、直ちに手動削除しない。
 bootstrapで定義したECRの直近10 image保持とS3の30日expirationに委ねる。
+
+### 4.4 初回作成のrollbackが失敗した場合
+
+初回stack作成が`ROLLBACK_FAILED`になった場合は、stack eventsと各resourceの実体をread-onlyで
+確認する。権限不足で作成自体に失敗したresourceを、存在確認なしに手動削除してはならない。
+
+修正版を再planする前に、ユーザーの個別承認を得て通常のstack削除を実行する。削除が
+`DELETE_FAILED`になった場合だけ、実体が存在しないことを再確認した失敗resourceのLogical IDを
+`--retain-resources`へ指定してstack記録を除去する。実体があるresourceはretainで隠さず、削除または
+保持の影響を個別に判断する。
 
 browserはAPI keyを持たず、同一originのPages Functionだけを呼ぶ。Pages Functionは1 MB上限を
 確認し、origin確認secretとusage keyをAWSへ付与する。Lambda adapterでもdecoded body sizeを
