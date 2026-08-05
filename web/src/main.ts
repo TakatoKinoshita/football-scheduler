@@ -15,6 +15,7 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
+import { setupPwaUpdates } from "./pwa-update";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
   cloneDocument,
@@ -1104,13 +1105,10 @@ function inferOrganizerCapacityTouched(): boolean {
   return typeof capacity === "number" && capacity !== Math.max(1, courtCount);
 }
 
-registerSW({
-  onNeedRefresh() {
-    if (window.confirm("新しい版を利用できます。入力を保存して画面を更新しますか？")) {
-      window.location.reload();
-    }
-  },
-  onOfflineReady() {
+setupPwaUpdates(registerSW, {
+  confirmRefresh: () =>
+    window.confirm("新しい版を利用できます。入力を保存して画面を更新しますか？"),
+  onOfflineReady: () => {
     backupStatus.textContent =
       "オフラインでも保存済みの内容を確認できる準備が整いました。";
   },
