@@ -11,9 +11,17 @@ Parameters:
   GitHubOwner:
     Type: String
     AllowedPattern: "[A-Za-z0-9_.-]+"
+  GitHubOwnerId:
+    Type: String
+    Description: GitHub OIDCのimmutable subjectに含まれるrepository owner ID
+    AllowedPattern: "[0-9]+"
   GitHubRepository:
     Type: String
     AllowedPattern: "[A-Za-z0-9_.-]+"
+  GitHubRepositoryId:
+    Type: String
+    Description: GitHub OIDCのimmutable subjectに含まれるrepository ID
+    AllowedPattern: "[0-9]+"
   ProductionStackName:
     Type: String
     Default: football-scheduler-production
@@ -133,7 +141,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/${GitHubRepository}:environment:production"
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:production"
       MaxSessionDuration: 3600
       Policies:
         - PolicyName: DeployFootballScheduler
