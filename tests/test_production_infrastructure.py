@@ -121,7 +121,8 @@ def test_public_pages_smoke_test_has_bounded_propagation_retry() -> None:
     assert smoke_step.count("--max-time 20") == 2
     assert "while" not in smoke_step
     assert 'grep --ignore-case "x-release-id: $RELEASE_ID"' in smoke_step
-    assert "大会日程スケジューラー" in smoke_step
+    assert '"<title>地域サッカー大会スケジューラー</title>"' in smoke_step
+    assert 'grep "大会日程スケジューラー"' not in smoke_step
 
 
 def test_production_workflow_separates_plan_from_apply() -> None:
