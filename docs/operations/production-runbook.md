@@ -6,9 +6,10 @@
 CloudWatch、AWS Budgetsを使用する。大会データはbrowserのIndexedDBとJSONファイルだけに
 保存し、CloudflareとAWSには永続保存しない。
 
-現時点では本番リソースを作成・公開していない。対象AWS accountのLambda同時実行quotaは
-2026年8月5日に`1000`と確認できており、必要値`106`以上の条件を満たしている。quotaによる
-公開blockerは解消済みである。
+本番リソースは2026年8月6日に作成・公開済みであり、公開URLは
+`https://football-scheduler-jp.pages.dev`である。初回の1日目リーグ日程生成を受入確認した
+releaseは`8bfe4228098fb40dfe4aab1476431d3aa536692a`である。対象AWS accountのLambda同時実行
+quotaは2026年8月5日に`1000`と確認できており、必要値`106`以上の条件を満たしている。
 
 本番templateは[infra/production/template.yaml](../../infra/production/template.yaml)、初回だけ必要な
 AWS OIDC role、CloudFormation実行role、ECR、SAM artifact bucketは
@@ -177,7 +178,7 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 
 初回planでは全resourceが`Add`で、`Remove`、`Modify`、replacementがないことを必須とする。
 change setが`CREATE_COMPLETE`かつ`AVAILABLE`であることを確認し、ARNとrelease SHAをapply用に
-記録する。今回の初回dry-runはここで停止し、change setを実行しない。
+記録する。初回dry-runではここで停止し、change setを実行しない。
 
 ### 4.2 Apply: 承認済みchange setの実行と公開
 
@@ -201,6 +202,25 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
 `football-scheduler-production-*`形式の明示名を使用する。これによりCloudFormation実行roleの
 IAM scope内に限定し、SAMやCloudFormationによる自動生成名の短縮へ依存しない。named IAM resourceを
 含むため、planでは`CAPABILITY_NAMED_IAM`を指定する。
+
+### 4.2.1 公開後の受入確認
+
+2026年8月6日にrelease `8bfe4228098fb40dfe4aab1476431d3aa536692a`で次を確認した。
+
+- 公開画面とAPIの`X-Release-Id`がrelease SHAと一致する。
+- smartphone、tablet、PCで4段階ウィザードを操作でき、横方向のoverflowがない。
+- 2チーム、1ブロック、1コートから1日目のリーグ1試合を生成でき、独立制約検証に合格する。
+- ブロック分け、日程表、チーム別予定、印刷画面を表示できる。
+- 一度online表示した画面をofflineで再読込みでき、保存済み結果と印刷画面へ到達できる。
+- 生成requestはHTTP 200で完了し、API GatewayとLambdaのログに大会名、チーム名、入力、結果を
+  記録していない。受入確認後に5xx、throttle、ALARMは発生していない。
+
+PWAの更新通知は、同じ画面を開いている間に1回だけ表示する。利用者が更新を承認した場合は、
+入力を保存して待機中のService Workerを有効化してから再読込みする。更新を見送った場合は現在の
+画面を維持し、同じ更新について確認dialogを連続表示しない。
+
+文書だけを変更したcommitでは本番artifactを再配信しない。この場合、`main`の最新SHAと公開中の
+`X-Release-Id`が異なることは意図した状態であり、次のコードreleaseで再び一致させる。
 
 ### 4.3 Planを取り消す場合
 
