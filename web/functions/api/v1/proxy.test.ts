@@ -47,6 +47,7 @@ describe("Cloudflare Pages API proxy", () => {
     expect(String(target)).toBe(
       "https://api-id.execute-api.us-east-1.amazonaws.com/prod/api/v1/schedules:generate",
     );
+    expect(options?.redirect).toBe("manual");
     const forwarded = new Headers(options?.headers);
     expect(forwarded.get("origin")).toBe("https://schedule.pages.dev");
     expect(forwarded.get("x-origin-verify")).toBe(environment.ORIGIN_VERIFY_VALUE);
@@ -76,6 +77,24 @@ describe("Cloudflare Pages API proxy", () => {
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("short");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("AWS APIからのredirectを追跡せず利用者へ転送しない", async () => {
+    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
+      new Response("redirect response body", {
+        status: 307,
+        headers: { location: "https://unexpected.example/secret-path" },
+      }),
+    );
+
+    const response = await proxyScheduleRequest(request(), environment, fetchMock);
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("location")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain("UPSTREAM_REDIRECT_REJECTED");
+    expect(body).not.toContain("unexpected.example");
+    expect(body).not.toContain("redirect response body");
   });
 
   it("API以外のpathを転送しない", async () => {
