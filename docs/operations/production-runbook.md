@@ -96,8 +96,13 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
      --no-cli-pager
    ```
 
-4. 作成されたGitHub deploy roleの信頼policyが、上記の完全なsubjectと
-   audience `sts.amazonaws.com`だけを許可していることを確認する。
+4. 作成されたroleのpolicyを確認する。
+   - GitHub deploy roleの信頼policyは、上記の完全なsubjectとaudience `sts.amazonaws.com`だけを
+     許可する。
+   - CloudFormation実行roleは、本番templateのresourceに必要なservice操作に加え、SAM transformの
+     `cloudformation:CreateChangeSet`を
+     `arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31`だけへ許可する。
+   - 本番templateへresource typeを追加するときは、CloudFormation実行roleの権限も同時に更新する。
 5. 出力値をGitHubの`production` Environmentへ登録する。
 6. Environmentのdeployment branchを`main`だけにし、required reviewerをrepository所有者にする。
    唯一のcollaborator本人が承認するため、prevent self-reviewは無効にする。

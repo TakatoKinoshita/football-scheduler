@@ -105,12 +105,17 @@ Resources:
                 Action:
                   - apigateway:*
                   - budgets:*
+                  - cloudwatch:*
                   - logs:*
                   - lambda:*
                   - s3:*
                   - sns:*
                   - xray:*
                 Resource: "*"
+              - Sid: ExpandServerlessTransform
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
               - Sid: ManageStackRoles
                 Effect: Allow
                 Action:
