@@ -60,6 +60,24 @@ def test_bootstrap_service_role_can_expand_sam_and_manage_alarms() -> None:
     ) in template
 
 
+def test_bootstrap_allows_production_lambda_to_retrieve_solver_image() -> None:
+    template = (_ROOT / "infra/production/bootstrap.yaml").read_text(encoding="utf-8")
+    repository_policy = template.split("      RepositoryPolicyText:\n", maxsplit=1)[1].split(
+        "      Tags:\n", maxsplit=1
+    )[0]
+
+    assert "Sid: LambdaECRImageRetrievalPolicy" in repository_policy
+    assert "Service: lambda.amazonaws.com" in repository_policy
+    assert "- ecr:BatchGetImage" in repository_policy
+    assert "- ecr:GetDownloadUrlForLayer" in repository_policy
+    assert "aws:SourceArn: !Sub" in repository_policy
+    assert (
+        "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:"
+        "function:${ProductionStackName}-*"
+    ) in repository_policy
+    assert "Sid: DenyNonTLS" in repository_policy
+
+
 def test_pages_function_is_only_invoked_for_api_routes() -> None:
     routes = json.loads((_ROOT / "web/public/_routes.json").read_text(encoding="utf-8"))
 
