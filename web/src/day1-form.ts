@@ -5,11 +5,11 @@ import {
   type TournamentDocument,
 } from "./types";
 
-export type WizardStep = 1 | 2 | 3 | 4;
+export type WizardStep = 1 | 2 | 3 | 4 | 5;
 
 export interface FieldIssue {
   field: string;
-  step: Exclude<WizardStep, 4>;
+  step: Exclude<WizardStep, 4 | 5>;
   message: string;
 }
 
@@ -121,7 +121,7 @@ function validTime(value: unknown): boolean {
 
 export function validateDay1LeagueDocument(
   document: TournamentDocument,
-  throughStep: Exclude<WizardStep, 4> = 3,
+  throughStep: Exclude<WizardStep, 4 | 5> = 3,
 ): FieldIssue[] {
   const issues: FieldIssue[] = [];
   const input = document.tournament.input;
@@ -238,7 +238,9 @@ export function validateDay1LeagueDocument(
   return issues;
 }
 
-const API_FIELD_MAP: Array<readonly [string, string, Exclude<WizardStep, 4>, string]> = [
+const API_FIELD_MAP: Array<
+  readonly [string, string, Exclude<WizardStep, 4 | 5>, string]
+> = [
   ["teams", "teams", 1, "参加チーム"],
   ["courts", "courts", 2, "使用コート"],
   ["league.block_count", "block-count", 2, "ブロック数"],

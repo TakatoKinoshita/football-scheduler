@@ -136,7 +136,8 @@ test("印刷mediaでは操作を隠して保存済み結果を表示する", asy
   await page.emulateMedia({ media: "print" });
 
   await expect(page.locator(".site-header")).toBeHidden();
-  await expect(page.getByRole("button", { name: "印刷する" })).toBeHidden();
-  await expect(page.locator(".panel.results")).toBeVisible();
+  await expect(page.getByRole("button", { name: "1日目を印刷" })).toBeHidden();
+  await expect(page.locator("#day1-results-panel")).toBeVisible();
+  await expect(page.locator("#day2-results-panel")).toBeHidden();
   await expect(page.locator("#result-content")).toContainText("青空FC 対 みどりSC");
 });

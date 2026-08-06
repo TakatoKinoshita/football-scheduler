@@ -22,6 +22,19 @@ async function enterOnlyResult(page: import("@playwright/test").Page): Promise<v
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
+test("順位未確定の2日目タブでは次の操作を始めず案内を表示する", async ({ page }) => {
+  await openGeneratedLeague(page);
+
+  await page.locator('.step[data-step="5"]').click();
+
+  await expect(page.locator('[data-panel="5"]')).toBeVisible();
+  await expect(page.locator("#day2-result-content")).toContainText("順位を確定してください");
+  await expect(page.locator("#tournament-confirmation")).toBeHidden();
+  await expect(page.locator("#day2-confirmation")).toBeHidden();
+  await page.getByRole("button", { name: "1日目へ戻る" }).click();
+  await expect(page.locator('[data-panel="4"]')).toBeVisible();
+});
+
 test("最終試合の入力直後に順位を確定し、変更時は確定順位を失効する", async ({ page }) => {
   await openGeneratedLeague(page);
   await page.unroute(GENERATE_API);
@@ -112,6 +125,8 @@ test("確定順位から2日目トーナメントを作成し、得点変更時�
     });
   });
 
+  await expect(page.locator("#go-day2-area")).toBeVisible();
+  await page.getByRole("button", { name: "2日目へ進む" }).click();
   await expect(page.locator("#tournament-confirmation")).toBeVisible();
   await expect(page.getByRole("button", { name: "2日目トーナメントを作成する" })).toBeEnabled();
   await page.getByRole("button", { name: "2日目トーナメントを作成する" }).click();
@@ -125,13 +140,14 @@ test("確定順位から2日目トーナメントを作成し、得点変更時�
     league_standings: { status: "COMPLETE" },
   });
 
+  await page.locator('.step[data-step="4"]').click();
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
   await expect(page.locator("#league-standings-view")).toHaveCount(0);
   await expect(page.locator("#tournament-plan-view")).toHaveCount(0);
   await expect(page.locator("#tournament-confirmation")).toBeHidden();
 });
 
-test("確定順位はモバイルと印刷表示で確認できる", async ({ page }) => {
+test("1日目と2日目をモバイルで分け、日別に印刷表示できる", async ({ page }) => {
   await mockExternalServices(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openApp(page);
@@ -150,13 +166,23 @@ test("確定順位はモバイルと印刷表示で確認できる", async ({ pa
   };
   await importDocument(page, document);
 
-  await expect(page.locator("#league-standings-view")).toBeVisible();
+  await expect(page.locator('[data-panel="5"]')).toBeVisible();
+  await expect(page.locator("#day2-standings-summary")).toContainText("青空FC");
   await expect(page.locator("#tournament-plan-view")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("#tournament-plan-view")).toBeVisible();
+  await expect(page.locator("#league-standings-view")).toBeHidden();
+
+  await page.emulateMedia({ media: "screen" });
+  await page.locator('.step[data-step="4"]').click();
+  await expect(page.locator('[data-panel="4"]')).toBeVisible();
+  await expect(page.locator("#league-standings-view")).toBeVisible();
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toBeVisible();
+  await expect(page.locator("#tournament-plan-view")).toBeHidden();
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#standings-confirmation")).toBeHidden();
   await expect(page.locator("#league-standings-view")).toBeVisible();
-  await expect(page.locator("#tournament-plan-view")).toBeVisible();
+  await expect(page.locator("#tournament-plan-view")).toBeHidden();
 });
 
 test("トーナメント表から2日目日程を作成し、設定変更時は2日目だけ失効する", async ({

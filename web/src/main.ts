@@ -73,14 +73,15 @@ root.innerHTML = `
     <nav class="steps no-print" aria-label="作成手順">
       <button class="step" type="button" data-step="1"><b>1</b><span>大会・チーム</span></button>
       <button class="step" type="button" data-step="2"><b>2</b><span>ブロック・会場</span></button>
-      <button class="step" type="button" data-step="3"><b>3</b><span>時刻・生成</span></button>
-      <button class="step" type="button" data-step="4"><b>4</b><span>確認・印刷</span></button>
+      <button class="step" type="button" data-step="3"><b>3</b><span>1日目設定</span></button>
+      <button class="step" type="button" data-step="4"><b>4</b><span>1日目</span></button>
+      <button class="step" type="button" data-step="5"><b>5</b><span>2日目</span></button>
     </nav>
 
     <section class="panel wizard-panel no-print" data-panel="1" aria-labelledby="step1-heading">
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 1 / 4</p>
+          <p class="section-number">手順 1 / 5</p>
           <h2 id="step1-heading">大会名と参加チーム</h2>
           <p>参加チームは、組合せ抽選に使う順番で1行に1チームずつ入力します。</p>
         </div>
@@ -109,7 +110,7 @@ root.innerHTML = `
     <section class="panel wizard-panel no-print" data-panel="2" aria-labelledby="step2-heading" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 2 / 4</p>
+          <p class="section-number">手順 2 / 5</p>
           <h2 id="step2-heading">ブロックと使用コート</h2>
           <p>ブロック数を選び、会場で同時に使えるコートを入力します。</p>
         </div>
@@ -156,7 +157,7 @@ root.innerHTML = `
     <section class="panel wizard-panel no-print" data-panel="3" aria-labelledby="step3-heading" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 3 / 4</p>
+          <p class="section-number">手順 3 / 5</p>
           <h2 id="step3-heading">開催時刻を確認して生成</h2>
           <p>安全確認後、最大30秒で1日目の結果を表示します。通信中も入力は失われません。</p>
         </div>
@@ -219,14 +220,14 @@ root.innerHTML = `
       </div>
     </section>
 
-    <section class="panel results" data-panel="4" aria-labelledby="results-heading" hidden>
+    <section id="day1-results-panel" class="panel results day-result" data-panel="4" aria-labelledby="results-heading" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 4 / 4</p>
-          <h2 id="results-heading">1日目のリーグ日程</h2>
+          <p class="section-number">手順 4 / 5</p>
+          <h2 id="results-heading">1日目の日程とリーグ結果</h2>
           <p id="result-summary">まだ生成結果はありません。</p>
         </div>
-        <button id="print" class="secondary no-print" type="button" disabled>印刷する</button>
+        <button id="print" class="secondary no-print" type="button" disabled>1日目を印刷</button>
       </div>
       <div id="result-content" class="result-content empty">
         日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。
@@ -239,6 +240,31 @@ root.innerHTML = `
         </div>
         <button id="confirm-standings" class="primary" type="button" disabled>順位を確定する</button>
         <p id="standings-status" class="status-message" role="status" aria-live="polite"></p>
+      </div>
+      <div id="go-day2-area" class="next-day-callout no-print" hidden>
+        <div>
+          <h3>1日目の順位が確定しました</h3>
+          <p>2日目タブで、確定順位からトーナメント表と日程を作成できます。</p>
+        </div>
+        <button id="go-day2" class="primary" type="button">2日目へ進む</button>
+      </div>
+      <div class="wizard-actions no-print">
+        <button id="step4-back" class="secondary" type="button">設定へ戻る</button>
+        <span></span>
+      </div>
+    </section>
+
+    <section id="day2-results-panel" class="panel results day-result" data-panel="5" aria-labelledby="day2-results-heading" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="section-number">手順 5 / 5</p>
+          <h2 id="day2-results-heading">2日目のトーナメントと日程</h2>
+          <p id="day2-result-summary">1日目の順位を確定すると、2日目を作成できます。</p>
+        </div>
+        <button id="print-day2" class="secondary no-print" type="button" disabled>2日目を印刷</button>
+      </div>
+      <div id="day2-result-content" class="result-content empty">
+        1日目タブで全試合の得点を入力し、順位を確定してください。
       </div>
       <div id="tournament-confirmation" class="standings-confirmation no-print" hidden>
         <h3>2日目トーナメントを作成する</h3>
@@ -298,7 +324,7 @@ root.innerHTML = `
         <p id="day2-status" class="status-message" role="status" aria-live="polite"></p>
       </div>
       <div class="wizard-actions no-print">
-        <button id="step4-back" class="secondary" type="button">設定へ戻る</button>
+        <button id="step5-back" class="secondary" type="button">1日目へ戻る</button>
         <span></span>
       </div>
     </section>
@@ -353,6 +379,15 @@ function asObjectArray(value: unknown): JsonObject[] {
           typeof item === "object" && item !== null && !Array.isArray(item),
       )
     : [];
+}
+
+function restoredWizardStep(document: TournamentDocument): WizardStep {
+  const result = asObject(document.tournament.result);
+  if (result === undefined) return 1;
+  return asObject(result.tournament_plan) !== undefined ||
+    asObject(result.day2_schedule) !== undefined
+    ? 5
+    : 4;
 }
 
 function inputNumber(input: HTMLInputElement): number | null {
@@ -415,6 +450,8 @@ const backupStatus = requiredElement<HTMLElement>("#backup-status");
 const generationStatus = requiredElement<HTMLElement>("#generation-status");
 const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
+const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
+const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
 const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
 const standingsStatus = requiredElement<HTMLElement>("#standings-status");
@@ -689,6 +726,8 @@ function saveDay2Settings(): void {
   day2StatusOwner = "generation";
   day2Status.textContent =
     "2日目設定を変更したため、以前の日程を取り消しました。もう一度作成してください。";
+  requiredElement<HTMLElement>("#day2-result-summary").textContent =
+    "2日目設定が変更されました。日程をもう一度作成してください。";
   document.querySelector("#day2-schedule-view")?.remove();
   refreshDay2Enabled();
 }
@@ -772,15 +811,23 @@ function refreshDay2Enabled(): void {
 function renderResult(): void {
   const summary = requiredElement<HTMLElement>("#result-summary");
   const content = requiredElement<HTMLElement>("#result-content");
+  const day2Summary = requiredElement<HTMLElement>("#day2-result-summary");
+  const day2Content = requiredElement<HTMLElement>("#day2-result-content");
   const result = documentState.tournament.result;
+  tournamentConfirmation.hidden = true;
+  day2Confirmation.hidden = true;
+  goDay2Area.hidden = true;
+  day2PrintButton.disabled = true;
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
     content.textContent =
       "日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。";
     content.classList.add("empty");
+    day2Summary.textContent = "1日目の順位を確定すると、2日目を作成できます。";
+    day2Content.textContent =
+      "1日目タブで全試合の得点を入力し、順位を確定してください。";
+    day2Content.classList.add("empty");
     standingsConfirmation.hidden = true;
-    tournamentConfirmation.hidden = true;
-    day2Confirmation.hidden = true;
     printButton.disabled = true;
     return;
   }
@@ -803,6 +850,11 @@ function renderResult(): void {
   summary.textContent = `${status}／配置済み ${slots.length}試合`;
   content.replaceChildren();
   content.classList.remove("empty");
+  day2Content.replaceChildren();
+  day2Content.classList.add("empty");
+  day2Content.textContent =
+    "1日目タブで全試合の得点を入力し、順位を確定してください。";
+  day2Summary.textContent = "1日目の順位を確定すると、2日目を作成できます。";
 
   const overview = window.document.createElement("dl");
   for (const [label, value] of [
@@ -826,8 +878,73 @@ function renderResult(): void {
   const leaguePlan = resultLeaguePlan();
   const blocks = asObjectArray(leaguePlan?.blocks);
   standingsConfirmation.hidden = blocks.length === 0;
-  tournamentConfirmation.hidden = true;
-  day2Confirmation.hidden = true;
+
+  appendTextElement(content, "h3", "1日目の日程表");
+  const tableWrapper = window.document.createElement("div");
+  tableWrapper.className = "table-wrap";
+  const table = window.document.createElement("table");
+  const head = window.document.createElement("thead");
+  const headingRow = window.document.createElement("tr");
+  for (const heading of ["時間", "コート", "対戦", "審判"]) {
+    appendTextElement(headingRow, "th", heading);
+  }
+  head.append(headingRow);
+  table.append(head);
+  const body = window.document.createElement("tbody");
+  const teamSchedules = new Map<string, string[]>();
+  for (const teamId of teamNames.keys()) teamSchedules.set(teamId, []);
+
+  for (const slot of slots) {
+    const match = matches.get(String(slot.match_id));
+    const homeId = exactTeamId(match, "home");
+    const awayId = exactTeamId(match, "away");
+    const homeName =
+      homeId === undefined
+        ? "前の試合結果で決定"
+        : (teamNames.get(homeId) ?? "名称未設定");
+    const awayName =
+      awayId === undefined
+        ? "前の試合結果で決定"
+        : (teamNames.get(awayId) ?? "名称未設定");
+    const courtName = courtNames.get(String(slot.court_id)) ?? "コート未設定";
+    const sectionNumber = Number(slot.section_no);
+    const row = window.document.createElement("tr");
+    appendTextElement(row, "td", sectionLabel(sectionNumber));
+    appendTextElement(row, "td", courtName);
+    appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
+    const assignment = asObject(slot.referee_assignment);
+    const kind = assignment?.kind ?? assignment?.type;
+    const refereeTeamId =
+      typeof assignment?.team_id === "string" ? assignment.team_id : undefined;
+    const refereeName =
+      kind === "organizer"
+        ? "主催者"
+        : refereeTeamId === undefined
+          ? "確認中"
+          : (teamNames.get(refereeTeamId) ?? "名称未設定");
+    appendTextElement(row, "td", refereeName);
+    body.append(row);
+
+    if (homeId !== undefined) {
+      teamSchedules
+        .get(homeId)
+        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${awayName}`);
+    }
+    if (awayId !== undefined) {
+      teamSchedules
+        .get(awayId)
+        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${homeName}`);
+    }
+    if (refereeTeamId !== undefined) {
+      teamSchedules
+        .get(refereeTeamId)
+        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　審判`);
+    }
+  }
+  table.append(body);
+  tableWrapper.append(table);
+  content.append(tableWrapper);
+
   if (blocks.length > 0) {
     appendTextElement(content, "h3", "ブロック分け");
     const blockGrid = window.document.createElement("div");
@@ -956,6 +1073,12 @@ function renderResult(): void {
           document.querySelector("#day2-schedule-view")?.remove();
           tournamentConfirmation.hidden = true;
           day2Confirmation.hidden = true;
+          goDay2Area.hidden = true;
+          day2PrintButton.disabled = true;
+          day2Summary.textContent = "得点が変更されました。順位を再確定してください。";
+          day2Content.textContent =
+            "1日目タブで順位を再確定すると、2日目の作成を再開できます。";
+          day2Content.classList.add("empty");
         }
       };
       homeScore.addEventListener("input", save);
@@ -970,9 +1093,14 @@ function renderResult(): void {
     refreshLeagueResultsProgress(leagueMatches.length);
     setupStandingsTurnstile();
     const standings = asObject(result.league_standings);
-    tournamentConfirmation.hidden = standings === undefined;
     if (standings !== undefined) {
       renderLeagueStandings(content, standings, teamNames);
+      goDay2Area.hidden = false;
+      day2Content.replaceChildren();
+      day2Content.classList.remove("empty");
+      day2Summary.textContent = "1日目の確定順位から2日目を作成します。";
+      renderDay2StandingsSummary(day2Content, standings, teamNames);
+      tournamentConfirmation.hidden = false;
       const league = asObject(documentState.tournament.input.league);
       const splitLabels: Record<string, string> = {
         upper: "中央順位を上位へ入れる",
@@ -985,70 +1113,26 @@ function renderResult(): void {
       refreshTournamentEnabled();
       const tournamentPlan = asObject(result.tournament_plan);
       if (tournamentPlan !== undefined) {
-        renderTournamentPlan(content, tournamentPlan, standings, teamNames);
+        renderTournamentPlan(day2Content, tournamentPlan, standings, teamNames);
+        day2PrintButton.disabled = false;
         day2Confirmation.hidden = false;
         setupDay2Turnstile();
         refreshDay2Enabled();
         const day2Schedule = asObject(result.day2_schedule);
         if (day2Schedule !== undefined) {
-          renderDay2Schedule(content, day2Schedule, tournamentPlan, standings, teamNames, courtNames);
+          day2Summary.textContent = "2日目のトーナメントと日程を作成済みです。";
+          renderDay2Schedule(
+            day2Content,
+            day2Schedule,
+            tournamentPlan,
+            standings,
+            teamNames,
+            courtNames,
+          );
         }
       }
     }
   }
-
-  appendTextElement(content, "h3", "日程表");
-  const tableWrapper = window.document.createElement("div");
-  tableWrapper.className = "table-wrap";
-  const table = window.document.createElement("table");
-  const head = window.document.createElement("thead");
-  const headingRow = window.document.createElement("tr");
-  for (const heading of ["時間", "コート", "対戦", "審判"]) {
-    appendTextElement(headingRow, "th", heading);
-  }
-  head.append(headingRow);
-  table.append(head);
-  const body = window.document.createElement("tbody");
-  const teamSchedules = new Map<string, string[]>();
-  for (const teamId of teamNames.keys()) teamSchedules.set(teamId, []);
-
-  for (const slot of slots) {
-    const match = matches.get(String(slot.match_id));
-    const homeId = exactTeamId(match, "home");
-    const awayId = exactTeamId(match, "away");
-    const homeName = homeId === undefined ? "前の試合結果で決定" : (teamNames.get(homeId) ?? "名称未設定");
-    const awayName = awayId === undefined ? "前の試合結果で決定" : (teamNames.get(awayId) ?? "名称未設定");
-    const courtName = courtNames.get(String(slot.court_id)) ?? "コート未設定";
-    const sectionNumber = Number(slot.section_no);
-    const row = window.document.createElement("tr");
-    appendTextElement(row, "td", sectionLabel(sectionNumber));
-    appendTextElement(row, "td", courtName);
-    appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
-    const assignment = asObject(slot.referee_assignment);
-    const kind = assignment?.kind ?? assignment?.type;
-    const refereeTeamId = typeof assignment?.team_id === "string" ? assignment.team_id : undefined;
-    const refereeName =
-      kind === "organizer"
-        ? "主催者"
-        : refereeTeamId === undefined
-          ? "確認中"
-          : (teamNames.get(refereeTeamId) ?? "名称未設定");
-    appendTextElement(row, "td", refereeName);
-    body.append(row);
-
-    if (homeId !== undefined) {
-      teamSchedules.get(homeId)?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${awayName}`);
-    }
-    if (awayId !== undefined) {
-      teamSchedules.get(awayId)?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${homeName}`);
-    }
-    if (refereeTeamId !== undefined) {
-      teamSchedules.get(refereeTeamId)?.push(`${sectionLabel(sectionNumber)}　${courtName}　審判`);
-    }
-  }
-  table.append(body);
-  tableWrapper.append(table);
-  content.append(tableWrapper);
 
   appendTextElement(content, "h3", "チーム別予定");
   const teamGrid = window.document.createElement("div");
@@ -1130,6 +1214,46 @@ function renderLeagueStandings(content: HTMLElement, standings: JsonObject, team
       "muted",
     );
   }
+  content.append(section);
+}
+
+function renderDay2StandingsSummary(
+  content: HTMLElement,
+  standings: JsonObject,
+  teamNames: Map<string, string>,
+): void {
+  const section = window.document.createElement("section");
+  section.id = "day2-standings-summary";
+  appendTextElement(section, "h3", "1日目の確定順位");
+  appendTextElement(
+    section,
+    "p",
+    "この順位をもとに上位・下位トーナメントへ振り分けます。得点を変更すると、2日目の内容は取り消されます。",
+    "muted",
+  );
+  const grouped = new Map<string, JsonObject[]>();
+  for (const row of asObjectArray(standings.standings)) {
+    const blockId = String(row.block_id ?? "-");
+    grouped.set(blockId, [...(grouped.get(blockId) ?? []), row]);
+  }
+  const grid = window.document.createElement("div");
+  grid.className = "block-grid compact-standings";
+  for (const [blockId, rows] of grouped) {
+    const card = window.document.createElement("section");
+    card.className = "block-card";
+    appendTextElement(card, "h4", `${blockId}ブロック`);
+    const list = window.document.createElement("ol");
+    for (const row of rows.sort((left, right) => Number(left.rank) - Number(right.rank))) {
+      appendTextElement(
+        list,
+        "li",
+        teamNames.get(String(row.team_id)) ?? "名称未設定",
+      );
+    }
+    card.append(list);
+    grid.append(card);
+  }
+  section.append(grid);
   content.append(section);
 }
 
@@ -1667,6 +1791,8 @@ function renderStep(): void {
   }
   updateReview();
   refreshGenerateEnabled();
+  if (currentStep === 4) document.body.dataset.printScope = "day1";
+  if (currentStep === 5) document.body.dataset.printScope = "day2";
   if (currentStep === 3) setupTurnstile();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -1886,6 +2012,8 @@ requiredElement<HTMLButtonElement>("#step2-back").addEventListener("click", () =
 requiredElement<HTMLButtonElement>("#step2-next").addEventListener("click", () => goToStep(3));
 requiredElement<HTMLButtonElement>("#step3-back").addEventListener("click", () => goToStep(2, false));
 requiredElement<HTMLButtonElement>("#step4-back").addEventListener("click", () => goToStep(3, false));
+requiredElement<HTMLButtonElement>("#step5-back").addEventListener("click", () => goToStep(4, false));
+requiredElement<HTMLButtonElement>("#go-day2").addEventListener("click", () => goToStep(5, false));
 
 requiredElement<HTMLButtonElement>("#confirm-save").addEventListener("click", () => {
   updateDraft(false);
@@ -1937,7 +2065,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       documentState = mode.document;
       legacyCompatibility = mode.legacyCompatibility;
       organizerCapacityTouched = inferOrganizerCapacityTouched();
-      currentStep = documentState.tournament.result === undefined ? 1 : 4;
+      currentStep = restoredWizardStep(documentState);
       return storage.replaceImported(documentState).then(() => {
         render();
         backupStatus.dataset.state = "imported";
@@ -1970,7 +2098,7 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
     documentState = mode.document;
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
-    currentStep = documentState.tournament.result === undefined ? 1 : 4;
+    currentStep = restoredWizardStep(documentState);
     render();
     backupStatus.textContent = "ひとつ前の状態へ戻しました。";
   });
@@ -2093,7 +2221,14 @@ generateButton.addEventListener("click", () => {
     });
 });
 
-printButton.addEventListener("click", () => window.print());
+printButton.addEventListener("click", () => {
+  document.body.dataset.printScope = "day1";
+  window.print();
+});
+day2PrintButton.addEventListener("click", () => {
+  document.body.dataset.printScope = "day2";
+  window.print();
+});
 standingsButton.addEventListener("click", requestLeagueStandings);
 tournamentButton.addEventListener("click", requestTournamentPlan);
 day2Button.addEventListener("click", requestDay2Schedule);
@@ -2421,7 +2556,7 @@ void storage
     documentState = mode.document;
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
-    currentStep = documentState.tournament.result === undefined ? 1 : 4;
+    currentStep = restoredWizardStep(documentState);
     render();
     if (mode.migrated) {
       void storage.saveDraft(documentState);
