@@ -16,6 +16,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from football_scheduler.day1_league import prepare_day1_league_schedule
+from football_scheduler.day2_schedule import (
+    Day2ScheduleError,
+    Day2ScheduleRequest,
+    generate_day2_schedule,
+)
 from football_scheduler.fixtures import (
     make_maximum_mvp_request,
     make_representative_request,
@@ -33,7 +38,7 @@ from football_scheduler.tournament import (
     TournamentPlanRequest,
     generate_tournament_plan,
 )
-from football_scheduler.validator import validate_schedule
+from football_scheduler.validator import validate_day2_schedule, validate_schedule
 
 SCHEMA_VERSION = "0.1.0"
 MAX_REQUEST_BYTES = 1_000_000
@@ -80,6 +85,32 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             return _to_json_object(
                 generate_tournament_plan(TournamentPlanRequest.model_validate(payload))
             )
+        if payload.get("request_kind") == "day2_schedule":
+            _validate_day2_schedule_limits(payload)
+            request_data = _apply_solver_time_limit(payload)
+            request = Day2ScheduleRequest.model_validate(request_data)
+            day1_document = _build_day1_source_validation_document(request_data)
+            day1_validation = _to_json_object(validate_schedule(day1_document))
+            if day1_validation.get("valid") is not True:
+                raise _RequestError(
+                    "DAY1_SCHEDULE_INVALID",
+                    "既存の1日目日程が大会規則の検証に合格しません。1日目日程を再作成してください。",
+                    diagnostics=list(day1_validation.get("diagnostics", [])),
+                )
+            schedule = generate_day2_schedule(request)
+            result_data = _to_json_object(schedule)
+            if result_data.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+                return result_data
+            day2_document = _build_day2_validation_document(request_data, result_data)
+            validation = _to_json_object(validate_day2_schedule(day2_document))
+            integrated_validation = _integrated_validation(day1_validation, validation)
+            return _json_round_trip(
+                {
+                    **result_data,
+                    "validation": validation,
+                    "integrated_validation": integrated_validation,
+                }
+            )
 
         request_data, response_metadata, fallback_request_data = _resolve_request(payload)
         _validate_limits(request_data)
@@ -105,6 +136,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except LeagueResultsError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except TournamentGenerationError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except Day2ScheduleError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         return _error_response(
@@ -324,6 +357,58 @@ def _validate_tournament_plan_limits(request: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_day2_schedule_limits(request: Mapping[str, Any]) -> None:
+    _validate_sequence_limit(request, "teams", MAX_TEAMS, "チーム数", "TEAM_LIMIT_EXCEEDED")
+    _validate_sequence_limit(request, "courts", MAX_COURTS, "コート数", "COURT_LIMIT_EXCEEDED")
+    league_plan = request.get("league_plan")
+    if isinstance(league_plan, Mapping):
+        _validate_sequence_limit(
+            league_plan, "matches", MAX_MATCHES, "リーグ試合数", "MATCH_LIMIT_EXCEEDED"
+        )
+        _validate_sequence_limit(
+            league_plan, "blocks", MAX_TEAMS, "リーグブロック数", "TEAM_LIMIT_EXCEEDED"
+        )
+    day1_schedule = request.get("day1_schedule")
+    if isinstance(day1_schedule, Mapping):
+        _validate_sequence_limit(
+            day1_schedule,
+            "slots",
+            MAX_SECTIONS * MAX_COURTS,
+            "1日目スロット数",
+            "MATCH_LIMIT_EXCEEDED",
+        )
+    tournament_plan = request.get("tournament_plan")
+    tournament_match_count = 0
+    if isinstance(tournament_plan, Mapping):
+        for pool_name in ("upper", "lower"):
+            pool = tournament_plan.get(pool_name)
+            if not isinstance(pool, Mapping):
+                continue
+            _validate_sequence_limit(
+                pool, "seeds", MAX_TEAMS, "トーナメントシード数", "TEAM_LIMIT_EXCEEDED"
+            )
+            matches = pool.get("matches")
+            if isinstance(matches, Sequence) and not isinstance(matches, (str, bytes, bytearray)):
+                tournament_match_count += len(matches)
+    if tournament_match_count > MAX_MATCHES:
+        raise _RequestError(
+            "MATCH_LIMIT_EXCEEDED",
+            f"2日目試合数が上限の{MAX_MATCHES}を超えています。",
+            actual=tournament_match_count,
+            maximum=MAX_MATCHES,
+        )
+    day = request.get("day")
+    if isinstance(day, Mapping):
+        maximum = day.get("max_sections")
+        if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum > MAX_SECTIONS:
+            raise _RequestError(
+                "SECTION_LIMIT_EXCEEDED",
+                f"セクション数が上限の{MAX_SECTIONS}を超えています。",
+                actual=maximum,
+                maximum=MAX_SECTIONS,
+            )
+
+
 def _validate_sequence_limit(
     request: Mapping[str, Any],
     field: str,
@@ -382,6 +467,94 @@ def _build_validation_document(
         "config": config,
         "matches": matches,
         "schedule": {"slots": slots},
+    }
+
+
+def _build_day2_validation_document(
+    request: Mapping[str, Any], result: Mapping[str, Any]
+) -> dict[str, Any]:
+    slots = deepcopy(list(result.get("slots", [])))
+    matches = deepcopy(list(result.get("tournament_matches", [])))
+    return {
+        "schema_version": request.get("schema_version", SCHEMA_VERSION),
+        "config": {
+            "teams": deepcopy(list(request.get("teams", []))),
+            "courts": deepcopy(list(request.get("courts", []))),
+            "days": {"day2": deepcopy(dict(request.get("day", {})))},
+            "referees": deepcopy(dict(request.get("referees", {}))),
+            "tournament_plan": deepcopy(dict(request.get("tournament_plan", {}))),
+        },
+        "league_plan": deepcopy(dict(request.get("league_plan", {}))),
+        "day1_schedule": deepcopy(dict(request.get("day1_schedule", {}))),
+        "tournament_plan": deepcopy(dict(request.get("tournament_plan", {}))),
+        "matches": matches,
+        "schedule": {
+            "slots": slots,
+            "section_timings": deepcopy(list(result.get("section_timings", []))),
+            "expected_end_time": result.get("expected_end_time"),
+            "metrics": deepcopy(dict(result.get("metrics", {}))),
+        },
+        "metrics": deepcopy(dict(result.get("metrics", {}))),
+    }
+
+
+def _build_day1_source_validation_document(request: Mapping[str, Any]) -> dict[str, Any]:
+    source = request.get("day1_schedule")
+    source_data = dict(source) if isinstance(source, Mapping) else {}
+    day = source_data.get("day")
+    league_plan = request.get("league_plan")
+    matches = (
+        deepcopy(list(league_plan.get("matches", []))) if isinstance(league_plan, Mapping) else []
+    )
+    slots = deepcopy(list(source_data.get("slots", [])))
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        assignment = slot.get("referee_assignment")
+        if isinstance(assignment, dict) and "type" not in assignment and "kind" in assignment:
+            assignment["type"] = assignment["kind"]
+    return {
+        "schema_version": request.get("schema_version", SCHEMA_VERSION),
+        "config": {
+            "teams": deepcopy(list(request.get("teams", []))),
+            "courts": deepcopy(list(request.get("courts", []))),
+            "days": {"day1": deepcopy(dict(day)) if isinstance(day, Mapping) else {}},
+            "referees": deepcopy(dict(request.get("referees", {}))),
+        },
+        "matches": matches,
+        "schedule": {"slots": slots},
+    }
+
+
+def _integrated_validation(day1: Mapping[str, Any], day2: Mapping[str, Any]) -> dict[str, Any]:
+    day1_diagnostics = day1.get("diagnostics")
+    day2_diagnostics = day2.get("diagnostics")
+    diagnostics = [
+        *(
+            deepcopy(list(day1_diagnostics))
+            if isinstance(day1_diagnostics, Sequence)
+            and not isinstance(day1_diagnostics, (str, bytes, bytearray))
+            else []
+        ),
+        *(
+            deepcopy(list(day2_diagnostics))
+            if isinstance(day2_diagnostics, Sequence)
+            and not isinstance(day2_diagnostics, (str, bytes, bytearray))
+            else []
+        ),
+    ]
+    return {
+        "valid": day1.get("valid") is True and day2.get("valid") is True,
+        "diagnostics": diagnostics,
+        "summary": {
+            "day1": deepcopy(dict(day1.get("summary", {})))
+            if isinstance(day1.get("summary"), Mapping)
+            else {},
+            "day2": deepcopy(dict(day2.get("summary", {})))
+            if isinstance(day2.get("summary"), Mapping)
+            else {},
+            "error_count": len(diagnostics),
+        },
     }
 
 

@@ -16,7 +16,7 @@ def _event(**headers: str) -> dict[str, Any]:
     return {
         "type": "REQUEST",
         "methodArn": _METHOD_ARN,
-        "headers": headers,
+        "headers": {"x-turnstile-action": "generate_schedule", **headers},
         "requestContext": {"identity": {"sourceIp": "203.0.113.10"}},
     }
 
@@ -50,6 +50,7 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
                 "X-Origin-Verify": "origin-secret",
                 "Origin": "https://schedule.example.jp",
                 "X-Turnstile-Token": "single-use-token",
+                "X-Turnstile-Action": "generate_schedule",
                 "X-Client-Ip": "203.0.113.10",
             }
         ),
@@ -60,7 +61,10 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
     assert result["context"] == {"authorizationCode": "AUTHORIZED"}
 
 
-@pytest.mark.parametrize("action", ["calculate_standings", "generate_tournament"])
+@pytest.mark.parametrize(
+    "action",
+    ["calculate_standings", "generate_tournament", "generate_day2_schedule"],
+)
 def test_result_workflow_turnstile_actions_are_allowed(
     monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
@@ -81,12 +85,43 @@ def test_result_workflow_turnstile_actions_are_allowed(
                 "X-Origin-Verify": "origin-secret",
                 "Origin": "https://schedule.example.jp",
                 "X-Turnstile-Token": "single-use-token",
+                "X-Turnstile-Action": action,
             }
         ),
         object(),
     )
 
     assert _effect(result) == "Allow"
+
+
+def test_turnstile_action_must_match_requested_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
+    monkeypatch.setattr(
+        authorizer,
+        "_verify_turnstile",
+        lambda *_: {
+            "success": True,
+            "hostname": "schedule.example.jp",
+            "action": "calculate_standings",
+        },
+    )
+
+    result = authorizer.lambda_handler(
+        _event(
+            **{
+                "X-Origin-Verify": "origin-secret",
+                "Origin": "https://schedule.example.jp",
+                "X-Turnstile-Token": "single-use-token",
+                "X-Turnstile-Action": "generate_day2_schedule",
+            }
+        ),
+        object(),
+    )
+
+    assert _effect(result) == "Deny"
+    assert result["context"] == {"authorizationCode": "BOT_CHECK_REJECTED"}
 
 
 def test_missing_proxy_header_is_denied_before_turnstile(

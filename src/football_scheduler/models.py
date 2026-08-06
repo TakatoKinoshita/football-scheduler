@@ -36,6 +36,13 @@ class RefereeKind(StrEnum):
     TEAM = "team"
 
 
+class TournamentFallback(StrEnum):
+    """トーナメントで直前試合の勝者を使えない場合の扱い。"""
+
+    ORGANIZER = "organizer"
+    STRICT = "strict"
+
+
 class Team(ContractModel):
     id: Identifier
     name: NonEmptyText
@@ -85,17 +92,38 @@ class MatchSpec(ContractModel):
         return frozenset((*self.possible_home_team_ids, *self.possible_away_team_ids))
 
 
+class DayBreak(ContractModel):
+    """指定セクション終了後の休憩。"""
+
+    after_section: Annotated[int, Field(gt=0)]
+    duration_minutes: Annotated[int, Field(gt=0)]
+
+
 class DaySettings(ContractModel):
     id: Identifier = "day1"
     start_time: time = time(9, 30)
     game_duration_minutes: Annotated[int, Field(gt=0)] = 35
     margin_minutes: Annotated[int, Field(ge=0)] = 5
     max_sections: Annotated[int, Field(gt=0)] | None = None
+    end_time: time | None = None
+    breaks: tuple[DayBreak, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_breaks(self) -> Self:
+        sections = [item.after_section for item in self.breaks]
+        if len(set(sections)) != len(sections):
+            raise ValueError("同じセクションの後に複数の休憩は指定できません")
+        if self.max_sections is not None and any(
+            section >= self.max_sections for section in sections
+        ):
+            raise ValueError("最終セクション以降に休憩は指定できません")
+        return self
 
 
 class RefereeSettings(ContractModel):
     organizer_capacity: Annotated[int, Field(ge=0)]
     team_referees_required_after_first: bool = True
+    tournament_fallback: TournamentFallback = TournamentFallback.ORGANIZER
 
 
 class SolverSettings(ContractModel):
@@ -148,13 +176,26 @@ class ScheduleRequest(ContractModel):
 class RefereeAssignment(ContractModel):
     kind: RefereeKind
     team_id: Identifier | None = None
+    source_match_id: Identifier | None = None
+    organizer_reason: Literal["first_section", "tournament_final", "fallback"] | None = None
+    fallback_reasons: tuple[Identifier, ...] = ()
 
     @model_validator(mode="after")
     def validate_team_id(self) -> Self:
-        if self.kind is RefereeKind.TEAM and self.team_id is None:
-            raise ValueError("チーム審判にはteam_idが必要です")
-        if self.kind is RefereeKind.ORGANIZER and self.team_id is not None:
-            raise ValueError("主催者審判にteam_idは指定できません")
+        if self.kind is RefereeKind.TEAM and (self.team_id is None) == (
+            self.source_match_id is None
+        ):
+            raise ValueError("チーム審判にはteam_idまたはsource_match_idのどちらか一方が必要です")
+        if self.kind is RefereeKind.ORGANIZER and (
+            self.team_id is not None or self.source_match_id is not None
+        ):
+            raise ValueError("主催者審判にチーム参照は指定できません")
+        if self.kind is RefereeKind.TEAM and (
+            self.organizer_reason is not None or self.fallback_reasons
+        ):
+            raise ValueError("チーム審判に主催者の割当て理由は指定できません")
+        if self.organizer_reason != "fallback" and self.fallback_reasons:
+            raise ValueError("フォールバック理由は主催者フォールバック時だけ指定できます")
         return self
 
 
@@ -164,6 +205,16 @@ class Slot(ContractModel):
     court_id: Identifier
     match_id: Identifier | None
     referee_assignment: RefereeAssignment | None
+
+
+class SectionTiming(ContractModel):
+    """休憩を反映したセクションの時刻。"""
+
+    day_id: Identifier
+    section_no: Annotated[int, Field(gt=0)]
+    start_time: time
+    match_end_time: time
+    break_after_minutes: Annotated[int, Field(ge=0)] = 0
 
 
 class Diagnostic(ContractModel):
@@ -179,19 +230,39 @@ class TeamRefereeCount(ContractModel):
     count: Annotated[int, Field(ge=0)]
 
 
+class ObjectiveStageMetric(ContractModel):
+    """辞書式最適化の目的別監査値。"""
+
+    objective: Identifier
+    value: Annotated[int, Field(ge=0)]
+    optimality_proven: bool
+
+
 class SolverMetrics(ContractModel):
     random_seed: int
     num_search_workers: Literal[1] = 1
     max_time_seconds: float
     ortools_version: NonEmptyText
     wall_time_seconds: Annotated[float, Field(ge=0)]
-    used_sections: Annotated[int, Field(ge=1)] | None = None
+    used_sections: Annotated[int, Field(ge=0)] | None = None
     objective_value: float | None = None
     best_objective_bound: float | None = None
     league_team_referee_counts: tuple[TeamRefereeCount, ...] = ()
     league_team_referee_count_min: Annotated[int, Field(ge=0)] | None = None
     league_team_referee_count_max: Annotated[int, Field(ge=0)] | None = None
     league_team_referee_count_difference: Annotated[int, Field(ge=0)] | None = None
+    maximum_team_wait_sections: Annotated[int, Field(ge=0)] | None = None
+    referee_then_match_count: Annotated[int, Field(ge=0)] | None = None
+    league_previous_same_court_referee_count: Annotated[int, Field(ge=0)] | None = None
+    adjacent_assignment_court_change_count: Annotated[int, Field(ge=0)] | None = None
+    team_court_change_count: Annotated[int, Field(ge=0)] | None = None
+    court_usage_difference: Annotated[int, Field(ge=0)] | None = None
+    organizer_referee_count: Annotated[int, Field(ge=0)] | None = None
+    tournament_team_referee_count: Annotated[int, Field(ge=0)] | None = None
+    tournament_referee_fallback_count: Annotated[int, Field(ge=0)] | None = None
+    unused_slot_count: Annotated[int, Field(ge=0)] | None = None
+    optimized_objectives: tuple[Identifier, ...] = ()
+    objective_stages: tuple[ObjectiveStageMetric, ...] = ()
     optimality_proven: bool
 
 
@@ -199,5 +270,7 @@ class ScheduleResult(ContractModel):
     schema_version: Literal["0.1.0"] = "0.1.0"
     status: SolverStatus
     slots: tuple[Slot, ...] = ()
+    section_timings: tuple[SectionTiming, ...] = ()
+    expected_end_time: time | None = None
     metrics: SolverMetrics
     diagnostics: tuple[Diagnostic, ...] = ()

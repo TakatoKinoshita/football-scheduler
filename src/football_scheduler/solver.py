@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from importlib.metadata import version
+from itertools import pairwise
 from time import perf_counter
 from typing import Any
 
@@ -12,6 +14,7 @@ from ortools.sat.python import cp_model
 from football_scheduler.models import (
     Diagnostic,
     MatchSpec,
+    ObjectiveStageMetric,
     RefereeAssignment,
     RefereeKind,
     ScheduleRequest,
@@ -21,6 +24,7 @@ from football_scheduler.models import (
     SolverStatus,
     TeamRefereeCount,
 )
+from football_scheduler.timekeeping import expected_end_time, resolve_max_sections, section_timings
 
 _STATUS_MAP = {
     cp_model.OPTIMAL: SolverStatus.OPTIMAL,
@@ -47,7 +51,7 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
         request = ScheduleRequest.model_validate(request)
 
     started_at = perf_counter()
-    horizon = request.day.max_sections or max(1, len(request.matches) * 2)
+    horizon = resolve_max_sections(request.day, max(1, len(request.matches) * 2))
     # モデル構築、JSON変換、独立検証も含めてAPIの時間上限内へ収める。
     solver_time_reserve = (
         _MAX_SOLVER_TIME_RESERVE_SECONDS
@@ -253,6 +257,9 @@ def _solve_schedule_at_horizon(
 
     solver = primary_solver
     status = SolverStatus.FEASIBLE
+    optimized_objectives: list[str] = []
+    if primary_status is SolverStatus.OPTIMAL:
+        optimized_objectives.append("used_sections")
     best_primary_bound = primary_solver.best_objective_bound
     primary_used_sections = sum(
         primary_solver.boolean_value(section) for section in active_sections
@@ -340,6 +347,28 @@ def _solve_schedule_at_horizon(
                 solver = fairness_solver
                 status = SolverStatus.OPTIMAL
                 best_primary_bound = primary_used_sections
+                fairness_value = fairness_solver.value(candidate_difference)
+                model.add(league_referee_count_difference == fairness_value)
+                optimized_objectives.append("league_team_referee_count_difference")
+                (
+                    solver,
+                    lower_status,
+                    lower_wall_time,
+                    lower_optimized,
+                ) = _optimize_lower_objectives(
+                    model,
+                    request,
+                    placement,
+                    match_in_section,
+                    team_referee,
+                    possible_matches_by_team,
+                    solver,
+                    solver_time_budget - wall_time,
+                )
+                wall_time += lower_wall_time
+                optimized_objectives.extend(lower_optimized)
+                if lower_status is SolverStatus.FEASIBLE:
+                    status = SolverStatus.FEASIBLE
                 break
             if fairness_status is not SolverStatus.INFEASIBLE:
                 break
@@ -397,6 +426,7 @@ def _solve_schedule_at_horizon(
     league_referee_count_values = list(league_referee_counts.values())
     minimum_league_referee_count_value = min(league_referee_count_values, default=0)
     maximum_league_referee_count_value = max(league_referee_count_values, default=0)
+    audit = _audit_schedule_quality(request, tuple(slots))
 
     diagnostics: tuple[Diagnostic, ...] = ()
     if status is SolverStatus.FEASIBLE:
@@ -410,6 +440,8 @@ def _solve_schedule_at_horizon(
     return ScheduleResult(
         status=status,
         slots=tuple(slots),
+        section_timings=section_timings(request.day, used_sections),
+        expected_end_time=expected_end_time(request.day, used_sections),
         metrics=SolverMetrics(
             random_seed=request.random_seed,
             max_time_seconds=request.solver.max_time_seconds,
@@ -430,10 +462,353 @@ def _solve_schedule_at_horizon(
             league_team_referee_count_difference=(
                 maximum_league_referee_count_value - minimum_league_referee_count_value
             ),
+            maximum_team_wait_sections=audit["maximum_team_wait_sections"],
+            referee_then_match_count=audit["referee_then_match_count"],
+            league_previous_same_court_referee_count=audit[
+                "league_previous_same_court_referee_count"
+            ],
+            adjacent_assignment_court_change_count=audit["adjacent_assignment_court_change_count"],
+            team_court_change_count=audit["team_court_change_count"],
+            court_usage_difference=audit["court_usage_difference"],
+            organizer_referee_count=audit["organizer_referee_count"],
+            tournament_team_referee_count=audit["tournament_team_referee_count"],
+            tournament_referee_fallback_count=0,
+            optimized_objectives=tuple(optimized_objectives),
+            objective_stages=tuple(
+                ObjectiveStageMetric(
+                    objective=name,
+                    value=value,
+                    optimality_proven=name in optimized_objectives,
+                )
+                for name, value in (
+                    ("used_sections", used_sections),
+                    (
+                        "league_team_referee_count_difference",
+                        maximum_league_referee_count_value - minimum_league_referee_count_value,
+                    ),
+                    ("maximum_team_wait_sections", audit["maximum_team_wait_sections"]),
+                    ("referee_then_match_count", audit["referee_then_match_count"]),
+                    (
+                        "league_previous_same_court_referee_count",
+                        audit["league_previous_same_court_referee_count"],
+                    ),
+                    (
+                        "adjacent_assignment_court_change_count",
+                        audit["adjacent_assignment_court_change_count"],
+                    ),
+                    ("team_court_change_count", audit["team_court_change_count"]),
+                    ("court_usage_difference", audit["court_usage_difference"]),
+                )
+            ),
             optimality_proven=status is SolverStatus.OPTIMAL,
         ),
         diagnostics=diagnostics,
     )
+
+
+def _optimize_lower_objectives(
+    model: cp_model.CpModel,
+    request: ScheduleRequest,
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
+    possible_matches_by_team: Mapping[str, tuple[int, ...]],
+    initial_solver: cp_model.CpSolver,
+    time_budget: float,
+) -> tuple[cp_model.CpSolver, SolverStatus, float, tuple[str, ...]]:
+    """証明済みの上位目的を固定し、残る目的を段階的に最適化する。"""
+
+    if time_budget <= 0.001:
+        return initial_solver, SolverStatus.FEASIBLE, 0.0, ()
+    horizon = max(section for _, section in match_in_section) + 1
+    court_count = len(request.courts)
+    sections, courts = range(horizon), range(court_count)
+
+    maximum_wait = _add_maximum_wait_objective(
+        model, possible_matches_by_team, match_in_section, horizon
+    )
+    referee_then_match: list[cp_model.IntVar] = []
+    referee_on_court: dict[tuple[str, int, int], cp_model.LinearExpr] = {}
+    role_on_court: dict[tuple[str, int, int], cp_model.LinearExpr] = {}
+    previous_same_court: list[cp_model.IntVar] = []
+    for team_id, relevant_matches in possible_matches_by_team.items():
+        for section in sections:
+            referee_now = [
+                variable
+                for (match, ref_section, referee_team), variable in team_referee.items()
+                if ref_section == section and referee_team == team_id
+            ]
+            if section + 1 < horizon:
+                transition = model.new_bool_var(f"referee_then_match_{team_id}_{section}")
+                played_next = sum(
+                    match_in_section[index, section + 1] for index in relevant_matches
+                )
+                model.add(transition <= sum(referee_now))
+                model.add(transition <= played_next)
+                model.add(transition >= sum(referee_now) + played_next - 1)
+                referee_then_match.append(transition)
+
+            for court in courts:
+                referee_court_terms: list[cp_model.IntVar] = []
+                for (match, ref_section, referee_team), ref_var in team_referee.items():
+                    if ref_section != section or referee_team != team_id:
+                        continue
+                    conjunction = model.new_bool_var(
+                        f"referee_court_{team_id}_{match}_{section}_{court}"
+                    )
+                    slot_var = placement[match, section, court]
+                    model.add(conjunction <= ref_var)
+                    model.add(conjunction <= slot_var)
+                    model.add(conjunction >= ref_var + slot_var - 1)
+                    referee_court_terms.append(conjunction)
+                referee_expr = cp_model.LinearExpr.sum(referee_court_terms)
+                referee_on_court[team_id, section, court] = referee_expr
+                played_expr = cp_model.LinearExpr.sum(
+                    [placement[index, section, court] for index in relevant_matches]
+                )
+                role_on_court[team_id, section, court] = played_expr + referee_expr
+                if section > 0:
+                    previous_played = sum(
+                        placement[index, section - 1, court] for index in relevant_matches
+                    )
+                    continued = model.new_bool_var(
+                        f"previous_same_court_referee_{team_id}_{section}_{court}"
+                    )
+                    model.add(continued <= referee_expr)
+                    model.add(continued <= previous_played)
+                    model.add(continued >= referee_expr + previous_played - 1)
+                    previous_same_court.append(continued)
+
+    referee_then_match_count = model.new_int_var(
+        0, len(referee_then_match), "referee_then_match_count"
+    )
+    model.add(referee_then_match_count == sum(referee_then_match))
+    previous_same_court_count = model.new_int_var(
+        0, len(previous_same_court), "previous_same_court_referee_count"
+    )
+    model.add(previous_same_court_count == sum(previous_same_court))
+
+    adjacent_moves: list[cp_model.IntVar] = []
+    for team_id in possible_matches_by_team:
+        for section in range(horizon - 1):
+            for left_court in courts:
+                for right_court in courts:
+                    if left_court == right_court:
+                        continue
+                    moved = model.new_bool_var(
+                        f"adjacent_move_{team_id}_{section}_{left_court}_{right_court}"
+                    )
+                    left = role_on_court[team_id, section, left_court]
+                    right = role_on_court[team_id, section + 1, right_court]
+                    model.add(moved <= left)
+                    model.add(moved <= right)
+                    model.add(moved >= left + right - 1)
+                    adjacent_moves.append(moved)
+    adjacent_move_count = model.new_int_var(0, len(adjacent_moves), "adjacent_move_count")
+    model.add(adjacent_move_count == sum(adjacent_moves))
+
+    # 直前の割当てコートを状態として持ち、空きセクションを挟む移動も1回として数える。
+    # 全セクション対の組合せを作らないため、最大入力でもモデルサイズを抑えられる。
+    all_moves: list[cp_model.IntVar] = []
+    for team_id in possible_matches_by_team:
+        last_court: list[cp_model.IntVar] = [
+            model.new_bool_var(f"last_court_{team_id}_0_{court}") for court in courts
+        ]
+        for state in last_court:
+            model.add(state == 0)
+        for section in sections:
+            role_any = cp_model.LinearExpr.sum(
+                [role_on_court[team_id, section, court] for court in courts]
+            )
+            for left_court in courts:
+                for right_court in courts:
+                    if left_court == right_court:
+                        continue
+                    moved = model.new_bool_var(
+                        f"all_move_{team_id}_{section}_{left_court}_{right_court}"
+                    )
+                    right_role = role_on_court[team_id, section, right_court]
+                    model.add(moved <= last_court[left_court])
+                    model.add(moved <= right_role)
+                    model.add(moved >= last_court[left_court] + right_role - 1)
+                    all_moves.append(moved)
+            next_last_court: list[cp_model.IntVar] = []
+            for court in courts:
+                state = model.new_bool_var(f"last_court_{team_id}_{section + 1}_{court}")
+                role_here = role_on_court[team_id, section, court]
+                model.add(state >= role_here)
+                model.add(state >= last_court[court] - role_any)
+                model.add(state <= role_here + last_court[court])
+                model.add(state <= role_here + 1 - role_any)
+                next_last_court.append(state)
+            last_court = next_last_court
+    all_move_count = model.new_int_var(0, len(all_moves), "team_court_change_count")
+    model.add(all_move_count == sum(all_moves))
+
+    court_counts: list[cp_model.IntVar] = []
+    for court in courts:
+        count = model.new_int_var(0, len(request.matches), f"all_match_court_count_{court}")
+        model.add(
+            count
+            == sum(
+                placement[index, section, court]
+                for index in range(len(request.matches))
+                for section in sections
+            )
+        )
+        court_counts.append(count)
+    minimum_court_count = model.new_int_var(0, len(request.matches), "court_count_min")
+    maximum_court_count = model.new_int_var(0, len(request.matches), "court_count_max")
+    court_usage_difference = model.new_int_var(0, len(request.matches), "court_usage_difference")
+    model.add_min_equality(minimum_court_count, court_counts)
+    model.add_max_equality(maximum_court_count, court_counts)
+    model.add(court_usage_difference == maximum_court_count - minimum_court_count)
+
+    stages: tuple[tuple[str, cp_model.IntVar, bool], ...] = (
+        ("maximum_team_wait_sections", maximum_wait, False),
+        ("referee_then_match_count", referee_then_match_count, False),
+        ("league_previous_same_court_referee_count", previous_same_court_count, True),
+        ("adjacent_assignment_court_change_count", adjacent_move_count, False),
+        ("team_court_change_count", all_move_count, False),
+        ("court_usage_difference", court_usage_difference, False),
+    )
+    solver = initial_solver
+    optimized: list[str] = []
+    wall_time = 0.0
+    final_status = SolverStatus.OPTIMAL
+    for stage_index, (name, objective, maximize) in enumerate(stages):
+        remaining = time_budget - wall_time
+        if remaining <= 0.001:
+            final_status = SolverStatus.FEASIBLE
+            break
+        stage_budget = remaining / (len(stages) - stage_index)
+        if maximize:
+            model.maximize(objective)
+        else:
+            model.minimize(objective)
+        candidate = _configured_solver(stage_budget, request.random_seed)
+        candidate_status = _STATUS_MAP.get(candidate.solve(model), SolverStatus.UNKNOWN)
+        wall_time += candidate.wall_time
+        if candidate_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+            final_status = SolverStatus.FEASIBLE
+            break
+        solver = candidate
+        if candidate_status is not SolverStatus.OPTIMAL:
+            final_status = SolverStatus.FEASIBLE
+            break
+        model.add(objective == candidate.value(objective))
+        optimized.append(name)
+    return solver, final_status, wall_time, tuple(optimized)
+
+
+def _add_maximum_wait_objective(
+    model: cp_model.CpModel,
+    possible_matches_by_team: Mapping[str, tuple[int, ...]],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    horizon: int,
+) -> cp_model.IntVar:
+    waiting_runs: list[cp_model.IntVar] = []
+    for team_id, relevant_matches in possible_matches_by_team.items():
+        activities = [
+            sum(match_in_section[index, section] for index in relevant_matches)
+            for section in range(horizon)
+        ]
+        previous_run: cp_model.IntVar | None = None
+        for section in range(horizon):
+            seen_before = model.new_bool_var(f"seen_before_{team_id}_{section}")
+            future_after = model.new_bool_var(f"future_after_{team_id}_{section}")
+            if section == 0:
+                model.add(seen_before == 0)
+            else:
+                model.add_max_equality(seen_before, activities[:section])
+            if section + 1 == horizon:
+                model.add(future_after == 0)
+            else:
+                model.add_max_equality(future_after, activities[section + 1 :])
+            between = model.new_bool_var(f"between_matches_{team_id}_{section}")
+            model.add(between <= seen_before)
+            model.add(between <= future_after)
+            model.add(between + activities[section] <= 1)
+            model.add(between >= seen_before + future_after - activities[section] - 1)
+            run = model.new_int_var(0, horizon, f"waiting_run_{team_id}_{section}")
+            prior = 0 if previous_run is None else previous_run
+            model.add(run == prior + 1).only_enforce_if(between)
+            model.add(run == 0).only_enforce_if(between.negated())
+            waiting_runs.append(run)
+            previous_run = run
+    maximum_wait = model.new_int_var(0, horizon, "maximum_team_wait_sections")
+    if waiting_runs:
+        model.add_max_equality(maximum_wait, waiting_runs)
+    else:
+        model.add(maximum_wait == 0)
+    return maximum_wait
+
+
+def _audit_schedule_quality(request: ScheduleRequest, slots: tuple[Slot, ...]) -> dict[str, int]:
+    match_by_id = {match.id: match for match in request.matches}
+    team_assignments: defaultdict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    match_sections: defaultdict[str, set[int]] = defaultdict(set)
+    organizer_count = 0
+    tournament_team_referees = 0
+    previous_same_court = 0
+    slots_by_position = {(slot.section_no, slot.court_id): slot for slot in slots}
+    for slot in slots:
+        if slot.match_id is None:
+            continue
+        match = match_by_id[slot.match_id]
+        for team_id in match.possible_team_ids:
+            team_assignments[team_id].append((slot.section_no, slot.court_id, "match"))
+            match_sections[team_id].add(slot.section_no)
+        assignment = slot.referee_assignment
+        if assignment is None:
+            continue
+        if assignment.kind is RefereeKind.ORGANIZER:
+            organizer_count += 1
+            continue
+        assert assignment.team_id is not None
+        team_assignments[assignment.team_id].append((slot.section_no, slot.court_id, "referee"))
+        if match.phase != "league":
+            tournament_team_referees += 1
+        previous = slots_by_position.get((slot.section_no - 1, slot.court_id))
+        if (
+            previous is not None
+            and previous.match_id is not None
+            and assignment.team_id in match_by_id[previous.match_id].possible_team_ids
+        ):
+            previous_same_court += 1
+
+    maximum_wait = max(
+        (
+            right - left - 1
+            for sections in match_sections.values()
+            for left, right in zip(sorted(sections), sorted(sections)[1:], strict=False)
+        ),
+        default=0,
+    )
+    referee_then_match = 0
+    adjacent_moves = 0
+    all_moves = 0
+    for entries in team_assignments.values():
+        ordered = sorted(entries)
+        for left, right in pairwise(ordered):
+            if left[1] != right[1]:
+                all_moves += 1
+                if right[0] == left[0] + 1:
+                    adjacent_moves += 1
+            if left[2] == "referee" and right[2] == "match" and right[0] == left[0] + 1:
+                referee_then_match += 1
+    court_counts = Counter(slot.court_id for slot in slots if slot.match_id is not None)
+    count_values = [court_counts[court.id] for court in request.courts]
+    return {
+        "maximum_team_wait_sections": maximum_wait,
+        "referee_then_match_count": referee_then_match,
+        "league_previous_same_court_referee_count": previous_same_court,
+        "adjacent_assignment_court_change_count": adjacent_moves,
+        "team_court_change_count": all_moves,
+        "court_usage_difference": max(count_values, default=0) - min(count_values, default=0),
+        "organizer_referee_count": organizer_count,
+        "tournament_team_referee_count": tournament_team_referees,
+    }
 
 
 def _with_total_solver_wall_time(

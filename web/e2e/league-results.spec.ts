@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  day2ScheduleResult,
   scheduleResult,
   standingsResult,
   tournamentFixture,
@@ -86,6 +87,7 @@ test("確定順位から2日目トーナメントを作成し、得点変更時�
   page,
 }) => {
   await mockExternalServices(page);
+  await page.setViewportSize({ width: 390, height: 844 });
   await openApp(page);
   const base = tournamentFixture({ withResult: true });
   await importDocument(page, {
@@ -155,4 +157,62 @@ test("確定順位はモバイルと印刷表示で確認できる", async ({ pa
   await expect(page.locator("#standings-confirmation")).toBeHidden();
   await expect(page.locator("#league-standings-view")).toBeVisible();
   await expect(page.locator("#tournament-plan-view")).toBeVisible();
+});
+
+test("トーナメント表から2日目日程を作成し、設定変更時は2日目だけ失効する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openApp(page);
+  const base = tournamentFixture({ withResult: true });
+  await importDocument(page, {
+    ...base,
+    tournament: {
+      ...base.tournament,
+      result: {
+        ...scheduleResult,
+        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
+        league_standings: standingsResult,
+        tournament_plan: tournamentPlanResult,
+      },
+    },
+  });
+  await page.unroute(GENERATE_API);
+  const requests: unknown[] = [];
+  await page.route(GENERATE_API, async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(day2ScheduleResult),
+    });
+  });
+
+  await expect(page.locator("#day2-confirmation")).toBeVisible();
+  await expect(page.getByRole("button", { name: "2日目の日程を作成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "2日目の日程を作成する" }).click();
+
+  await expect(page.locator("#day2-schedule-view")).toContainText("2日目の日程・審判");
+  expect(requests[0]).toMatchObject({
+    request_kind: "day2_schedule",
+    day: { id: "day2", start_time: "09:30", margin_minutes: 10 },
+    referees: { tournament_fallback: "organizer" },
+    tournament_plan: { status: "COMPLETE" },
+  });
+
+  await page.locator("#day2-margin-minutes").fill("15");
+  await page.locator("#day2-margin-minutes").blur();
+  await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
+  await expect(page.locator("#tournament-plan-view")).toBeVisible();
+  await expect(page.locator("#day2-status")).toContainText("以前の日程を取り消しました");
+  await page.getByRole("button", { name: "2日目の日程を作成する" }).click();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
+  await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
+  await page.context().setOffline(true);
+  await page.reload();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("#day2-confirmation")).toBeHidden();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
 });

@@ -18,7 +18,11 @@ def _event(
 ) -> dict[str, Any]:
     return {
         "httpMethod": method,
-        "headers": headers or {"content-type": "application/json"},
+        "headers": {
+            "content-type": "application/json",
+            "x-turnstile-action": "generate_schedule",
+            **(headers or {}),
+        },
         "body": body,
         "isBase64Encoded": base64_encoded,
         "requestContext": {"requestId": "not-logged"},
@@ -87,6 +91,26 @@ def test_completed_tournament_plan_returns_http_200(
     )
 
     response = api_handler.lambda_handler(_event("{}"), object())
+
+    assert response["statusCode"] == 200
+
+
+def test_day2_schedule_success_returns_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: {"status": "OPTIMAL", "schedule_scope": "day2_tournament"},
+    )
+
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"day2_schedule"}',
+            headers={"x-turnstile-action": "generate_day2_schedule"},
+        ),
+        object(),
+    )
 
     assert response["statusCode"] == 200
 
@@ -164,15 +188,38 @@ def test_technical_fixture_is_not_exposed_by_public_api(
     assert json.loads(response["body"])["diagnostics"][0]["code"] == "TEST_FIXTURE_NOT_ALLOWED"
 
 
+def test_turnstile_action_must_match_request_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: pytest.fail("application must not run"),
+    )
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"day2_schedule"}',
+            headers={"x-turnstile-action": "generate_tournament"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
+
+
 @pytest.mark.parametrize(
     ("code", "expected_status"),
     [
         ("INPUT_SCHEMA_INVALID", 400),
         ("INVALID_BLOCK_COUNT", 400),
         ("TOURNAMENT_SOURCE_INVALID", 400),
+        ("DAY_END_TIME_INVALID", 400),
+        ("DAY1_SCHEDULE_INVALID", 400),
         ("TEAM_LIMIT_EXCEEDED", 413),
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),
+        ("TOURNAMENT_REFEREE_UNAVAILABLE", 422),
         ("SCHEDULE_GENERATION_FAILED", 500),
     ],
 )

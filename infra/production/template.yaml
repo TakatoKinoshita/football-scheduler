@@ -325,7 +325,7 @@ Resources:
               type: request
               authorizerResultTtlInSeconds: 0
               identitySource: >-
-                method.request.header.X-Origin-Verify,method.request.header.Origin,method.request.header.X-Turnstile-Token
+                method.request.header.X-Origin-Verify,method.request.header.Origin,method.request.header.X-Turnstile-Token,method.request.header.X-Turnstile-Action
               authorizerUri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiAuthorizerFunction.Arn}/invocations"
 
   SolverInvokePermission:

@@ -138,6 +138,28 @@ function completedTournamentPlan() {
   };
 }
 
+function day2Document() {
+  const document = rankedDocument();
+  const result = document.tournament.result as Record<string, unknown>;
+  result.tournament_plan = completedTournamentPlan();
+  const integratedValidation = { valid: true, issues: [], summary: {} };
+  result.day2_schedule = {
+    schema_version: "0.1.0",
+    schedule_scope: "day2_tournament",
+    status: "OPTIMAL",
+    tournament_matches: [],
+    slots: [],
+    section_timings: [],
+    expected_end_time: null,
+    team_schedules: [],
+    metrics: { used_sections: 0 },
+    diagnostics: [],
+    integrated_validation: integratedValidation,
+  };
+  result.integrated_validation = integratedValidation;
+  return document;
+}
+
 describe("大会JSONの入出力", () => {
   it("書き出した文書を同じ内容で読み込む", () => {
     const document = validDocument();
@@ -271,6 +293,31 @@ describe("大会JSONの入出力", () => {
     result.tournament_plan = completedTournamentPlan();
 
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/確定順位がない/);
+  });
+
+  it("2日目設定・日程・統合検証を同じ内容で復元する", () => {
+    const document = day2Document();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("トーナメント表にない2日目試合参照を拒否する", () => {
+    const document = day2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    schedule.tournament_matches = [{ id: "UT-UNKNOWN" }];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/トーナメント表が一致/);
+  });
+
+  it("改ざんされた2日目の休憩設定を拒否する", () => {
+    const document = day2Document();
+    const day2 = document.tournament.input.day2 as Record<string, unknown>;
+    day2.breaks = [
+      { after_section: 4, duration_minutes: 60 },
+      { after_section: 4, duration_minutes: 30 },
+    ];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/休憩設定/);
   });
 
   it("ファイル名に使えない文字を置き換える", () => {

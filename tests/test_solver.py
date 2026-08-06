@@ -12,11 +12,15 @@ from football_scheduler.fixtures import (
     make_smoke_request,
 )
 from football_scheduler.models import (
+    Court,
     DaySettings,
     MatchSpec,
     RefereeKind,
+    RefereeSettings,
     ScheduleRequest,
+    SolverSettings,
     SolverStatus,
+    Team,
 )
 from football_scheduler.solver import solve_schedule
 
@@ -63,6 +67,69 @@ def test_maximum_mvp_fixture_uses_documented_input_limits() -> None:
     assert len(request.matches) == 48
     assert request.day.max_sections == 24
     assert request.solver.max_time_seconds == 20
+
+
+def _court_movement_request(*, unavoidable: bool) -> ScheduleRequest:
+    teams = tuple(Team(id=f"team-{index}", name=f"チーム{index}") for index in range(1, 7))
+    matches = (
+        MatchSpec(
+            id="UT-SOURCE-A",
+            phase="upper_tournament",
+            possible_home_team_ids=("team-1",),
+            possible_away_team_ids=("team-2",),
+            organizer_referee_required=True,
+        ),
+        MatchSpec(
+            id="UT-SOURCE-B",
+            phase="upper_tournament",
+            possible_home_team_ids=("team-3",),
+            possible_away_team_ids=("team-4",),
+            organizer_referee_required=True,
+        ),
+        MatchSpec(
+            id="UT-MIDDLE",
+            phase="upper_tournament",
+            possible_home_team_ids=("team-5",),
+            possible_away_team_ids=("team-6",),
+            organizer_referee_required=True,
+        ),
+        MatchSpec(
+            id="UT-FINAL",
+            phase="upper_tournament",
+            possible_home_team_ids=("team-1",),
+            possible_away_team_ids=(("team-3",) if unavoidable else ("team-2",)),
+            prerequisite_match_ids=(
+                ("UT-SOURCE-A", "UT-SOURCE-B") if unavoidable else ("UT-SOURCE-A",)
+            ),
+            organizer_referee_required=True,
+        ),
+    )
+    return ScheduleRequest(
+        teams=teams,
+        courts=(Court(id="court-1", name="1コート"), Court(id="court-2", name="2コート")),
+        matches=matches,
+        day=DaySettings(max_sections=4),
+        referees=RefereeSettings(organizer_capacity=2),
+        solver=SolverSettings(max_time_seconds=10),
+    )
+
+
+def test_total_court_movement_keeps_consecutive_assignments_on_the_same_court() -> None:
+    result = solve_schedule(_court_movement_request(unavoidable=False))
+    by_match = {slot.match_id: slot for slot in result.slots if slot.match_id is not None}
+
+    assert result.status is SolverStatus.OPTIMAL
+    assert by_match["UT-SOURCE-A"].court_id == by_match["UT-FINAL"].court_id
+    assert result.metrics.team_court_change_count == 0
+    assert "team_court_change_count" in result.metrics.optimized_objectives
+
+
+def test_total_court_movement_returns_the_minimum_when_one_move_is_unavoidable() -> None:
+    result = solve_schedule(_court_movement_request(unavoidable=True))
+
+    assert result.status is SolverStatus.OPTIMAL
+    assert result.metrics.team_court_change_count == 1
+    assert "team_court_change_count" in result.metrics.optimized_objectives
 
 
 def test_representative_fixture_satisfies_core_hard_constraints() -> None:

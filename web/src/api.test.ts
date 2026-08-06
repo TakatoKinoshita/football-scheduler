@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   API_PATH,
+  generateDay2Schedule,
   generateSchedule,
   generateTournamentPlan,
   ScheduleApiError,
@@ -27,6 +28,7 @@ describe("日程生成API", () => {
     );
     const [, options] = fetchMock.mock.calls[0] ?? [];
     expect(new Headers(options?.headers).has("x-api-key")).toBe(false);
+    expect(new Headers(options?.headers).get("x-turnstile-action")).toBe("generate_schedule");
   });
 
   it("安全確認なしでは通信しない", async () => {
@@ -91,5 +93,25 @@ describe("日程生成API", () => {
       status: "COMPLETE",
     });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
+      "generate_tournament",
+    );
+  });
+
+  it("2日目日程要求も同じ保護されたAPIへ送る", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ status: "OPTIMAL", schedule_scope: "day2_tournament" }), {
+        status: 200,
+      }),
+    );
+    const input = { request_kind: "day2_schedule" };
+
+    await expect(generateDay2Schedule(input, "token", fetchMock)).resolves.toMatchObject({
+      schedule_scope: "day2_tournament",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
+      "generate_day2_schedule",
+    );
   });
 });

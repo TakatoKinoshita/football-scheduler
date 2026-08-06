@@ -134,13 +134,314 @@ function nonNegativeInteger(value: unknown, label: string): number {
   return value;
 }
 
+function validateDay2Settings(input: JsonObject): JsonObject | undefined {
+  if (input.day2 === undefined) return undefined;
+  const day = objectValue(input.day2, "2日目設定を読み取れませんでした。");
+  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+  if (
+    day.id !== "day2" ||
+    typeof day.start_time !== "string" ||
+    !timePattern.test(day.start_time) ||
+    typeof day.game_duration_minutes !== "number" ||
+    !Number.isInteger(day.game_duration_minutes) ||
+    day.game_duration_minutes < 1 ||
+    typeof day.margin_minutes !== "number" ||
+    !Number.isInteger(day.margin_minutes) ||
+    day.margin_minutes < 0 ||
+    (day.end_time !== undefined &&
+      day.end_time !== null &&
+      (typeof day.end_time !== "string" || !timePattern.test(day.end_time))) ||
+    (day.max_sections !== undefined &&
+      day.max_sections !== null &&
+      (!Number.isInteger(day.max_sections) ||
+        Number(day.max_sections) < 1 ||
+        Number(day.max_sections) > LIMITS.sections))
+  ) {
+    throw new ImportValidationError("INVALID_DOCUMENT", "2日目の時刻設定が不正です。");
+  }
+  const breaks = arrayValue(day.breaks ?? [], "2日目の休憩", LIMITS.sections);
+  const sections = new Set<number>();
+  for (const item of breaks) {
+    const afterSection = nonNegativeInteger(item.after_section, "休憩前のセクション");
+    const duration = nonNegativeInteger(item.duration_minutes, "休憩時間");
+    if (
+      afterSection < 1 ||
+      afterSection > LIMITS.sections ||
+      duration < 1 ||
+      sections.has(afterSection)
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "2日目の休憩設定が不正です。");
+    }
+    sections.add(afterSection);
+  }
+  return day;
+}
+
+function clockMinutes(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
+  if (match === null) return undefined;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : undefined;
+}
+
+function validateDay2ScheduleResult(
+  result: JsonObject,
+  input: JsonObject,
+  teams: JsonObject[],
+  tournamentPlan: JsonObject,
+): void {
+  if (result.day2_schedule === undefined) {
+    if (result.integrated_validation !== undefined) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "2日目日程がないため、統合検証結果を復元できませんでした。",
+      );
+    }
+    return;
+  }
+  const day = validateDay2Settings(input);
+  if (day === undefined) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "2日目設定がないため、2日目日程を復元できませんでした。",
+    );
+  }
+  const schedule = objectValue(result.day2_schedule, "2日目日程を読み取れませんでした。");
+  if (
+    schedule.schema_version !== SCHEMA_VERSION ||
+    schedule.schedule_scope !== "day2_tournament" ||
+    !new Set(["OPTIMAL", "FEASIBLE"]).has(String(schedule.status))
+  ) {
+    throw new ImportValidationError("INVALID_DOCUMENT", "2日目日程の状態が不正です。");
+  }
+  const planMatches = [
+    ...arrayValue(objectValue(tournamentPlan.upper, "上位トーナメントが不正です。").matches, "上位試合", LIMITS.matches),
+    ...arrayValue(objectValue(tournamentPlan.lower, "下位トーナメントが不正です。").matches, "下位試合", LIMITS.matches),
+  ];
+  const expectedMatchIds = new Set(planMatches.map((match) => String(match.id)));
+  const scheduledMatches = arrayValue(
+    schedule.tournament_matches,
+    "2日目トーナメント試合",
+    LIMITS.matches,
+  );
+  const scheduledMatchIds = uniqueIds(scheduledMatches, "2日目トーナメント試合");
+  if (
+    scheduledMatchIds.size !== expectedMatchIds.size ||
+    [...scheduledMatchIds].some((matchId) => !expectedMatchIds.has(matchId))
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "2日目日程の試合とトーナメント表が一致しません。",
+    );
+  }
+  const courtIds = new Set(
+    arrayValue(input.courts, "コート", LIMITS.courts).map((court) => String(court.id)),
+  );
+  const slots = arrayValue(
+    schedule.slots,
+    "2日目スロット",
+    LIMITS.sections * LIMITS.courts,
+  );
+  const positions = new Set<string>();
+  const assignedMatches = new Set<string>();
+  for (const slot of slots) {
+    const section = nonNegativeInteger(slot.section_no, "2日目セクション番号");
+    const position = `${section}:${String(slot.court_id)}`;
+    if (
+      slot.day_id !== "day2" ||
+      section < 1 ||
+      section > LIMITS.sections ||
+      typeof slot.court_id !== "string" ||
+      !courtIds.has(slot.court_id) ||
+      positions.has(position)
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "2日目スロットの位置が不正です。");
+    }
+    positions.add(position);
+    if (slot.match_id === null) {
+      if (slot.referee_assignment !== null) {
+        throw new ImportValidationError("INVALID_REFERENCE", "空きスロットに審判が設定されています。");
+      }
+      continue;
+    }
+    if (
+      typeof slot.match_id !== "string" ||
+      !expectedMatchIds.has(slot.match_id) ||
+      assignedMatches.has(slot.match_id)
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "2日目の試合配置が重複または不足しています。");
+    }
+    assignedMatches.add(slot.match_id);
+    const referee = objectValue(slot.referee_assignment, "2日目の審判割当てを読み取れませんでした。");
+    if (referee.kind === "team") {
+      if (
+        typeof referee.source_match_id !== "string" ||
+        !expectedMatchIds.has(referee.source_match_id) ||
+        referee.source_match_id === slot.match_id ||
+        referee.team_id !== null && referee.team_id !== undefined
+      ) {
+        throw new ImportValidationError("INVALID_REFERENCE", "2日目の審判供給元が不正です。");
+      }
+    } else if (referee.kind === "organizer") {
+      if (
+        !new Set(["first_section", "tournament_final", "fallback"]).has(
+          String(referee.organizer_reason),
+        ) ||
+        !Array.isArray(referee.fallback_reasons) ||
+        referee.fallback_reasons.some((reason) => typeof reason !== "string")
+      ) {
+        throw new ImportValidationError("INVALID_REFERENCE", "主催者審判の理由が不正です。");
+      }
+    } else {
+      throw new ImportValidationError("INVALID_DOCUMENT", "2日目の審判種別が不正です。");
+    }
+  }
+  if (assignedMatches.size !== expectedMatchIds.size) {
+    throw new ImportValidationError("INVALID_REFERENCE", "2日目日程に不足している試合があります。");
+  }
+  const timings = arrayValue(schedule.section_timings, "2日目時刻", LIMITS.sections);
+  const timingSections = new Set<number>();
+  const timingBySection = new Map<number, JsonObject>();
+  for (const timing of timings) {
+    const section = nonNegativeInteger(timing.section_no, "2日目時刻のセクション");
+    if (
+      timing.day_id !== "day2" ||
+      section < 1 ||
+      timingSections.has(section) ||
+      typeof timing.start_time !== "string" ||
+      typeof timing.match_end_time !== "string"
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "2日目のセクション時刻が不正です。");
+    }
+    timingSections.add(section);
+    timingBySection.set(section, timing);
+  }
+  const usedSections = Math.max(
+    0,
+    ...slots
+      .filter((slot) => typeof slot.match_id === "string")
+      .map((slot) => Number(slot.section_no)),
+  );
+  const startMinutes = clockMinutes(day.start_time);
+  const duration = Number(day.game_duration_minutes);
+  const margin = Number(day.margin_minutes);
+  const breakMinutes = new Map(
+    arrayValue(day.breaks ?? [], "2日目の休憩", LIMITS.sections).map((item) => [
+      Number(item.after_section),
+      Number(item.duration_minutes),
+    ]),
+  );
+  if (timings.length !== usedSections || startMinutes === undefined) {
+    throw new ImportValidationError("INVALID_REFERENCE", "2日目の時刻一覧が日程と一致しません。");
+  }
+  for (let section = 1; section <= usedSections; section += 1) {
+    const expectedStart =
+      startMinutes +
+      (section - 1) * (duration + margin) +
+      [...breakMinutes]
+        .filter(([afterSection]) => afterSection < section)
+        .reduce((total, [, minutes]) => total + minutes, 0);
+    const timing = timingBySection.get(section);
+    if (
+      timing === undefined ||
+      clockMinutes(timing.start_time) !== expectedStart ||
+      clockMinutes(timing.match_end_time) !== expectedStart + duration ||
+      Number(timing.break_after_minutes ?? 0) !== (breakMinutes.get(section) ?? 0)
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "2日目のセクション時刻が設定と一致しません。");
+    }
+  }
+  const expectedEnd =
+    usedSections === 0
+      ? undefined
+      : clockMinutes(timingBySection.get(usedSections)?.match_end_time);
+  if (
+    (usedSections === 0 && schedule.expected_end_time !== null) ||
+    (usedSections > 0 && clockMinutes(schedule.expected_end_time) !== expectedEnd)
+  ) {
+    throw new ImportValidationError("INVALID_REFERENCE", "2日目の終了予定時刻が不正です。");
+  }
+  if (
+    (typeof day.max_sections === "number" && usedSections > day.max_sections) ||
+    (clockMinutes(day.end_time) !== undefined &&
+      expectedEnd !== undefined &&
+      expectedEnd > clockMinutes(day.end_time)!)
+  ) {
+    throw new ImportValidationError("INVALID_REFERENCE", "2日目日程が設定した上限を超えています。");
+  }
+  const teamIds = new Set(teams.map((team) => String(team.id)));
+  for (const route of arrayValue(
+    schedule.team_schedules,
+    "2日目チーム経路",
+    LIMITS.matches * LIMITS.teams,
+  )) {
+    if (
+      typeof route.team_id !== "string" ||
+      !teamIds.has(route.team_id) ||
+      typeof route.match_id !== "string" ||
+      !expectedMatchIds.has(route.match_id) ||
+      !courtIds.has(String(route.court_id)) ||
+      !new Set(["match", "referee"]).has(String(route.role)) ||
+      !Array.isArray(route.conditions) ||
+      route.conditions.some((condition) => typeof condition !== "string")
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "2日目のチーム経路が不正です。");
+    }
+  }
+  const metrics = objectValue(schedule.metrics, "2日目の監査値を読み取れませんでした。");
+  for (const field of [
+    "used_sections",
+    "maximum_team_wait_sections",
+    "referee_then_match_count",
+    "adjacent_assignment_court_change_count",
+    "team_court_change_count",
+    "court_usage_difference",
+    "organizer_referee_count",
+    "tournament_team_referee_count",
+    "tournament_referee_fallback_count",
+    "unused_slot_count",
+  ]) {
+    if (metrics[field] !== undefined) nonNegativeInteger(metrics[field], `2日目監査値${field}`);
+  }
+  for (const stage of arrayValue(metrics.objective_stages ?? [], "目的別監査値", 16)) {
+    if (
+      typeof stage.objective !== "string" ||
+      stage.objective.length === 0 ||
+      typeof stage.optimality_proven !== "boolean"
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "目的別監査値が不正です。");
+    }
+    nonNegativeInteger(stage.value, `目的${stage.objective}の値`);
+  }
+  const integrated = objectValue(
+    schedule.integrated_validation,
+    "2日間の統合検証を読み取れませんでした。",
+  );
+  if (
+    integrated.valid !== true ||
+    !Array.isArray(integrated.diagnostics ?? integrated.issues)
+  ) {
+    throw new ImportValidationError("INVALID_DOCUMENT", "2日間の統合検証に合格していません。");
+  }
+  if (
+    result.integrated_validation === undefined ||
+    JSON.stringify(result.integrated_validation) !== JSON.stringify(schedule.integrated_validation)
+  ) {
+    throw new ImportValidationError("INVALID_REFERENCE", "保存された統合検証結果が一致しません。");
+  }
+}
+
 function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: JsonObject): void {
   const planValue = result.league_plan;
   if (planValue === undefined) {
     if (
       result.league_results !== undefined ||
       result.league_standings !== undefined ||
-      result.tournament_plan !== undefined
+      result.tournament_plan !== undefined ||
+      result.day2_schedule !== undefined ||
+      result.integrated_validation !== undefined
     ) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
@@ -259,7 +560,11 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
 
   if (result.league_standings === undefined) {
-    if (result.tournament_plan !== undefined) {
+    if (
+      result.tournament_plan !== undefined ||
+      result.day2_schedule !== undefined ||
+      result.integrated_validation !== undefined
+    ) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
         "確定順位がないため、2日目トーナメントを復元できませんでした。",
@@ -360,12 +665,22 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
         expectedUpperTeams.add(String(row.team_id));
       }
     }
+    const tournamentPlan = objectValue(
+      result.tournament_plan,
+      "2日目トーナメントを読み取れませんでした。",
+    );
     validateTournamentPlan(
-      objectValue(result.tournament_plan, "2日目トーナメントを読み取れませんでした。"),
+      tournamentPlan,
       rows,
       teamIds,
       oddSplitPolicy,
       expectedUpperTeams,
+    );
+    validateDay2ScheduleResult(result, input, teams, tournamentPlan);
+  } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "トーナメント表がないため、2日目日程を復元できませんでした。",
     );
   }
 }
@@ -765,6 +1080,7 @@ export function parseTournamentJson(text: string): TournamentDocument {
     ? []
     : arrayValue(input.matches, "試合", LIMITS.matches);
   validateReferences(input, teams, matches);
+  validateDay2Settings(input);
   if (tournament.result !== undefined) {
     validateLeagueResult(
       objectValue(tournament.result, "生成結果を読み取れませんでした。"),

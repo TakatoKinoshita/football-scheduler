@@ -141,6 +141,34 @@ export const tournamentPlanResult = {
   warnings: [],
 };
 
+export const day2ScheduleResult = {
+  schema_version: "0.1.0",
+  schedule_scope: "day2_tournament",
+  status: "OPTIMAL",
+  tournament_matches: [],
+  slots: [],
+  section_timings: [],
+  expected_end_time: null,
+  team_schedules: [],
+  metrics: {
+    random_seed: 20260803,
+    max_time_seconds: 30,
+    ortools_version: "test",
+    wall_time_seconds: 0,
+    used_sections: 0,
+    objective_value: 0,
+    best_objective_bound: 0,
+    organizer_referee_count: 0,
+    tournament_team_referee_count: 0,
+    tournament_referee_fallback_count: 0,
+    optimized_objectives: ["used_sections"],
+    optimality_proven: true,
+  },
+  diagnostics: [],
+  validation: { valid: true, issues: [], summary: {} },
+  integrated_validation: { valid: true, issues: [], summary: {} },
+};
+
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",

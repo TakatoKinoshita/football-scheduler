@@ -31,7 +31,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 JsonObject = dict[str, Any]
@@ -127,6 +127,783 @@ def validate_schedule(document: Any) -> JsonObject:
         slot_count=len(normalized_slots),
         summary_details=_league_team_referee_summary(data, matches_by_id, normalized_slots),
     )
+
+
+def validate_day2_schedule(document: Any) -> JsonObject:
+    """2日目トーナメント日程を勝敗経路と審判規則を含めて独立検証する。"""
+
+    data = _to_plain_data(document)
+    if not isinstance(data, Mapping):
+        return _report(
+            [_diagnostic("INVALID_DOCUMENT", "検証対象はオブジェクトである必要があります。")],
+            match_count=0,
+            slot_count=0,
+        )
+    matches = _extract_matches(data)
+    slots = _extract_slots(data)
+    diagnostics: list[JsonObject] = []
+    match_ids = [str(match.get("id", "")) for match in matches]
+    duplicates = sorted(
+        match_id for match_id, count in Counter(match_ids).items() if match_id and count > 1
+    )
+    for index, match_id in enumerate(match_ids):
+        if not match_id:
+            diagnostics.append(
+                _diagnostic(
+                    "MATCH_ID_MISSING",
+                    "試合にmatch IDがありません。",
+                    path=f"matches[{index}].id",
+                )
+            )
+    for match_id in duplicates:
+        diagnostics.append(
+            _diagnostic(
+                "MATCH_ID_DUPLICATED",
+                f"match ID「{match_id}」が試合定義内で重複しています。",
+                match_id=match_id,
+            )
+        )
+    matches_by_id = {
+        str(match["id"]): match
+        for match in matches
+        if match.get("id") and str(match["id"]) not in duplicates
+    }
+    normalized_slots: list[JsonObject] = []
+    for index, slot in enumerate(slots):
+        normalized = _normalize_slot(slot, index, diagnostics)
+        if normalized is not None:
+            normalized_slots.append(normalized)
+    _validate_match_assignments(matches_by_id, normalized_slots, duplicates, diagnostics)
+    _validate_slot_uniqueness(normalized_slots, diagnostics)
+
+    try:
+        paths = _independent_tournament_paths(data, matches_by_id)
+    except ValueError as exc:
+        diagnostics.append(
+            _diagnostic(
+                "TOURNAMENT_REFERENCE_INVALID",
+                "トーナメントの勝敗参照を独立検証できませんでした。",
+                reason=str(exc)[:200],
+            )
+        )
+        paths = {}
+    if paths:
+        _validate_path_aware_match_conflicts(normalized_slots, matches_by_id, paths, diagnostics)
+        _validate_day2_dependencies(normalized_slots, matches_by_id, diagnostics)
+        _validate_day2_referees(data, normalized_slots, matches_by_id, paths, diagnostics)
+    _validate_day2_timing(data, normalized_slots, diagnostics)
+    _validate_max_sections(normalized_slots, _max_sections(data), diagnostics)
+    summary = _day2_summary(data, matches_by_id, normalized_slots)
+    _validate_day2_metrics(data, summary, diagnostics)
+    return _report(
+        diagnostics,
+        match_count=len(matches),
+        slot_count=len(normalized_slots),
+        summary_details=summary,
+    )
+
+
+def _validate_day2_timing(
+    data: Mapping[str, Any],
+    slots: Sequence[Mapping[str, Any]],
+    diagnostics: list[JsonObject],
+) -> None:
+    config = _config(data)
+    days = config.get("days")
+    day = days.get("day2") if isinstance(days, Mapping) else None
+    schedule = data.get("schedule")
+    if not isinstance(day, Mapping) or not isinstance(schedule, Mapping):
+        return
+    start = _clock_minutes(day.get("start_time"))
+    duration = day.get("game_duration_minutes")
+    margin = day.get("margin_minutes")
+    if (
+        start is None
+        or not isinstance(duration, int)
+        or isinstance(duration, bool)
+        or duration <= 0
+        or not isinstance(margin, int)
+        or isinstance(margin, bool)
+        or margin < 0
+    ):
+        diagnostics.append(
+            _diagnostic(
+                "SCHEDULE_TIMING_MISMATCH",
+                "2日目の時刻設定を独立検証できませんでした。",
+            )
+        )
+        return
+    breaks: dict[int, int] = {}
+    raw_breaks = day.get("breaks")
+    if isinstance(raw_breaks, Sequence) and not isinstance(raw_breaks, (str, bytes, bytearray)):
+        for item in raw_breaks:
+            if not isinstance(item, Mapping):
+                continue
+            section = item.get("after_section")
+            minutes = item.get("duration_minutes")
+            if isinstance(section, int) and isinstance(minutes, int):
+                breaks[section] = minutes
+    used = max((int(slot["section_no"]) for slot in slots if slot.get("match_id")), default=0)
+    timings = _as_mapping_list(schedule.get("section_timings"))
+    by_section = {
+        int(item["section_no"]): item for item in timings if isinstance(item.get("section_no"), int)
+    }
+    if len(timings) != used or len(by_section) != used:
+        diagnostics.append(
+            _diagnostic(
+                "SCHEDULE_TIMING_MISMATCH",
+                "使用セクション数と2日目の時刻一覧が一致しません。",
+                used_sections=used,
+                timing_count=len(timings),
+            )
+        )
+        return
+    for section in range(1, used + 1):
+        expected_start = (
+            start
+            + (section - 1) * (duration + margin)
+            + sum(minutes for after, minutes in breaks.items() if after < section)
+        )
+        timing = by_section.get(section)
+        if (
+            timing is None
+            or timing.get("day_id") != "day2"
+            or _clock_minutes(timing.get("start_time")) != expected_start
+            or _clock_minutes(timing.get("match_end_time")) != expected_start + duration
+            or timing.get("break_after_minutes", 0) != breaks.get(section, 0)
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "SCHEDULE_TIMING_MISMATCH",
+                    f"2日目の第{section}セクションの時刻が設定と一致しません。",
+                    section_no=section,
+                )
+            )
+    expected_end = None if used == 0 else _clock_minutes(by_section[used].get("match_end_time"))
+    supplied_end = schedule.get("expected_end_time")
+    if (supplied_end is None) != (expected_end is None) or (
+        supplied_end is not None and _clock_minutes(supplied_end) != expected_end
+    ):
+        diagnostics.append(
+            _diagnostic(
+                "SCHEDULE_TIMING_MISMATCH",
+                "2日目の終了予定時刻が最終セクションと一致しません。",
+            )
+        )
+    configured_end = _clock_minutes(day.get("end_time"))
+    if configured_end is not None and expected_end is not None and expected_end > configured_end:
+        diagnostics.append(
+            _diagnostic(
+                "DAY_END_TIME_EXCEEDED",
+                "2日目の日程が設定した終了時刻を超えています。",
+            )
+        )
+
+
+def _clock_minutes(value: Any) -> int | None:
+    if hasattr(value, "hour") and hasattr(value, "minute"):
+        return int(value.hour) * 60 + int(value.minute)
+    if not isinstance(value, str):
+        return None
+    parts = value.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    return hour * 60 + minute if 0 <= hour <= 23 and 0 <= minute <= 59 else None
+
+
+def _independent_tournament_paths(
+    data: Mapping[str, Any], matches_by_id: Mapping[str, Mapping[str, Any]]
+) -> dict[str, dict[str, frozenset[frozenset[str]]]]:
+    plan = data.get("tournament_plan")
+    if not isinstance(plan, Mapping):
+        config = _config(data)
+        plan = config.get("tournament_plan")
+    ranks: dict[tuple[str, int], str] = {}
+    known_teams: set[str] = set()
+    if isinstance(plan, Mapping):
+        for pool_name in ("upper", "lower"):
+            pool = plan.get(pool_name)
+            if not isinstance(pool, Mapping):
+                continue
+            for seed in _as_mapping_list(pool.get("seeds")):
+                block_id, rank, team_id = (
+                    seed.get("block_id"),
+                    seed.get("block_rank"),
+                    seed.get("team_id"),
+                )
+                if (
+                    block_id not in (None, "")
+                    and isinstance(rank, int)
+                    and team_id
+                    not in (
+                        None,
+                        "",
+                    )
+                ):
+                    ranks[str(block_id), rank] = str(team_id)
+                    known_teams.add(str(team_id))
+    for team in _as_mapping_list(_config(data).get("teams")):
+        if team.get("id") not in (None, ""):
+            known_teams.add(str(team["id"]))
+
+    cache: dict[str, dict[str, frozenset[frozenset[str]]]] = {}
+    visiting: set[str] = set()
+
+    def entry_paths(entry: Any) -> dict[str, frozenset[frozenset[str]]]:
+        if not isinstance(entry, Mapping):
+            raise ValueError("entryがオブジェクトではありません")
+        kind = str(entry.get("type", "")).lower().replace("-", "_")
+        if kind in {"concrete_team", "concrete", "team"}:
+            team_id = entry.get("team_id", entry.get("id"))
+            if team_id in (None, "") or str(team_id) not in known_teams:
+                raise ValueError("未登録チーム参照があります")
+            return {str(team_id): frozenset({frozenset()})}
+        if kind == "league_rank":
+            block_id, rank = entry.get("block_id"), entry.get("rank")
+            team_id = ranks.get((str(block_id), rank)) if isinstance(rank, int) else None
+            if team_id is None:
+                raise ValueError("存在しないリーグ順位参照があります")
+            return {team_id: frozenset({frozenset()})}
+        if kind in {"winner_of", "loser_of"}:
+            source_id = entry.get("match_id", entry.get("source_match_id"))
+            if source_id in (None, ""):
+                raise ValueError("勝敗参照にmatch IDがありません")
+            outcome = "W" if kind == "winner_of" else "L"
+            source = match_paths(str(source_id))
+            return {
+                team_id: frozenset(
+                    condition | {f"{outcome}:{source_id}"} for condition in conditions
+                )
+                for team_id, conditions in source.items()
+            }
+        raise ValueError("未対応のentry種別です")
+
+    def match_paths(match_id: str) -> dict[str, frozenset[frozenset[str]]]:
+        if match_id in cache:
+            return cache[match_id]
+        if match_id in visiting:
+            raise ValueError("試合依存関係が循環しています")
+        match = matches_by_id.get(match_id)
+        if match is None:
+            raise ValueError("未定義の試合参照があります")
+        visiting.add(match_id)
+        home, away = entry_paths(match.get("home")), entry_paths(match.get("away"))
+        for team_id in set(home) & set(away):
+            if any(
+                _independent_conditions_compatible(left, right)
+                for left in home[team_id]
+                for right in away[team_id]
+            ):
+                raise ValueError("同じチームが対戦の両側へ入る経路があります")
+        merged = {
+            team_id: frozenset((*home.get(team_id, ()), *away.get(team_id, ())))
+            for team_id in set(home) | set(away)
+        }
+        visiting.remove(match_id)
+        cache[match_id] = merged
+        return merged
+
+    for match_id in matches_by_id:
+        match_paths(match_id)
+    return cache
+
+
+def _validate_path_aware_match_conflicts(
+    slots: Sequence[Mapping[str, Any]],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    paths: Mapping[str, Mapping[str, frozenset[frozenset[str]]]],
+    diagnostics: list[JsonObject],
+) -> None:
+    by_section: defaultdict[tuple[str, int], list[Mapping[str, Any]]] = defaultdict(list)
+    for slot in slots:
+        if slot.get("match_id") in matches_by_id:
+            by_section[str(slot["day_id"]), int(slot["section_no"])].append(slot)
+    for (day_id, section), section_slots in sorted(by_section.items()):
+        for left_index, left in enumerate(section_slots):
+            for right in section_slots[left_index + 1 :]:
+                left_id, right_id = str(left["match_id"]), str(right["match_id"])
+                conflict = _independent_paths_overlap(paths[left_id], paths[right_id])
+                if conflict:
+                    diagnostics.append(
+                        _diagnostic(
+                            "TEAM_SAME_SECTION_CONFLICT",
+                            f"{day_id}の第{section}セクションで、同じチームが複数試合へ進む勝敗経路があります。",
+                            match_ids=[left_id, right_id],
+                            possible_team_ids=sorted(conflict),
+                        )
+                    )
+    for (day_id, section), earlier_slots in sorted(by_section.items()):
+        for earlier in earlier_slots:
+            for later in by_section.get((day_id, section + 1), []):
+                earlier_id, later_id = str(earlier["match_id"]), str(later["match_id"])
+                conflict = _independent_paths_overlap(paths[earlier_id], paths[later_id])
+                if conflict:
+                    diagnostics.append(
+                        _diagnostic(
+                            "TEAM_CONSECUTIVE_SECTION_CONFLICT",
+                            f"{day_id}の連続セクションで同じチームが試合をする勝敗経路があります。",
+                            section_nos=[section, section + 1],
+                            match_ids=[earlier_id, later_id],
+                            possible_team_ids=sorted(conflict),
+                        )
+                    )
+
+
+def _validate_day2_dependencies(
+    slots: Sequence[Mapping[str, Any]],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    diagnostics: list[JsonObject],
+) -> None:
+    positions = {
+        str(slot["match_id"]): slot for slot in slots if slot.get("match_id") in matches_by_id
+    }
+    preliminary_positions = [
+        positions[match_id]
+        for match_id, match in matches_by_id.items()
+        if bool(match.get("preliminary")) and match_id in positions
+    ]
+    for match_id, match in matches_by_id.items():
+        target = positions.get(match_id)
+        if target is None:
+            continue
+        dependencies = _string_set(match.get("prerequisite_match_ids")) | _dependency_ids(match)
+        for dependency_id in dependencies:
+            source = positions.get(dependency_id)
+            if source is None:
+                continue
+            gap = int(target["section_no"]) - int(source["section_no"])
+            if gap < 2:
+                diagnostics.append(
+                    _diagnostic(
+                        "DEPENDENCY_REST_VIOLATION",
+                        f"試合「{dependency_id}」と後続試合「{match_id}」の間に完全な休憩セクションがありません。",
+                        match_id=match_id,
+                        dependency_match_id=dependency_id,
+                        section_gap=gap,
+                    )
+                )
+        if not bool(match.get("preliminary")):
+            for preliminary in preliminary_positions:
+                if int(target["section_no"]) <= int(preliminary["section_no"]):
+                    diagnostics.append(
+                        _diagnostic(
+                            "PRELIMINARY_BARRIER_VIOLATION",
+                            "全予備戦が終わる前に本戦が開始されています。",
+                            match_id=match_id,
+                        )
+                    )
+                    break
+
+
+def _validate_day2_referees(
+    data: Mapping[str, Any],
+    slots: Sequence[Mapping[str, Any]],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    paths: Mapping[str, Mapping[str, frozenset[frozenset[str]]]],
+    diagnostics: list[JsonObject],
+) -> None:
+    occupied = [slot for slot in slots if slot.get("match_id") in matches_by_id]
+    by_section: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
+    by_court: defaultdict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for slot in occupied:
+        by_section[int(slot["section_no"])].append(slot)
+        by_court[str(slot["court_id"])].append(slot)
+    for court_slots in by_court.values():
+        court_slots.sort(key=lambda item: int(item["section_no"]))
+    capacity = _organizer_capacity(data)
+    fallback = _tournament_fallback(data)
+    for section, section_slots in sorted(by_section.items()):
+        organizer_count = sum(
+            _referee_with_source(slot)[0] == "organizer" for slot in section_slots
+        )
+        if capacity is not None and organizer_count > capacity:
+            diagnostics.append(
+                _diagnostic(
+                    "ORGANIZER_CAPACITY_EXCEEDED",
+                    f"day2の第{section}セクションで主催者審判が{organizer_count}件必要ですが、上限は{capacity}件です。",
+                    section_no=section,
+                    required=organizer_count,
+                    capacity=capacity,
+                )
+            )
+
+    source_use: Counter[tuple[int, str]] = Counter()
+    referee_paths_by_section: defaultdict[int, list[Mapping[str, frozenset[frozenset[str]]]]] = (
+        defaultdict(list)
+    )
+    for slot in sorted(occupied, key=lambda item: (int(item["section_no"]), str(item["court_id"]))):
+        match_id = str(slot["match_id"])
+        match = matches_by_id[match_id]
+        section = int(slot["section_no"])
+        kind, source_id, reason, supplied_reasons = _referee_with_source(slot)
+        required_reason = (
+            "first_section"
+            if section == 1
+            else "tournament_final"
+            if bool(match.get("final"))
+            else None
+        )
+        if required_reason is not None:
+            if kind != "organizer" or reason not in {None, required_reason}:
+                diagnostics.append(
+                    _diagnostic(
+                        "TOURNAMENT_ORGANIZER_REFEREE_REQUIRED",
+                        "第1セクションと各トーナメント決勝は主催者審判にしてください。",
+                        match_id=match_id,
+                        required_reason=required_reason,
+                    )
+                )
+            continue
+        previous = max(
+            (item for item in by_court[str(slot["court_id"])] if int(item["section_no"]) < section),
+            key=lambda item: int(item["section_no"]),
+            default=None,
+        )
+        expected_source = None if previous is None else str(previous["match_id"])
+        expected_reasons: list[str] = []
+        if expected_source is None:
+            expected_reasons.append("no_previous_match")
+        else:
+            source_paths = _independent_add_outcome(paths[expected_source], expected_source, "W")
+            if _independent_paths_overlap(source_paths, paths[match_id]):
+                expected_reasons.append("source_may_play_target")
+            if any(
+                _independent_paths_overlap(source_paths, paths[str(other["match_id"])])
+                for other in by_section[section]
+                if other is not slot
+            ):
+                expected_reasons.append("source_may_have_same_section_role")
+            if source_use[section, expected_source] > 0:
+                expected_reasons.append("source_used_twice_in_section")
+            if any(
+                _independent_paths_overlap(source_paths, assigned_paths)
+                for assigned_paths in referee_paths_by_section[section]
+            ):
+                expected_reasons.append("source_may_referee_twice_in_section")
+        if expected_reasons:
+            if kind != "organizer" or reason != "fallback":
+                diagnostics.append(
+                    _diagnostic(
+                        "TOURNAMENT_REFEREE_SOURCE_CONFLICT",
+                        "直前試合の勝者を安全に審判へ割り当てられません。",
+                        match_id=match_id,
+                        expected_reasons=expected_reasons,
+                    )
+                )
+            elif set(supplied_reasons) != set(expected_reasons):
+                diagnostics.append(
+                    _diagnostic(
+                        "TOURNAMENT_REFEREE_FALLBACK_REASON_MISMATCH",
+                        "主催者へ切り替えた理由が独立集計と一致しません。",
+                        match_id=match_id,
+                        expected_reasons=expected_reasons,
+                        actual_reasons=list(supplied_reasons),
+                    )
+                )
+            if fallback == "strict":
+                diagnostics.append(
+                    _diagnostic(
+                        "TOURNAMENT_STRICT_FALLBACK_FORBIDDEN",
+                        "厳格モードでは主催者へのフォールバックを利用できません。",
+                        match_id=match_id,
+                    )
+                )
+            continue
+        if kind != "team" or source_id != expected_source:
+            diagnostics.append(
+                _diagnostic(
+                    "TOURNAMENT_PREVIOUS_WINNER_REFEREE_REQUIRED",
+                    "同じコートの直前の実試合の勝者を審判へ割り当ててください。",
+                    match_id=match_id,
+                    expected_source_match_id=expected_source,
+                )
+            )
+        elif source_id is not None:
+            source_use[section, source_id] += 1
+            referee_paths_by_section[section].append(
+                _independent_add_outcome(paths[source_id], source_id, "W")
+            )
+
+
+def _day2_summary(
+    data: Mapping[str, Any],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+) -> JsonObject:
+    occupied = [slot for slot in slots if slot.get("match_id") in matches_by_id]
+    used_sections = max((int(slot["section_no"]) for slot in occupied), default=0)
+    organizer = 0
+    fallback = 0
+    for slot in occupied:
+        kind, _source, reason, _reasons = _referee_with_source(slot)
+        organizer += kind == "organizer"
+        fallback += reason == "fallback"
+    court_ids = [
+        str(court["id"])
+        for court in _as_mapping_list(_config(data).get("courts"))
+        if court.get("id") not in (None, "")
+    ]
+    court_counts = Counter(str(slot["court_id"]) for slot in occupied)
+    counts = [court_counts[court_id] for court_id in court_ids]
+    positions = {str(slot["match_id"]): slot for slot in occupied}
+    waits: list[int] = []
+    for match_id, match in matches_by_id.items():
+        target = positions.get(match_id)
+        if target is None:
+            continue
+        for dependency in _string_set(match.get("prerequisite_match_ids")) | _dependency_ids(match):
+            source = positions.get(dependency)
+            if source is not None:
+                waits.append(int(target["section_no"]) - int(source["section_no"]) - 1)
+    dependency_court_changes = 0
+    for match_id, match in matches_by_id.items():
+        target = positions.get(match_id)
+        if target is None:
+            continue
+        dependencies = _string_set(match.get("prerequisite_match_ids")) | _dependency_ids(match)
+        dependency_court_changes += sum(
+            positions.get(dependency) is not None
+            and str(positions[dependency]["court_id"]) != str(target["court_id"])
+            for dependency in dependencies
+        )
+
+    routes: defaultdict[str, list[tuple[str, int, str, str, frozenset[str]]]] = defaultdict(list)
+    try:
+        paths = _independent_tournament_paths(data, matches_by_id)
+    except ValueError:
+        paths = {}
+    for slot in occupied:
+        match_id = str(slot["match_id"])
+        for team_id, conditions in paths.get(match_id, {}).items():
+            for condition in conditions:
+                routes[team_id].append(
+                    (
+                        "match",
+                        int(slot["section_no"]),
+                        str(slot["court_id"]),
+                        match_id,
+                        condition,
+                    )
+                )
+        kind, source_id, _reason, _reasons = _referee_with_source(slot)
+        if kind != "team" or source_id is None or source_id not in paths:
+            continue
+        for team_id, conditions in _independent_add_outcome(
+            paths[source_id], source_id, "W"
+        ).items():
+            for condition in conditions:
+                routes[team_id].append(
+                    (
+                        "referee",
+                        int(slot["section_no"]),
+                        str(slot["court_id"]),
+                        match_id,
+                        condition,
+                    )
+                )
+    referee_then_match: set[tuple[str, str, str]] = set()
+    adjacent_moves: set[tuple[str, str, str]] = set()
+    for team_id, entries in routes.items():
+        for left in entries:
+            for right in entries:
+                if right[1] != left[1] + 1:
+                    continue
+                if not _independent_conditions_compatible(left[4], right[4]):
+                    continue
+                if left[0] == "referee" and right[0] == "match":
+                    referee_then_match.add((team_id, left[3], right[3]))
+                if left[2] != right[2]:
+                    adjacent_moves.add((team_id, left[3], right[3]))
+    return {
+        **_day1_fixed_objective_summary(data),
+        "used_sections": used_sections,
+        "maximum_team_wait_sections": max(waits, default=0),
+        "organizer_referee_count": organizer,
+        "tournament_team_referee_count": len(occupied) - organizer,
+        "tournament_referee_fallback_count": fallback,
+        "referee_then_match_count": len(referee_then_match),
+        "adjacent_assignment_court_change_count": len(adjacent_moves),
+        "team_court_change_count": dependency_court_changes,
+        "court_usage_difference": max(counts, default=0) - min(counts, default=0),
+        "unused_slot_count": len(slots) - len(occupied),
+    }
+
+
+def _day1_fixed_objective_summary(data: Mapping[str, Any]) -> JsonObject:
+    """2日目で変更しないリーグ審判目的を、1日目スロットから再集計する。"""
+
+    team_ids = sorted(
+        str(team["id"])
+        for team in _as_mapping_list(_config(data).get("teams"))
+        if team.get("id") not in (None, "")
+    )
+    counts = {team_id: 0 for team_id in team_ids}
+    league_plan = data.get("league_plan")
+    raw_matches = league_plan.get("matches") if isinstance(league_plan, Mapping) else None
+    match_teams: dict[str, set[str]] = {}
+    for match in _as_mapping_list(raw_matches):
+        match_id = match.get("id")
+        if match_id in (None, ""):
+            continue
+        match_teams[str(match_id)] = {
+            *(_string_set(match.get("possible_home_team_ids"))),
+            *(_string_set(match.get("possible_away_team_ids"))),
+        }
+    source = data.get("day1_schedule")
+    source_slots = source.get("slots") if isinstance(source, Mapping) else None
+    slots = _as_mapping_list(source_slots)
+    by_position = {
+        (slot.get("section_no"), str(slot.get("court_id"))): slot
+        for slot in slots
+        if isinstance(slot.get("section_no"), int) and slot.get("court_id") not in (None, "")
+    }
+    previous_same_court = 0
+    for slot in slots:
+        match_id = str(slot.get("match_id", ""))
+        if match_id not in match_teams:
+            continue
+        assignment = slot.get("referee_assignment", slot.get("referee"))
+        if not isinstance(assignment, Mapping):
+            continue
+        kind = assignment.get("kind", assignment.get("type"))
+        team_id = assignment.get("team_id")
+        if kind != "team" or team_id in (None, "") or str(team_id) not in counts:
+            continue
+        referee_team_id = str(team_id)
+        counts[referee_team_id] += 1
+        section = slot.get("section_no")
+        court_id = str(slot.get("court_id"))
+        if not isinstance(section, int):
+            continue
+        previous = by_position.get((section - 1, court_id))
+        previous_match_id = (
+            str(previous.get("match_id", "")) if isinstance(previous, Mapping) else ""
+        )
+        if referee_team_id in match_teams.get(previous_match_id, set()):
+            previous_same_court += 1
+    values = list(counts.values())
+    minimum = min(values, default=0)
+    maximum = max(values, default=0)
+    return {
+        "league_team_referee_counts": [
+            {"team_id": team_id, "count": counts[team_id]} for team_id in team_ids
+        ],
+        "league_team_referee_count_min": minimum,
+        "league_team_referee_count_max": maximum,
+        "league_team_referee_count_difference": maximum - minimum,
+        "league_previous_same_court_referee_count": previous_same_court,
+    }
+
+
+def _validate_day2_metrics(
+    data: Mapping[str, Any], summary: Mapping[str, Any], diagnostics: list[JsonObject]
+) -> None:
+    metrics = data.get("metrics")
+    if metrics is None:
+        schedule = data.get("schedule")
+        if isinstance(schedule, Mapping):
+            metrics = schedule.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return
+    for key in (
+        "league_team_referee_counts",
+        "league_team_referee_count_min",
+        "league_team_referee_count_max",
+        "league_team_referee_count_difference",
+        "league_previous_same_court_referee_count",
+        "used_sections",
+        "maximum_team_wait_sections",
+        "organizer_referee_count",
+        "tournament_team_referee_count",
+        "tournament_referee_fallback_count",
+        "referee_then_match_count",
+        "adjacent_assignment_court_change_count",
+        "team_court_change_count",
+        "court_usage_difference",
+        "unused_slot_count",
+    ):
+        if key in metrics and metrics[key] != summary[key]:
+            diagnostics.append(
+                _diagnostic(
+                    "SCHEDULE_AUDIT_MISMATCH",
+                    "ソルバーの監査値と独立集計が一致しません。",
+                    field=key,
+                    expected=summary[key],
+                    actual=metrics[key],
+                )
+            )
+
+
+def _independent_paths_overlap(
+    left: Mapping[str, Iterable[frozenset[str]]],
+    right: Mapping[str, Iterable[frozenset[str]]],
+) -> set[str]:
+    return {
+        team_id
+        for team_id in set(left) & set(right)
+        if any(
+            _independent_conditions_compatible(left_condition, right_condition)
+            for left_condition in left[team_id]
+            for right_condition in right[team_id]
+        )
+    }
+
+
+def _independent_conditions_compatible(left: frozenset[str], right: frozenset[str]) -> bool:
+    outcomes: dict[str, str] = {}
+    for literal in (*left, *right):
+        outcome, separator, match_id = literal.partition(":")
+        if separator == "" or outcome not in {"W", "L"}:
+            continue
+        previous = outcomes.get(match_id)
+        if previous is not None and previous != outcome:
+            return False
+        outcomes[match_id] = outcome
+    return True
+
+
+def _independent_add_outcome(
+    paths: Mapping[str, frozenset[frozenset[str]]], match_id: str, outcome: str
+) -> dict[str, frozenset[frozenset[str]]]:
+    return {
+        team_id: frozenset(condition | {f"{outcome}:{match_id}"} for condition in conditions)
+        for team_id, conditions in paths.items()
+    }
+
+
+def _referee_with_source(
+    slot: Mapping[str, Any],
+) -> tuple[str | None, str | None, str | None, tuple[str, ...]]:
+    assignment = slot.get("referee_assignment", slot.get("referee"))
+    if not isinstance(assignment, Mapping):
+        return None, None, None, ()
+    kind = assignment.get("kind", assignment.get("type"))
+    source = assignment.get("source_match_id")
+    reason = assignment.get("organizer_reason")
+    raw_reasons = assignment.get("fallback_reasons")
+    reasons = (
+        tuple(str(item) for item in raw_reasons)
+        if isinstance(raw_reasons, Sequence)
+        and not isinstance(raw_reasons, (str, bytes, bytearray))
+        else ()
+    )
+    return (
+        None if kind in (None, "") else str(kind),
+        None if source in (None, "") else str(source),
+        None if reason in (None, "") else str(reason),
+        reasons,
+    )
+
+
+def _tournament_fallback(data: Mapping[str, Any]) -> str:
+    referees = _config(data).get("referees")
+    if isinstance(referees, Mapping):
+        return str(referees.get("tournament_fallback", "organizer"))
+    return "organizer"
 
 
 def _to_plain_data(value: Any) -> Any:

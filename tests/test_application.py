@@ -496,3 +496,87 @@ def test_unexpected_exception_is_not_exposed(monkeypatch: pytest.MonkeyPatch) ->
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "SCHEDULE_GENERATION_FAILED"
     assert "secret" not in str(result)
+
+
+def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() -> None:
+    day1_request = _day1_league_request(team_count=2, block_count=1, court_count=1)
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": day1["league_plan"],
+            "results": [
+                {
+                    "match_id": day1["league_plan"]["matches"][0]["id"],
+                    "home_score": 1,
+                    "away_score": 0,
+                }
+            ],
+            "random_seed": 20260803,
+        }
+    )
+    tournament = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": day1["league_plan"],
+            "league_standings": standings,
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+
+    day2_request = {
+        "request_kind": "day2_schedule",
+        "teams": day1_request["teams"],
+        "courts": day1_request["courts"],
+        "league_plan": day1["league_plan"],
+        "day1_schedule": {"day": day1_request["day"], "slots": day1["slots"]},
+        "tournament_plan": tournament,
+        "day": {
+            "id": "day2",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 10,
+        },
+        "referees": {
+            "organizer_capacity": 1,
+            "tournament_fallback": "organizer",
+        },
+        "random_seed": 20260803,
+        "solver": {"max_time_seconds": 5},
+    }
+    result = application.handle_request(day2_request)
+
+    assert result["status"] == "OPTIMAL"
+    assert result["schedule_scope"] == "day2_tournament"
+    assert result["validation"]["valid"] is True
+    assert result["integrated_validation"]["valid"] is True
+    assert result["slots"] == []
+
+    invalid_day1 = application.handle_request(
+        {
+            **day2_request,
+            "day1_schedule": {"day": day1_request["day"], "slots": []},
+        }
+    )
+    assert invalid_day1["status"] == "error"
+    assert invalid_day1["diagnostics"][0]["code"] == "DAY1_SCHEDULE_INVALID"
+    assert "1日目日程" in invalid_day1["diagnostics"][0]["message"]
+
+
+def test_day2_schedule_rejects_section_limit_before_solver() -> None:
+    result = application.handle_request(
+        {
+            "request_kind": "day2_schedule",
+            "teams": [],
+            "courts": [],
+            "league_plan": {},
+            "day1_schedule": {},
+            "tournament_plan": {},
+            "day": {"max_sections": application.MAX_SECTIONS + 1},
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "SECTION_LIMIT_EXCEEDED"

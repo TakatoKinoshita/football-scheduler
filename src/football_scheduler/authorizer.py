@@ -14,7 +14,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 _SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-_EXPECTED_ACTIONS = frozenset({"generate_schedule", "calculate_standings", "generate_tournament"})
+_EXPECTED_ACTIONS = frozenset(
+    {
+        "generate_schedule",
+        "calculate_standings",
+        "generate_tournament",
+        "generate_day2_schedule",
+    }
+)
 _MAX_TOKEN_LENGTH = 2_048
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.setLevel(logging.INFO)
@@ -96,6 +103,9 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
     token = headers.get("x-turnstile-token", "")
     if not token or len(token) > _MAX_TOKEN_LENGTH:
         return _policy("anonymous", "Deny", method_arn, "BOT_CHECK_REQUIRED")
+    requested_action = headers.get("x-turnstile-action", "")
+    if requested_action not in _EXPECTED_ACTIONS:
+        return _policy("anonymous", "Deny", method_arn, "BOT_CHECK_ACTION_REQUIRED")
 
     # Pages FunctionがCloudflareの接続元情報から付与した値だけを使う。
     # この時点ではproxy共有secretを検証済みなので、browserが偽装したheaderは届かない。
@@ -111,7 +121,7 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
         result.get("success") is not True
         or not isinstance(hostname, str)
         or hostname.casefold() != expected_hostname
-        or action not in _EXPECTED_ACTIONS
+        or action != requested_action
     ):
         return _policy("anonymous", "Deny", method_arn, "BOT_CHECK_REJECTED")
     return _policy("turnstile-user", "Allow", method_arn, "AUTHORIZED")

@@ -56,6 +56,7 @@ def main() -> int:
         "headers": {
             "content-type": "application/json",
             "content-length": str(len(body.encode("utf-8"))),
+            "x-turnstile-action": "generate_schedule",
         },
         "body": body,
         "isBase64Encoded": False,

@@ -4,6 +4,19 @@ export const API_PATH = "/api/v1/schedules:generate";
 const MAX_BYTES = 1_000_000;
 const TIMEOUT_MILLISECONDS = 30_000;
 
+function turnstileAction(input: JsonObject): string {
+  switch (input.request_kind) {
+    case "league_standings":
+      return "calculate_standings";
+    case "tournament_plan":
+      return "generate_tournament";
+    case "day2_schedule":
+      return "generate_day2_schedule";
+    default:
+      return "generate_schedule";
+  }
+}
+
 export class ScheduleApiError extends Error {
   constructor(
     public readonly code: string,
@@ -35,6 +48,7 @@ export async function generateSchedule(
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-turnstile-action": turnstileAction(input),
         "x-turnstile-token": turnstileToken,
       },
       body,
@@ -103,6 +117,15 @@ export function calculateLeagueStandings(
 
 /** 確定したリーグ順位から、上位・下位の完全順位決定表を生成する。 */
 export function generateTournamentPlan(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}
+
+/** 確定したトーナメント表を、2日目の時刻・コート・審判へ配置する。 */
+export function generateDay2Schedule(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

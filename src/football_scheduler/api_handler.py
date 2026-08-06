@@ -12,6 +12,12 @@ from typing import Any
 from football_scheduler import application
 
 MAX_HTTP_BODY_BYTES = 1_000_000
+_ACTION_BY_REQUEST_KIND = {
+    "day1_league": "generate_schedule",
+    "league_standings": "calculate_standings",
+    "tournament_plan": "generate_tournament",
+    "day2_schedule": "generate_day2_schedule",
+}
 _HEADERS = {
     "Cache-Control": "no-store, max-age=0",
     "Content-Type": "application/json; charset=utf-8",
@@ -32,6 +38,13 @@ _CLIENT_ERROR_CODES = {
     "LEAGUE_RESULTS_INCOMPLETE",
     "LEAGUE_PLAN_INVALID",
     "TOURNAMENT_SOURCE_INVALID",
+    "TOURNAMENT_REFERENCE_INVALID",
+    "TOURNAMENT_MATCH_DUPLICATED",
+    "DAY_END_TIME_INVALID",
+    "DAY_TIME_WINDOW_TOO_SHORT",
+    "DAY_SECTION_LIMIT_CONFLICT",
+    "DAY_OVERRUNS_MIDNIGHT",
+    "DAY1_SCHEDULE_INVALID",
 }
 _LIMIT_ERROR_CODES = {
     "INPUT_TOO_LARGE",
@@ -116,7 +129,11 @@ def _status_for_result(result: Mapping[str, Any]) -> int:
     if status == "INFEASIBLE":
         return 422
     if status == "UNKNOWN":
-        return 504 if code == "SCHEDULE_SEARCH_TIMEOUT" else 503
+        return (
+            504
+            if code in {"SCHEDULE_SEARCH_TIMEOUT", "TOURNAMENT_SCHEDULE_SEARCH_TIMEOUT"}
+            else 503
+        )
     if status != "error":
         return 500
     if code in _CLIENT_ERROR_CODES:
@@ -129,6 +146,9 @@ def _status_for_result(result: Mapping[str, Any]) -> int:
         "INSUFFICIENT_SLOTS",
         "TOURNAMENT_DEPENDENCY_CYCLE",
         "SCHEDULE_INFEASIBLE",
+        "TOURNAMENT_SCHEDULE_INFEASIBLE",
+        "TOURNAMENT_REFEREE_UNAVAILABLE",
+        "ORGANIZER_CAPACITY_INSUFFICIENT",
     }:
         return 422
     return 500
@@ -193,6 +213,18 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
         payload = _decode_body(event)
     except _TransportError as exc:
         return _response(exc.status_code, _error(exc.code, exc.message))
+
+    request_kind = payload.get("request_kind", "day1_league")
+    expected_action = _ACTION_BY_REQUEST_KIND.get(str(request_kind))
+    supplied_action = _headers(event).get("x-turnstile-action")
+    if expected_action is None or supplied_action != expected_action:
+        return _response(
+            400,
+            _error(
+                "BOT_CHECK_ACTION_MISMATCH",
+                "この操作の安全確認が一致しません。安全確認をやり直してください。",
+            ),
+        )
 
     if "fixture" in payload:
         return _response(

@@ -19,6 +19,7 @@ function request(body = "{}", headers: Record<string, string> = {}): Request {
       "content-type": "application/json",
       origin: "https://schedule.pages.dev",
       "x-turnstile-token": "single-use-token",
+      "x-turnstile-action": "generate_schedule",
       ...headers,
     },
     body,
@@ -53,6 +54,7 @@ describe("Cloudflare Pages API proxy", () => {
     expect(forwarded.get("x-origin-verify")).toBe(environment.ORIGIN_VERIFY_VALUE);
     expect(forwarded.get("x-api-key")).toBe(environment.API_USAGE_KEY);
     expect(forwarded.get("x-client-ip")).toBe("203.0.113.10");
+    expect(forwarded.get("x-turnstile-action")).toBe("generate_schedule");
   });
 
   it("1 MBを超える入力はAWSへ送信しない", async () => {
@@ -108,5 +110,20 @@ describe("Cloudflare Pages API proxy", () => {
 
     expect(response.status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("未登録のTurnstile actionはAWSへ送信しない", async () => {
+    const fetchMock = vi.fn<FetchImplementation>();
+    const response = await proxyScheduleRequest(
+      request("{}", { "x-turnstile-action": "other_action" }),
+      environment,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      diagnostics: [{ code: "BOT_CHECK_ACTION_REQUIRED" }],
+    });
   });
 });

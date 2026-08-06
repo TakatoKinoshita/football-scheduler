@@ -1,5 +1,11 @@
 const API_PATH = "/api/v1/schedules:generate";
 const MAX_BODY_BYTES = 1_000_000;
+const TURNSTILE_ACTIONS = new Set([
+  "generate_schedule",
+  "calculate_standings",
+  "generate_tournament",
+  "generate_day2_schedule",
+]);
 
 export interface Environment {
   AWS_API_ORIGIN: string;
@@ -86,6 +92,14 @@ export async function proxyScheduleRequest(
       "安全確認を完了してから日程を生成してください。",
     );
   }
+  const turnstileAction = request.headers.get("x-turnstile-action") ?? "";
+  if (!TURNSTILE_ACTIONS.has(turnstileAction)) {
+    return errorResponse(
+      400,
+      "BOT_CHECK_ACTION_REQUIRED",
+      "この操作の安全確認をやり直してください。",
+    );
+  }
   const browserOrigin = request.headers.get("origin") ?? "";
   if (!browserOrigin.startsWith("https://")) {
     return errorResponse(
@@ -123,6 +137,7 @@ export async function proxyScheduleRequest(
     "x-api-key": environment.API_USAGE_KEY,
     "x-origin-verify": environment.ORIGIN_VERIFY_VALUE,
     "x-turnstile-token": turnstileToken,
+    "x-turnstile-action": turnstileAction,
   });
   const clientIp = request.headers.get("cf-connecting-ip");
   if (clientIp) headers.set("x-client-ip", clientIp);
