@@ -97,6 +97,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .result-content dt { color: var(--muted); font-size: .82rem; font-weight: 700; }
 .result-content dd { margin: .2rem 0 0; font-size: 1.1rem; font-weight: 800; overflow-wrap: anywhere; }
 .result-content h3 { margin: 1.7rem 0 .7rem; color: var(--green); }
+.score-input { display: inline-block; width: 4.5rem; min-height: 44px; padding: .45rem; text-align: center; }
+.standings-confirmation { margin-top: 1rem; padding: 1rem; background: #fff8e8; border: 2px solid #e8c77a; border-radius: .5rem; }
+.standings-confirmation h3 { margin: 0; color: var(--green); }
+.standings-confirmation > p { margin: .35rem 0 .8rem; }
 .validation-ok { display: inline-block; margin: 1rem 0 0; padding: .35rem .65rem; color: #17532e; background: #d9efdf; border-radius: 1rem; font-weight: 800; }
 .block-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }
 .block-card { padding: .9rem; background: white; border: 1px solid var(--border); border-radius: .4rem; break-inside: avoid; }
@@ -137,4 +141,5 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   table { min-width: 0; font-size: 9pt; }
   .team-schedule-grid { grid-template-columns: repeat(2, 1fr); }
   .block-grid { grid-template-columns: repeat(3, 1fr); }
+  .score-input { min-height: 0; padding: .1rem; border: 0; background: white; }
 }

@@ -18,8 +18,12 @@ export async function mockExternalServices(
           window.turnstile = {
             render: function (element, options) {
               window.__e2eTurnstileOptions = options;
+              window.__e2eTurnstileOptionsById = window.__e2eTurnstileOptionsById || {};
+              var widgetId = "e2e-widget-" + Object.keys(window.__e2eTurnstileOptionsById).length;
+              window.__e2eTurnstileOptionsById[widgetId] = options;
               var marker = document.createElement("div");
               marker.dataset.testid = "turnstile-widget-mock";
+              marker.dataset.action = options.action;
               marker.textContent = "安全確認";
               element.append(marker);
               if (${completeTurnstile}) {
@@ -27,11 +31,12 @@ export async function mockExternalServices(
                   options.callback("e2e-turnstile-token");
                 }, 0);
               }
-              return "e2e-widget";
+              return widgetId;
             },
-            reset: function () {
+            reset: function (widgetId) {
+              var options = window.__e2eTurnstileOptionsById[widgetId];
               setTimeout(function () {
-                window.__e2eTurnstileOptions.callback("e2e-turnstile-token");
+                options.callback("e2e-turnstile-token");
               }, 0);
             }
           };
@@ -87,4 +92,5 @@ export async function importDocument(page: Page, document: unknown): Promise<voi
     buffer: Buffer.from(JSON.stringify(document)),
   });
   await expect(page.locator("#tournament-name")).toHaveValue(expectedName);
+  await expect(page.locator('#backup-status[data-state="imported"]')).toBeAttached();
 }

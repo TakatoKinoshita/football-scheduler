@@ -48,6 +48,44 @@ export const scheduleResult = {
   },
 };
 
+export const standingsResult = {
+  schema_version: "0.1.0",
+  status: "COMPLETE",
+  standings: [
+    {
+      block_id: "A",
+      rank: 1,
+      team_id: "team-01",
+      played: 1,
+      wins: 1,
+      draws: 0,
+      losses: 0,
+      goals_for: 2,
+      goals_against: 1,
+      goal_difference: 1,
+      points: 3,
+      tie_break: "勝点・得失点差・総得点",
+      head_to_head: null,
+    },
+    {
+      block_id: "A",
+      rank: 2,
+      team_id: "team-02",
+      played: 1,
+      wins: 0,
+      draws: 0,
+      losses: 1,
+      goals_for: 1,
+      goals_against: 2,
+      goal_difference: -1,
+      points: 0,
+      tie_break: "勝点・得失点差・総得点",
+      head_to_head: null,
+    },
+  ],
+  draws: [],
+};
+
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",

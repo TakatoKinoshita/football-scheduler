@@ -91,3 +91,12 @@ export async function generateSchedule(
     clearTimeout(timeout);
   }
 }
+
+/** 日程生成と同じ保護されたAPIで、保存済みのリーグ結果から順位を確定する。 */
+export function calculateLeagueStandings(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}

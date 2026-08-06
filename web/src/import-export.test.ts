@@ -30,6 +30,49 @@ function validDocument() {
   return document;
 }
 
+function rankedDocument() {
+  const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+  document.tournament.name = "順位確定大会";
+  document.tournament.input.teams = [
+    { id: "team-01", name: "青" },
+    { id: "team-02", name: "赤" },
+  ];
+  document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+  document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
+  document.tournament.result = {
+    status: "OPTIMAL",
+    league_plan: {
+      schema_version: "0.1.0",
+      assignment_mode: "random",
+      random_seed: 7,
+      blocks: [{ id: "A", team_ids: ["team-01", "team-02"] }],
+      logical_rounds: [{ block_id: "A", round_no: 1, match_ids: ["LG-A-M1"] }],
+      matches: [
+        {
+          id: "LG-A-M1",
+          phase: "league",
+          round: "Aブロック 第1ラウンド",
+          possible_home_team_ids: ["team-01"],
+          possible_away_team_ids: ["team-02"],
+          prerequisite_match_ids: [],
+          organizer_referee_required: false,
+        },
+      ],
+    },
+    league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
+    league_standings: {
+      schema_version: "0.1.0",
+      status: "COMPLETE",
+      standings: [
+        { block_id: "A", rank: 1, team_id: "team-01" },
+        { block_id: "A", rank: 2, team_id: "team-02" },
+      ],
+      draws: [],
+    },
+  };
+  return document;
+}
+
 describe("大会JSONの入出力", () => {
   it("書き出した文書を同じ内容で読み込む", () => {
     const document = validDocument();
@@ -87,6 +130,55 @@ describe("大会JSONの入出力", () => {
       { id: "court-a", name: "予備コート" },
     ];
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/コートID.*重複/);
+  });
+
+  it("入力途中の結果と確定順位を同じ内容で復元する", () => {
+    const document = rankedDocument();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("日程にない試合結果を拒否して現在データ候補にしない", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.league_results = [{ match_id: "LG-A-M99", home_score: 2, away_score: 1 }];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/日程にない試合/);
+  });
+
+  it("負の得点を拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.league_results = [{ match_id: "LG-A-M1", home_score: -1, away_score: 1 }];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/0以上の整数/);
+  });
+
+  it("重複した確定順位を拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    const standings = result.league_standings as Record<string, unknown>;
+    standings.standings = [
+      { block_id: "A", rank: 1, team_id: "team-01" },
+      { block_id: "A", rank: 1, team_id: "team-02" },
+    ];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/重複した順位/);
+  });
+
+  it("候補と確定順が一致しない抽選記録を拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    const standings = result.league_standings as Record<string, unknown>;
+    standings.draws = [
+      {
+        block_id: "A",
+        candidates: ["team-01", "team-02"],
+        decided_order: ["team-01"],
+        random_seed: 7,
+      },
+    ];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/抽選記録/);
   });
 
   it("ファイル名に使えない文字を置き換える", () => {

@@ -1,6 +1,6 @@
 import { registerSW } from "virtual:pwa-register";
 
-import { generateSchedule, ScheduleApiError } from "./api";
+import { calculateLeagueStandings, generateSchedule, ScheduleApiError } from "./api";
 import {
   issuesFromApiDetails,
   isDay1LeagueInput,
@@ -56,8 +56,8 @@ root.innerHTML = `
   </header>
   <main>
     <div class="scope-notice no-print" role="note">
-      <strong>現在生成できるのは1日目のリーグ日程です。</strong>
-      リーグ結果入力と2日目トーナメントは今後追加します。
+      <strong>1日目のリーグ日程とブロック順位を確認できます。</strong>
+      2日目トーナメントは今後追加します。
     </div>
     <div id="legacy-banner" class="notice no-print" role="note" hidden>
       従来形式の大会データを互換モードで開いています。内容を壊さないため大会設定は変更できませんが、日程の再生成と保存・印刷は利用できます。
@@ -214,6 +214,15 @@ root.innerHTML = `
       <div id="result-content" class="result-content empty">
         日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。
       </div>
+      <div id="standings-confirmation" class="standings-confirmation no-print" hidden>
+        <h3>順位を確定する</h3>
+        <p id="league-results-progress">試合結果を確認しています。</p>
+        <div id="standings-turnstile-widget" class="turnstile-box" aria-label="順位確定の安全確認">
+          安全確認を読み込んでいます。
+        </div>
+        <button id="confirm-standings" class="primary" type="button" disabled>順位を確定する</button>
+        <p id="standings-status" class="status-message" role="status" aria-live="polite"></p>
+      </div>
       <div class="wizard-actions no-print">
         <button id="step4-back" class="secondary" type="button">設定へ戻る</button>
         <span></span>
@@ -299,6 +308,11 @@ let organizerCapacityTouched = false;
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
 let turnstileSetupStarted = false;
+let standingsTurnstileToken = "";
+let standingsTurnstileWidgetId: string | undefined;
+let standingsTurnstileSetupStarted = false;
+let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
+let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 
 const nameInput = requiredElement<HTMLInputElement>("#tournament-name");
@@ -318,6 +332,10 @@ const backupStatus = requiredElement<HTMLElement>("#backup-status");
 const generationStatus = requiredElement<HTMLElement>("#generation-status");
 const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
+const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
+const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
+const standingsStatus = requiredElement<HTMLElement>("#standings-status");
+const standingsButton = requiredElement<HTMLButtonElement>("#confirm-standings");
 
 type TurnstileApi = NonNullable<Window["turnstile"]>;
 
@@ -406,6 +424,67 @@ function resultMatches(): JsonObject[] {
     : asObjectArray(documentState.tournament.input.matches);
 }
 
+function leagueResults(): JsonObject[] {
+  return asObjectArray(documentState.tournament.result?.league_results);
+}
+
+function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boolean {
+  const result = asObject(documentState.tournament.result);
+  if (result === undefined) return false;
+  const hadStandings = asObject(result.league_standings) !== undefined;
+  const nextResult: JsonObject = { ...result, league_results: results };
+  if (standings === undefined) delete nextResult.league_standings;
+  else nextResult.league_standings = standings;
+  documentState = {
+    ...documentState,
+    updatedAt: new Date().toISOString(),
+    tournament: {
+      ...documentState.tournament,
+      result: nextResult,
+    },
+  };
+  saveState.textContent = "保存しています…";
+  autosave.schedule(
+    documentState,
+    () => {
+      saveState.textContent = "この端末に保存済み";
+    },
+    () => {
+      saveState.textContent = "保存できませんでした";
+      standingsStatus.textContent =
+        "試合結果を保存できませんでした。端末の空き容量を確認してください。";
+    },
+  );
+  return hadStandings;
+}
+
+function orderedLeagueMatches(slots: JsonObject[]): JsonObject[] {
+  const order = new Map(
+    slots.map((slot, index) => [String(slot.match_id), index]),
+  );
+  return resultMatches()
+    .filter((match) => String(match.phase) === "league")
+    .sort(
+      (left, right) =>
+        (order.get(String(left.id)) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(String(right.id)) ?? Number.MAX_SAFE_INTEGER),
+    );
+}
+
+function refreshLeagueResultsProgress(totalMatches: number): void {
+  const enteredCount = new Set(
+    leagueResults()
+      .filter((result) => typeof result.match_id === "string")
+      .map((result) => result.match_id as string),
+  ).size;
+  leagueResultsProgress.textContent = `入力済み ${enteredCount} / ${totalMatches}試合`;
+  standingsButton.disabled =
+    enteredCount !== totalMatches ||
+    totalMatches === 0 ||
+    !navigator.onLine ||
+    standingsTurnstileToken.length === 0;
+}
+
 function renderResult(): void {
   const summary = requiredElement<HTMLElement>("#result-summary");
   const content = requiredElement<HTMLElement>("#result-content");
@@ -415,6 +494,7 @@ function renderResult(): void {
     content.textContent =
       "日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。";
     content.classList.add("empty");
+    standingsConfirmation.hidden = true;
     printButton.disabled = true;
     return;
   }
@@ -459,6 +539,7 @@ function renderResult(): void {
 
   const leaguePlan = resultLeaguePlan();
   const blocks = asObjectArray(leaguePlan?.blocks);
+  standingsConfirmation.hidden = blocks.length === 0;
   if (blocks.length > 0) {
     appendTextElement(content, "h3", "ブロック分け");
     const blockGrid = window.document.createElement("div");
@@ -479,6 +560,125 @@ function renderResult(): void {
       blockGrid.append(card);
     }
     content.append(blockGrid);
+  }
+
+  if (blocks.length > 0) {
+    const resultsByMatch = new Map(
+      leagueResults()
+        .filter((value) => typeof value.match_id === "string")
+        .map((value) => [value.match_id as string, value]),
+    );
+    const leagueMatches = orderedLeagueMatches(slots);
+    const enteredCount = leagueMatches.filter((match) =>
+      resultsByMatch.has(String(match.id)),
+    ).length;
+    appendTextElement(content, "h3", "リーグ結果入力");
+    appendTextElement(
+      content,
+      "p",
+      `入力済み ${enteredCount} / ${leagueMatches.length}試合。得点を入力すると、この端末へ自動保存します。`,
+      "muted",
+    );
+    const resultTable = window.document.createElement("table");
+    const resultHead = window.document.createElement("thead");
+    const resultHeading = window.document.createElement("tr");
+    for (const heading of ["時間", "ブロック", "対戦", "得点", "保存状態"]) {
+      appendTextElement(resultHeading, "th", heading);
+    }
+    resultHead.append(resultHeading);
+    resultTable.append(resultHead);
+    const resultBody = window.document.createElement("tbody");
+    for (const match of leagueMatches) {
+      const matchId = String(match.id);
+      const current = resultsByMatch.get(matchId);
+      const scheduledSlot = slots.find((slot) => slot.match_id === matchId);
+      const row = window.document.createElement("tr");
+      appendTextElement(
+        row,
+        "td",
+        scheduledSlot === undefined
+          ? "未配置"
+          : sectionLabel(Number(scheduledSlot.section_no)),
+      );
+      const blockId = blocks.find(
+        (block) =>
+          Array.isArray(block.team_ids) &&
+          block.team_ids.includes(exactTeamId(match, "home")),
+      )?.id;
+      appendTextElement(row, "td", String(blockId ?? "-"));
+      const home = exactTeamId(match, "home");
+      const away = exactTeamId(match, "away");
+      const homeName = teamNames.get(home ?? "") ?? "名称未設定";
+      const awayName = teamNames.get(away ?? "") ?? "名称未設定";
+      appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
+      const scoreCell = window.document.createElement("td");
+      const homeScore = window.document.createElement("input");
+      const awayScore = window.document.createElement("input");
+      for (const [input, teamName] of [
+        [homeScore, homeName],
+        [awayScore, awayName],
+      ] as const) {
+        input.type = "number";
+        input.min = "0";
+        input.step = "1";
+        input.inputMode = "numeric";
+        input.className = "score-input";
+        input.setAttribute("aria-label", `${homeName} 対 ${awayName}・${teamName}の得点`);
+      }
+      homeScore.value = typeof current?.home_score === "number" ? String(current.home_score) : "";
+      awayScore.value = typeof current?.away_score === "number" ? String(current.away_score) : "";
+      scoreCell.append(homeScore, window.document.createTextNode(" - "), awayScore);
+      row.append(scoreCell);
+      const saved = appendTextElement(
+        row,
+        "td",
+        current === undefined ? "未入力" : "保存済み",
+        "muted",
+      );
+      const save = () => {
+        const homeValue = inputNumber(homeScore);
+        const awayValue = inputNumber(awayScore);
+        const validHome =
+          homeValue === null || (Number.isInteger(homeValue) && homeValue >= 0);
+        const validAway =
+          awayValue === null || (Number.isInteger(awayValue) && awayValue >= 0);
+        homeScore.toggleAttribute("aria-invalid", !validHome);
+        awayScore.toggleAttribute("aria-invalid", !validAway);
+        if (!validHome || !validAway) {
+          saved.textContent = "0以上の整数を入力";
+          saved.className = "field-error";
+          standingsButton.disabled = true;
+          return;
+        }
+        const next = leagueResults().filter((value) => value.match_id !== matchId);
+        if (homeValue !== null && awayValue !== null) {
+          next.push({ match_id: matchId, home_score: homeValue, away_score: awayValue });
+        }
+        const invalidated = saveLeagueResults(next);
+        saved.textContent =
+          homeValue !== null && awayValue !== null ? "保存済み" : "未入力";
+        saved.className = "muted";
+        refreshLeagueResultsProgress(leagueMatches.length);
+        if (invalidated) {
+          standingsStatusOwner = "calculation";
+          standingsStatus.textContent =
+            "得点を変更したため、確定順位を取り消しました。もう一度順位を確定してください。";
+          document.querySelector("#league-standings-view")?.remove();
+        }
+      };
+      homeScore.addEventListener("input", save);
+      awayScore.addEventListener("input", save);
+      resultBody.append(row);
+    }
+    resultTable.append(resultBody);
+    const resultWrapper = window.document.createElement("div");
+    resultWrapper.className = "table-wrap";
+    resultWrapper.append(resultTable);
+    content.append(resultWrapper);
+    refreshLeagueResultsProgress(leagueMatches.length);
+    setupStandingsTurnstile();
+    const standings = asObject(result.league_standings);
+    if (standings !== undefined) renderLeagueStandings(content, standings, teamNames);
   }
 
   appendTextElement(content, "h3", "日程表");
@@ -553,6 +753,115 @@ function renderResult(): void {
   }
   content.append(teamGrid);
   printButton.disabled = false;
+}
+
+function renderLeagueStandings(content: HTMLElement, standings: JsonObject, teamNames: Map<string, string>): void {
+  const section = window.document.createElement("section");
+  section.id = "league-standings-view";
+  appendTextElement(section, "h3", "確定順位");
+  const table = window.document.createElement("table");
+  const head = window.document.createElement("thead");
+  const heading = window.document.createElement("tr");
+  for (const label of [
+    "ブロック",
+    "順位",
+    "チーム",
+    "勝点",
+    "得失点差",
+    "総得点",
+    "直接対戦",
+    "決定根拠",
+  ]) {
+    appendTextElement(heading, "th", label);
+  }
+  head.append(heading);
+  table.append(head);
+  const body = window.document.createElement("tbody");
+  for (const rowValue of asObjectArray(standings.standings)) {
+    const row = window.document.createElement("tr");
+    const headToHead = asObject(rowValue.head_to_head);
+    const headToHeadLabel =
+      headToHead === undefined
+        ? "—"
+        : `勝点${String(headToHead.points)}・得失点差${String(headToHead.goal_difference)}・総得点${String(headToHead.goals_for)}`;
+    for (const value of [
+      rowValue.block_id,
+      rowValue.rank,
+      teamNames.get(String(rowValue.team_id)) ?? "名称未設定",
+      rowValue.points,
+      rowValue.goal_difference,
+      rowValue.goals_for,
+      headToHeadLabel,
+      rowValue.tie_break,
+    ]) {
+      appendTextElement(row, "td", String(value ?? "-"));
+    }
+    body.append(row);
+  }
+  table.append(body);
+  const wrapper = window.document.createElement("div");
+  wrapper.className = "table-wrap";
+  wrapper.append(table);
+  section.append(wrapper);
+  for (const draw of asObjectArray(standings.draws)) {
+    const order = Array.isArray(draw.decided_order)
+      ? draw.decided_order.map((team) => teamNames.get(String(team)) ?? String(team)).join("、")
+      : "";
+    appendTextElement(
+      section,
+      "p",
+      `${String(draw.block_id)}ブロックの抽選（抽選番号 ${String(draw.random_seed)}）：${order}`,
+      "muted",
+    );
+  }
+  content.append(section);
+}
+
+function requestLeagueStandings(): void {
+  const result = asObject(documentState.tournament.result);
+  const plan = resultLeaguePlan();
+  if (result === undefined || plan === undefined) return;
+  if (standingsTurnstileToken.length === 0) {
+    standingsStatus.textContent = "順位確定の安全確認を完了してください。";
+    return;
+  }
+  standingsButton.disabled = true;
+  standingsStatusOwner = "calculation";
+  standingsStatus.textContent = "順位を計算しています…";
+  void calculateLeagueStandings(
+    {
+      request_kind: "league_standings",
+      league_plan: plan,
+      results: leagueResults(),
+      random_seed: documentState.tournament.input.random_seed ?? 20260803,
+    },
+    standingsTurnstileToken,
+  )
+    .then((standings) => {
+      saveLeagueResults(leagueResults(), standings);
+      standingsStatus.textContent = "順位を確定し、この端末へ保存しました。";
+      renderResult();
+    })
+    .catch((error: unknown) => {
+      standingsStatus.textContent =
+        error instanceof ScheduleApiError
+          ? error.message
+          : "順位を確定できませんでした。入力は保存されています。";
+      refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+    })
+    .finally(() => {
+      standingsTurnstileToken = "";
+      refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+      const api = turnstileApi();
+      if (standingsTurnstileWidgetId !== undefined && api !== undefined) {
+        try {
+          api.reset(standingsTurnstileWidgetId);
+        } catch {
+          standingsStatus.textContent =
+            "安全確認を再開できませんでした。画面を再読み込みしてください。";
+        }
+      }
+    });
 }
 
 function renderBlockCountOptions(selected: unknown): void {
@@ -831,6 +1140,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
   const input = event.currentTarget as HTMLInputElement;
   const file = input.files?.[0];
   if (file === undefined) return;
+  delete backupStatus.dataset.state;
   void file
     .text()
     .then((text) => {
@@ -854,12 +1164,14 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       currentStep = documentState.tournament.result === undefined ? 1 : 4;
       return storage.replaceImported(documentState).then(() => {
         render();
+        backupStatus.dataset.state = "imported";
         backupStatus.textContent = mode.migrated
           ? "以前の下書きを1日目リーグ形式へ移行して復元しました。"
           : "ファイルから復元しました。内容を確認してください。";
       });
     })
     .catch((error: unknown) => {
+      backupStatus.dataset.state = "import-error";
       backupStatus.textContent =
         error instanceof ImportValidationError
           ? error.message
@@ -1006,6 +1318,7 @@ generateButton.addEventListener("click", () => {
 });
 
 printButton.addEventListener("click", () => window.print());
+standingsButton.addEventListener("click", requestLeagueStandings);
 
 function updateConnectionStatus(): void {
   const connection = requiredElement<HTMLElement>("#connection");
@@ -1017,6 +1330,9 @@ function updateConnectionStatus(): void {
     connection.className = "connection offline";
   }
   refreshGenerateEnabled();
+  if (!standingsConfirmation.hidden) {
+    refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+  }
 }
 window.addEventListener("online", updateConnectionStatus);
 window.addEventListener("offline", updateConnectionStatus);
@@ -1036,65 +1352,135 @@ function setupTurnstile(): void {
     );
     return;
   }
-  const script = window.document.createElement("script");
-  script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-  script.async = true;
-  script.defer = true;
-  script.addEventListener("load", () => {
-    const api = turnstileApi();
-    if (api === undefined) {
-      container.textContent =
-        "安全確認を初期化できませんでした。画面を再読み込みしてください。";
-      requireTurnstileConfirmation(
-        "安全確認を初期化できませんでした。画面を再読み込みしてください。",
-      );
-      return;
-    }
-    try {
-      container.replaceChildren();
-      turnstileWidgetId = api.render(container, {
-        sitekey: siteKey,
-        action: "generate_schedule",
-        callback: (token) => {
-          if (token.length === 0) {
+  void loadTurnstileApi()
+    .then((api) => {
+      try {
+        container.replaceChildren();
+        turnstileWidgetId = api.render(container, {
+          sitekey: siteKey,
+          action: "generate_schedule",
+          callback: (token) => {
+            if (token.length === 0) {
+              requireTurnstileConfirmation(
+                "安全確認を完了できませんでした。もう一度お試しください。",
+              );
+              return;
+            }
+            turnstileToken = token;
+            refreshGenerateEnabled();
+            if (generationStatusOwner === "turnstile") {
+              generationStatus.textContent = "安全確認が完了しました。";
+            }
+          },
+          "expired-callback": () => {
             requireTurnstileConfirmation(
-              "安全確認を完了できませんでした。もう一度お試しください。",
+              "安全確認の期限が切れました。もう一度確認してください。",
             );
-            return;
-          }
-          turnstileToken = token;
-          refreshGenerateEnabled();
-          if (generationStatusOwner === "turnstile") {
-            generationStatus.textContent = "安全確認が完了しました。";
-          }
-        },
-        "expired-callback": () => {
-          requireTurnstileConfirmation(
-            "安全確認の期限が切れました。もう一度確認してください。",
-          );
-        },
-        "error-callback": () => {
-          requireTurnstileConfirmation(
-            "安全確認を完了できませんでした。通信状態を確認してください。",
-          );
-        },
-      });
-    } catch {
-      container.textContent =
-        "安全確認を初期化できませんでした。画面を再読み込みしてください。";
-      requireTurnstileConfirmation(
-        "安全確認を初期化できませんでした。画面を再読み込みしてください。",
-      );
-    }
+          },
+          "error-callback": () => {
+            requireTurnstileConfirmation(
+              "安全確認を完了できませんでした。通信状態を確認してください。",
+            );
+          },
+        });
+      } catch {
+        container.textContent =
+          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+        requireTurnstileConfirmation(
+          "安全確認を初期化できませんでした。画面を再読み込みしてください。",
+        );
+      }
+    })
+    .catch((error: unknown) => {
+      const message =
+        error instanceof Error && error.message === "Turnstile API is unavailable"
+          ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
+          : "安全確認を読み込めませんでした。通信状態を確認してください。";
+      container.textContent = message;
+      requireTurnstileConfirmation(message);
+    });
+}
+
+function loadTurnstileApi(): Promise<TurnstileApi> {
+  const existing = turnstileApi();
+  if (existing !== undefined) return Promise.resolve(existing);
+  if (turnstileLoadPromise !== undefined) return turnstileLoadPromise;
+  turnstileLoadPromise = new Promise<TurnstileApi>((resolve, reject) => {
+    const script = window.document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", () => {
+      const api = turnstileApi();
+      if (api === undefined) reject(new Error("Turnstile API is unavailable"));
+      else resolve(api);
+    });
+    script.addEventListener("error", () => reject(new Error("Turnstile could not be loaded")));
+    window.document.head.append(script);
   });
-  script.addEventListener("error", () => {
-    container.textContent =
-      "安全確認を読み込めませんでした。通信状態を確認してください。";
-    requireTurnstileConfirmation(
-      "安全確認を読み込めませんでした。通信状態を確認してください。",
-    );
-  });
-  window.document.head.append(script);
+  return turnstileLoadPromise;
+}
+
+function setupStandingsTurnstile(): void {
+  if (standingsTurnstileSetupStarted) return;
+  standingsTurnstileSetupStarted = true;
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+  const container = requiredElement<HTMLElement>("#standings-turnstile-widget");
+  if (!siteKey) {
+    container.textContent = "安全確認の設定が完了していないため、順位を確定できません。";
+    standingsStatus.textContent =
+      "安全確認の設定が完了していないため、順位を確定できません。";
+    return;
+  }
+  void loadTurnstileApi()
+    .then((api) => {
+      try {
+        container.replaceChildren();
+        standingsTurnstileWidgetId = api.render(container, {
+          sitekey: siteKey,
+          action: "calculate_standings",
+          callback: (token) => {
+            standingsTurnstileToken = token;
+            if (standingsStatusOwner === "turnstile") {
+              standingsStatus.textContent =
+                token.length > 0
+                  ? "安全確認が完了しました。"
+                  : "安全確認を完了できませんでした。もう一度お試しください。";
+            }
+            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+          },
+          "expired-callback": () => {
+            standingsTurnstileToken = "";
+            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+            if (standingsStatusOwner === "turnstile") {
+              standingsStatus.textContent =
+                "安全確認の期限が切れました。もう一度確認してください。";
+            }
+          },
+          "error-callback": () => {
+            standingsTurnstileToken = "";
+            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
+            if (standingsStatusOwner === "turnstile") {
+              standingsStatus.textContent =
+                "安全確認を完了できませんでした。通信状態を確認してください。";
+            }
+          },
+        });
+      } catch {
+        container.textContent =
+          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+      }
+    })
+    .catch((error: unknown) => {
+      const initialized =
+        error instanceof Error && error.message === "Turnstile API is unavailable";
+      container.textContent = initialized
+        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
+        : "安全確認を読み込めませんでした。通信状態を確認してください。";
+      standingsStatus.textContent = initialized
+        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
+        : "安全確認を読み込めませんでした。入力はこの端末に保存されています。";
+    });
 }
 
 function inferOrganizerCapacityTouched(): boolean {

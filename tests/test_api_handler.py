@@ -63,6 +63,20 @@ def test_base64_body_is_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     assert received == [payload]
 
 
+def test_completed_league_standings_return_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: {"status": "COMPLETE", "standings": []},
+    )
+
+    response = api_handler.lambda_handler(_event("{}"), object())
+
+    assert response["statusCode"] == 200
+
+
 def test_content_length_over_one_megabyte_is_rejected_before_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

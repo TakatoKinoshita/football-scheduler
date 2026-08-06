@@ -27,6 +27,10 @@ _CLIENT_ERROR_CODES = {
     "INVALID_BLOCK_COUNT",
     "DUPLICATE_TEAM_ID",
     "LEAGUE_INPUT_INVALID",
+    "DUPLICATE_LEAGUE_RESULT",
+    "UNKNOWN_LEAGUE_MATCH",
+    "LEAGUE_RESULTS_INCOMPLETE",
+    "LEAGUE_PLAN_INVALID",
 }
 _LIMIT_ERROR_CODES = {
     "INPUT_TOO_LARGE",
@@ -103,7 +107,7 @@ def _error(code: str, message: str) -> dict[str, Any]:
 
 def _status_for_result(result: Mapping[str, Any]) -> int:
     status = result.get("status")
-    if status in {"OPTIMAL", "FEASIBLE"}:
+    if status in {"OPTIMAL", "FEASIBLE", "COMPLETE"}:
         return 200
     diagnostics = result.get("diagnostics")
     first = diagnostics[0] if isinstance(diagnostics, list) and diagnostics else None

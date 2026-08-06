@@ -22,6 +22,11 @@ from football_scheduler.fixtures import (
     make_smoke_request,
 )
 from football_scheduler.league import LeagueGenerationError
+from football_scheduler.league_results import (
+    LeagueResultsError,
+    LeagueStandingsRequest,
+    calculate_league_standings,
+)
 from football_scheduler.solver import solve_schedule
 from football_scheduler.validator import validate_schedule
 
@@ -60,6 +65,12 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         _validate_json_size(payload)
+        if payload.get("request_kind") == "league_standings":
+            _validate_league_standings_limits(payload)
+            return _to_json_object(
+                calculate_league_standings(LeagueStandingsRequest.model_validate(payload))
+            )
+
         request_data, response_metadata, fallback_request_data = _resolve_request(payload)
         _validate_limits(request_data)
         request_data = _apply_solver_time_limit(request_data)
@@ -80,6 +91,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except _RequestError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except LeagueGenerationError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except LeagueResultsError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         return _error_response(
@@ -252,6 +265,17 @@ def _validate_limits(request: Mapping[str, Any]) -> None:
             f"セクション数が上限の{MAX_SECTIONS}を超えています。",
             actual=max_sections,
             maximum=MAX_SECTIONS,
+        )
+
+
+def _validate_league_standings_limits(request: Mapping[str, Any]) -> None:
+    _validate_sequence_limit(
+        request, "results", MAX_MATCHES, "リーグ結果数", "MATCH_LIMIT_EXCEEDED"
+    )
+    league_plan = request.get("league_plan")
+    if isinstance(league_plan, Mapping):
+        _validate_sequence_limit(
+            league_plan, "matches", MAX_MATCHES, "リーグ試合数", "MATCH_LIMIT_EXCEEDED"
         )
 
 

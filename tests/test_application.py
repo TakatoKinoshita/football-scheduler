@@ -145,6 +145,54 @@ def test_day1_league_request_adds_block_ids_before_solving(
     ]
 
 
+def test_league_standings_request_returns_rankings_after_all_results_are_entered() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
+    match_id = generated["league_plan"]["matches"][0]["id"]
+
+    result = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": generated["league_plan"],
+            "results": [{"match_id": match_id, "home_score": 2, "away_score": 1}],
+            "random_seed": 20260803,
+        }
+    )
+
+    assert result["status"] == "COMPLETE"
+    assert [standing["rank"] for standing in result["standings"]] == [1, 2]
+
+
+def test_league_standings_request_reports_missing_results() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
+
+    result = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": generated["league_plan"],
+            "results": [],
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "LEAGUE_RESULTS_INCOMPLETE"
+
+
+def test_league_standings_request_rejects_result_limit() -> None:
+    result = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": {"matches": []},
+            "results": [
+                {"match_id": f"M{index}", "home_score": 0, "away_score": 0}
+                for index in range(application.MAX_MATCHES + 1)
+            ],
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "MATCH_LIMIT_EXCEEDED"
+
+
 def test_inferred_horizon_does_not_become_a_silent_hard_constraint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
