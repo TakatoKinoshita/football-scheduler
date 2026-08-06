@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { scheduleResult } from "./fixtures";
-import { GENERATE_API, mockExternalServices, openApp } from "./helpers";
+import { scheduleResult, tournamentFixture } from "./fixtures";
+import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
 
 async function fillThroughGeneration(page: import("@playwright/test").Page): Promise<void> {
   await page.locator("#tournament-name").fill("本番確認大会");
@@ -40,11 +40,20 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
-    requests.push(route.request().postDataJSON());
+    const request = route.request().postDataJSON() as {
+      courts?: Array<{ id?: unknown }>;
+    };
+    requests.push(request);
+    const courtId = typeof request.courts?.[0]?.id === "string"
+      ? request.courts[0].id
+      : scheduleResult.slots[0]!.court_id;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(scheduleResult),
+      body: JSON.stringify({
+        ...scheduleResult,
+        slots: scheduleResult.slots.map((slot) => ({ ...slot, court_id: courtId })),
+      }),
     });
   });
 
@@ -59,6 +68,42 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
     courts: [{ name: "Aコート" }, { name: "Bコート" }],
   });
   expect(requests[0]).not.toHaveProperty("day2");
+});
+
+test("読込み済み文書のチームIDとコートIDを設定変更後の再生成でも保持する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const customized = JSON.parse(
+    JSON.stringify(tournamentFixture({ withResult: true }))
+      .replaceAll("team-01", "blue-team")
+      .replaceAll("team-02", "green-team")
+      .replaceAll("court-a", "main-pitch"),
+  ) as { tournament: { result: unknown } };
+  await importDocument(page, customized);
+  await page.locator('.step[data-step="3"]').click();
+  await page.locator("#game-duration").fill("40");
+  await page.unroute(GENERATE_API);
+  let request: Record<string, unknown> | undefined;
+  await page.route(GENERATE_API, async (route) => {
+    request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(customized.tournament.result),
+    });
+  });
+
+  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
+
+  expect(request).toMatchObject({
+    teams: [{ id: "blue-team" }, { id: "green-team" }],
+    courts: [{ id: "main-pitch" }],
+    day: { game_duration_minutes: 40 },
+  });
 });
 
 test("生成直前の無効入力ではAPIを呼ばず安全確認を維持する", async ({ page }) => {

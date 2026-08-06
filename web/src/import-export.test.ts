@@ -78,8 +78,31 @@ function rankedDocument() {
       ],
       draws: [],
     },
+    slots: [
+      {
+        day_id: "day1",
+        section_no: 1,
+        court_id: "court-a",
+        match_id: "LG-A-M1",
+        referee_assignment: { kind: "organizer" },
+      },
+    ],
+    section_timings: [
+      {
+        day_id: "day1",
+        section_no: 1,
+        start_time: "09:30:00",
+        match_end_time: "10:05:00",
+        break_after_minutes: 0,
+      },
+    ],
+    expected_end_time: "10:05:00",
   };
   return document;
+}
+
+function scheduledDay1Document() {
+  return rankedDocument();
 }
 
 function completedTournamentPlan() {
@@ -204,6 +227,24 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("従来のinput.matches形式でも1日目スロットを復元する", () => {
+    const document = validDocument();
+    document.tournament.result = {
+      status: "OPTIMAL",
+      slots: [
+        {
+          day_id: "day1",
+          section_no: 1,
+          court_id: "court-a",
+          match_id: "LG-A-M1",
+          referee_assignment: { type: "organizer" },
+        },
+      ],
+    };
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("新しい1日目リーグ形式はmatchesなしで読み込む", () => {
     const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
     document.tournament.name = "地区大会";
@@ -260,6 +301,200 @@ describe("大会JSONの入出力", () => {
   it("入力途中の結果と確定順位を同じ内容で復元する", () => {
     const document = rankedDocument();
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("1日目の時刻一覧がない従来文書を復元する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.section_timings;
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("生成済み1日目日程のスロット欠落を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.slots;
+    delete result.section_timings;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/試合配置/);
+  });
+
+  it("リーグ計画が欠けていても成功状態のスロット欠落を拒否する", () => {
+    const document = validDocument();
+    document.tournament.result = { status: "OPTIMAL" };
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/試合配置/);
+  });
+
+  it("1日目時刻だけが残ったスロット欠落を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.slots;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/試合配置/);
+  });
+
+  it("1日目スロットの未知のコートを拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots[0]!.court_id = "court-unknown";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/コート位置/);
+  });
+
+  it("1日目スロットの未知の試合を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots[0]!.match_id = "LG-A-UNKNOWN";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/未知または重複/);
+  });
+
+  it("1日目スロットの重複位置を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots.push({ ...slots[0]!, match_id: null, referee_assignment: null });
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/コート位置/);
+  });
+
+  it("1日目の同じ試合の重複配置を拒否する", () => {
+    const document = scheduledDay1Document();
+    document.tournament.input.courts = [
+      { id: "court-a", name: "Aコート" },
+      { id: "court-b", name: "Bコート" },
+    ];
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots.push({ ...slots[0]!, court_id: "court-b" });
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/未知または重複/);
+  });
+
+  it("1日目の実試合に審判がない文書を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots[0]!.referee_assignment = null;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/審判割当て/);
+  });
+
+  it("1日目の未知のチーム審判を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots[0]!.referee_assignment = { kind: "team", team_id: "team-unknown" };
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/審判割当て/);
+  });
+
+  it("1日目の空きスロットに審判がある文書を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots.push({
+      day_id: "day1",
+      section_no: 2,
+      court_id: "court-a",
+      match_id: null,
+      referee_assignment: { kind: "organizer" },
+    });
+    const timings = result.section_timings as Array<Record<string, unknown>>;
+    timings.push({
+      day_id: "day1",
+      section_no: 2,
+      start_time: "10:10:00",
+      match_end_time: "10:45:00",
+      break_after_minutes: 0,
+    });
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/空きスロット/);
+  });
+
+  it("1日目に配置されていない試合を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.slots = [];
+    result.section_timings = [];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/配置されていない/);
+  });
+
+  it("改ざんされた1日目の時刻一覧を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const timings = result.section_timings as Array<Record<string, unknown>>;
+    timings[0]!.start_time = "09:31:00";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/大会設定と一致/);
+  });
+
+  it("重複した1日目時刻セクションを拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const timings = result.section_timings as Array<Record<string, unknown>>;
+    timings.push({ ...timings[0]! });
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/セクション時刻/);
+  });
+
+  it("日程のセクションが欠けた1日目時刻一覧を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.section_timings = [];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/すべて含んで/);
+  });
+
+  it.each([
+    ["試合時間0分", { game_duration_minutes: 0 }],
+    ["文字列の試合時間", { game_duration_minutes: "35" }],
+    ["負の休憩", { breaks: [{ after_section: 1, duration_minutes: -1 }] }],
+    [
+      "重複した休憩",
+      {
+        breaks: [
+          { after_section: 1, duration_minutes: 10 },
+          { after_section: 1, duration_minutes: 20 },
+        ],
+      },
+    ],
+  ])("不正な1日目設定（%s）を拒否する", (_label, changes) => {
+    const document = scheduledDay1Document();
+    document.tournament.input.day = {
+      ...(document.tournament.input.day as Record<string, unknown>),
+      ...changes,
+    };
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/1日目.*(?:時刻|休憩)/);
+  });
+
+  it("現行形式は時刻一覧がなくても不正な1日目設定を拒否する", () => {
+    const document = scheduledDay1Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.section_timings;
+    const day = document.tournament.input.day as Record<string, unknown>;
+    day.game_duration_minutes = 0;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/1日目の時刻設定/);
+  });
+
+  it("1日目の最大セクションを超えた配置を拒否する", () => {
+    const document = scheduledDay1Document();
+    const day = document.tournament.input.day as Record<string, unknown>;
+    day.max_sections = 1;
+    const result = document.tournament.result as Record<string, unknown>;
+    const slots = result.slots as Array<Record<string, unknown>>;
+    slots[0]!.section_no = 2;
+    const timings = result.section_timings as Array<Record<string, unknown>>;
+    timings[0]!.section_no = 2;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/コート位置/);
   });
 
   it("日程にない試合結果を拒否して現在データ候補にしない", () => {

@@ -197,6 +197,269 @@ export const provisionalDay2ScheduleResult = {
   participant_resolution: "provisional",
 };
 
+const scheduleViewTeams = [
+  { id: "team-01", name: "青空FC" },
+  { id: "team-02", name: "みどりSC" },
+  { id: "team-03", name: "赤松FC" },
+  { id: "team-04", name: "白波SC" },
+  { id: "team-05", name: "北星FC" },
+  { id: "team-06", name: "南風SC" },
+  { id: "team-07", name: "東山FC" },
+  { id: "team-08", name: "西海SC" },
+];
+
+const scheduleViewBlocks = ["A", "B", "C", "D"].map((id, index) => ({
+  id,
+  team_ids: [`team-${String(index * 2 + 1).padStart(2, "0")}`, `team-${String(index * 2 + 2).padStart(2, "0")}`],
+}));
+
+const scheduleViewLeagueMatches = scheduleViewBlocks.map((block, index) => ({
+  id: `LG-${block.id}-M1`,
+  phase: "league",
+  round: `${block.id}ブロック 第1ラウンド`,
+  possible_home_team_ids: [scheduleViewTeams[index * 2]!.id],
+  possible_away_team_ids: [scheduleViewTeams[index * 2 + 1]!.id],
+  prerequisite_match_ids: [],
+  organizer_referee_required: false,
+}));
+
+export const scheduleViewDay1Result = {
+  schema_version: "0.1.0",
+  status: "OPTIMAL",
+  schedule_scope: "day1_league",
+  league_plan: {
+    schema_version: "0.1.0",
+    assignment_mode: "random",
+    random_seed: 20260803,
+    blocks: scheduleViewBlocks,
+    logical_rounds: scheduleViewBlocks.map((block) => ({
+      block_id: block.id,
+      round_no: 1,
+      match_ids: [`LG-${block.id}-M1`],
+    })),
+    matches: scheduleViewLeagueMatches,
+  },
+  slots: [
+    { day_id: "day1", section_no: 1, court_id: "court-a", match_id: "LG-A-M1", referee_assignment: { kind: "organizer" } },
+    { day_id: "day1", section_no: 1, court_id: "court-b", match_id: "LG-B-M1", referee_assignment: { kind: "organizer" } },
+    { day_id: "day1", section_no: 2, court_id: "court-a", match_id: null, referee_assignment: null },
+    { day_id: "day1", section_no: 2, court_id: "court-b", match_id: "LG-C-M1", referee_assignment: { kind: "team", team_id: "team-01" } },
+    { day_id: "day1", section_no: 3, court_id: "court-a", match_id: "LG-D-M1", referee_assignment: { kind: "team", team_id: "team-03" } },
+    { day_id: "day1", section_no: 3, court_id: "court-b", match_id: null, referee_assignment: null },
+  ],
+  section_timings: [
+    { day_id: "day1", section_no: 1, start_time: "09:30", match_end_time: "10:05", break_after_minutes: 0 },
+    { day_id: "day1", section_no: 2, start_time: "10:10", match_end_time: "10:45", break_after_minutes: 0 },
+    { day_id: "day1", section_no: 3, start_time: "10:50", match_end_time: "11:25", break_after_minutes: 0 },
+  ],
+  expected_end_time: "11:25",
+  metrics: {
+    random_seed: 20260803,
+    wall_time_seconds: 0.01,
+    used_sections: 3,
+    optimality_proven: true,
+  },
+  diagnostics: [],
+  validation: {
+    valid: true,
+    diagnostics: [],
+    summary: { checked_match_count: 4, checked_slot_count: 6, error_count: 0 },
+  },
+};
+
+const rankRef = (blockId: string, rank: number) => ({
+  type: "league_rank",
+  block_id: blockId,
+  rank,
+});
+const winnerOf = (matchId: string) => ({ type: "winner_of", match_id: matchId });
+const loserOf = (matchId: string) => ({ type: "loser_of", match_id: matchId });
+
+function scheduleViewPool(pool: "upper" | "lower") {
+  const prefix = pool === "upper" ? "UT" : "LT";
+  const blockRank = pool === "upper" ? 1 : 2;
+  const seeds = ["A", "B", "C", "D"].map((blockId, index) => ({
+    seed_no: index + 1,
+    team_id: null,
+    block_id: blockId,
+    block_rank: blockRank,
+    entry: rankRef(blockId, blockRank),
+    team: null,
+  }));
+  const matches = [
+    {
+      id: `${prefix}-SF1`,
+      phase: `${pool}_tournament`,
+      round: "準決勝",
+      round_no: 1,
+      home: rankRef("A", blockRank),
+      away: rankRef("D", blockRank),
+      rank_range: [1, 4],
+    },
+    {
+      id: `${prefix}-SF2`,
+      phase: `${pool}_tournament`,
+      round: "準決勝",
+      round_no: 1,
+      home: rankRef("B", blockRank),
+      away: rankRef("C", blockRank),
+      rank_range: [1, 4],
+    },
+    {
+      id: `${prefix}-FINAL`,
+      phase: `${pool}_tournament`,
+      round: "決勝",
+      round_no: 2,
+      home: winnerOf(`${prefix}-SF1`),
+      away: winnerOf(`${prefix}-SF2`),
+      rank_range: [1, 2],
+    },
+    {
+      id: `${prefix}-PLACE3`,
+      phase: `${pool}_tournament`,
+      round: "3位決定戦",
+      round_no: 2,
+      home: loserOf(`${prefix}-SF1`),
+      away: loserOf(`${prefix}-SF2`),
+      rank_range: [3, 4],
+    },
+  ];
+  return {
+    pool,
+    participant_count: 4,
+    seeds,
+    matches,
+    byes: [],
+    placements: [
+      { rank: 1, entry: winnerOf(`${prefix}-FINAL`) },
+      { rank: 2, entry: loserOf(`${prefix}-FINAL`) },
+      { rank: 3, entry: winnerOf(`${prefix}-PLACE3`) },
+      { rank: 4, entry: loserOf(`${prefix}-PLACE3`) },
+    ],
+    evaluation: emptyTournamentEvaluation,
+  };
+}
+
+export const scheduleViewTournamentPlanResult = {
+  schema_version: "0.1.0",
+  status: "COMPLETE",
+  participant_resolution: "provisional",
+  odd_split_policy: "upper",
+  random_seed: 20260803,
+  upper: scheduleViewPool("upper"),
+  lower: scheduleViewPool("lower"),
+  seed_draws: [
+    { pool: "upper", block_rank: 1, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), random_seed: 20260803 },
+    { pool: "lower", block_rank: 2, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), random_seed: 20260803 },
+  ],
+  warnings: [],
+};
+
+const scheduleViewTournamentMatches = [
+  ...scheduleViewTournamentPlanResult.upper.matches,
+  ...scheduleViewTournamentPlanResult.lower.matches,
+].map((match) => ({
+  ...match,
+  possible_rank_refs: [rankRef("A", match.phase === "upper_tournament" ? 1 : 2)],
+  possible_team_ids: [],
+  prerequisite_match_ids: [],
+  preliminary: false,
+  final: match.id.endsWith("FINAL"),
+}));
+
+const scheduleViewDay2Slots = [
+  { day_id: "day2", section_no: 1, court_id: "court-a", match_id: "UT-SF1", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 1, court_id: "court-b", match_id: "UT-SF2", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 2, court_id: "court-a", match_id: null, referee_assignment: null },
+  { day_id: "day2", section_no: 2, court_id: "court-b", match_id: "LT-SF1", referee_assignment: { kind: "team", source_match_id: "UT-SF2" } },
+  { day_id: "day2", section_no: 3, court_id: "court-a", match_id: "UT-PLACE3", referee_assignment: { kind: "team", source_match_id: "UT-SF1" } },
+  { day_id: "day2", section_no: 3, court_id: "court-b", match_id: "LT-SF2", referee_assignment: { kind: "team", source_match_id: "LT-SF1" } },
+  { day_id: "day2", section_no: 4, court_id: "court-a", match_id: "UT-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 4, court_id: "court-b", match_id: "LT-PLACE3", referee_assignment: { kind: "team", source_match_id: "LT-SF2" } },
+  { day_id: "day2", section_no: 5, court_id: "court-a", match_id: "LT-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 5, court_id: "court-b", match_id: null, referee_assignment: null },
+];
+
+export const scheduleViewDay2ScheduleResult = {
+  schema_version: "0.1.0",
+  schedule_scope: "day2_tournament",
+  participant_resolution: "provisional",
+  status: "OPTIMAL",
+  tournament_matches: scheduleViewTournamentMatches,
+  slots: scheduleViewDay2Slots,
+  section_timings: [
+    { day_id: "day2", section_no: 1, start_time: "09:30", match_end_time: "10:05", break_after_minutes: 0 },
+    { day_id: "day2", section_no: 2, start_time: "10:15", match_end_time: "10:50", break_after_minutes: 0 },
+    { day_id: "day2", section_no: 3, start_time: "11:00", match_end_time: "11:35", break_after_minutes: 0 },
+    { day_id: "day2", section_no: 4, start_time: "11:45", match_end_time: "12:20", break_after_minutes: 0 },
+    { day_id: "day2", section_no: 5, start_time: "12:30", match_end_time: "13:05", break_after_minutes: 0 },
+  ],
+  expected_end_time: "13:05",
+  team_schedules: scheduleViewDay2Slots.flatMap((slot) => {
+    if (slot.match_id === null) return [];
+    const match = scheduleViewTournamentMatches.find((candidate) => candidate.id === slot.match_id)!;
+    return match.possible_rank_refs.map((rankRef) => ({
+      rank_ref: rankRef,
+      team_id: null,
+      match_id: slot.match_id,
+      section_no: slot.section_no,
+      court_id: slot.court_id,
+      role: "match",
+      conditions: [],
+    }));
+  }),
+  metrics: {
+    random_seed: 20260803,
+    max_time_seconds: 30,
+    ortools_version: "test",
+    wall_time_seconds: 0.01,
+    used_sections: 5,
+    objective_value: 5,
+    best_objective_bound: 5,
+    organizer_referee_count: 4,
+    tournament_team_referee_count: 4,
+    tournament_referee_fallback_count: 0,
+    unused_slot_count: 2,
+    optimized_objectives: ["used_sections"],
+    optimality_proven: true,
+  },
+  diagnostics: [],
+  validation: { valid: true, issues: [], summary: {} },
+  integrated_validation: { valid: true, issues: [], summary: {} },
+};
+
+export function scheduleViewTournamentFixture() {
+  return {
+    documentType: "football-scheduler-tournament",
+    schemaVersion: "0.1.0",
+    updatedAt: "2026-08-07T00:00:00.000Z",
+    tournament: {
+      name: "表示切替大会",
+      input: {
+        schema_version: "0.1.0",
+        request_kind: "day1_league",
+        teams: scheduleViewTeams,
+        courts: [
+          { id: "court-a", name: "Aコート" },
+          { id: "court-b", name: "Bコート" },
+        ],
+        league: { block_count: 4, assignment_mode: "random", odd_split_policy: "upper" },
+        day: { id: "day1", start_time: "09:30", game_duration_minutes: 35, margin_minutes: 5, max_sections: 6, breaks: [] },
+        day2: { id: "day2", start_time: "09:30", game_duration_minutes: 35, margin_minutes: 10, max_sections: 8, end_time: null, breaks: [] },
+        referees: { organizer_capacity: 2, team_referees_required_after_first: true, tournament_fallback: "organizer" },
+        random_seed: 20260803,
+        solver: { max_time_seconds: 30 },
+      },
+      result: {
+        ...scheduleViewDay1Result,
+        tournament_plan: scheduleViewTournamentPlanResult,
+        day2_schedule: scheduleViewDay2ScheduleResult,
+        integrated_validation: scheduleViewDay2ScheduleResult.integrated_validation,
+      },
+    },
+  };
+}
+
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",

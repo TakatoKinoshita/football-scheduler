@@ -177,13 +177,221 @@ function validateDay2Settings(input: JsonObject): JsonObject | undefined {
   return day;
 }
 
+function validateDay1ScheduleSettings(input: JsonObject): JsonObject {
+  const day = objectValue(input.day, "1日目の時刻設定を読み取れませんでした。");
+  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+  if (
+    day.id !== "day1" ||
+    typeof day.start_time !== "string" ||
+    !timePattern.test(day.start_time) ||
+    typeof day.game_duration_minutes !== "number" ||
+    !Number.isInteger(day.game_duration_minutes) ||
+    day.game_duration_minutes < 1 ||
+    typeof day.margin_minutes !== "number" ||
+    !Number.isInteger(day.margin_minutes) ||
+    day.margin_minutes < 0 ||
+    (day.end_time !== undefined &&
+      day.end_time !== null &&
+      (typeof day.end_time !== "string" || !timePattern.test(day.end_time))) ||
+    (day.max_sections !== undefined &&
+      day.max_sections !== null &&
+      (!Number.isInteger(day.max_sections) ||
+        Number(day.max_sections) < 1 ||
+        Number(day.max_sections) > LIMITS.sections))
+  ) {
+    throw new ImportValidationError("INVALID_DOCUMENT", "1日目の時刻設定が不正です。");
+  }
+  const breaks = arrayValue(day.breaks ?? [], "1日目の休憩", LIMITS.sections);
+  const sections = new Set<number>();
+  for (const item of breaks) {
+    const afterSection = nonNegativeInteger(item.after_section, "1日目の休憩前セクション");
+    const duration = nonNegativeInteger(item.duration_minutes, "1日目の休憩時間");
+    if (
+      afterSection < 1 ||
+      afterSection > LIMITS.sections ||
+      duration < 1 ||
+      sections.has(afterSection)
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "1日目の休憩設定が不正です。");
+    }
+    sections.add(afterSection);
+  }
+  return day;
+}
+
 function clockMinutes(value: unknown): number | undefined {
   if (typeof value !== "string") return undefined;
-  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
+  const match = /^(\d{2}):(\d{2})(?::[0-5]\d)?$/.exec(value);
   if (match === null) return undefined;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
   return hour <= 23 && minute <= 59 ? hour * 60 + minute : undefined;
+}
+
+function validateDay1ScheduleResult(
+  result: JsonObject,
+  input: JsonObject,
+  teams: JsonObject[],
+  courts: JsonObject[],
+  matches: JsonObject[],
+): void {
+  const courtIds = new Set(courts.map((court) => String(court.id)));
+  const teamIds = new Set(teams.map((team) => String(team.id)));
+  const matchIds = new Set(matches.map((match) => String(match.id)));
+  if (result.slots === undefined) {
+    if (
+      result.section_timings !== undefined ||
+      result.status === "OPTIMAL" ||
+      result.status === "FEASIBLE"
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "1日目日程の試合配置を読み取れませんでした。日程を再生成してください。",
+      );
+    }
+    return;
+  }
+  const currentDay1Format = isDay1LeagueInput(input);
+  let day = currentDay1Format
+    ? validateDay1ScheduleSettings(input)
+    : objectValue(input.day, "1日目の時刻設定を読み取れませんでした。");
+  const slots = arrayValue(
+    result.slots,
+    "1日目スロット",
+    LIMITS.sections * LIMITS.courts,
+  );
+  const positions = new Set<string>();
+  const assignedMatches = new Set<string>();
+  const slotSections = new Set<number>();
+  const maximum = day.max_sections;
+
+  for (const slot of slots) {
+    const section = nonNegativeInteger(slot.section_no, "1日目セクション番号");
+    const courtId = slot.court_id;
+    const position = `${section}:${String(courtId)}`;
+    if (
+      slot.day_id !== "day1" ||
+      section < 1 ||
+      section > LIMITS.sections ||
+      (typeof maximum === "number" && section > maximum) ||
+      typeof courtId !== "string" ||
+      !courtIds.has(courtId) ||
+      positions.has(position)
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "1日目スロットの日時またはコート位置が不正です。",
+      );
+    }
+    positions.add(position);
+    slotSections.add(section);
+
+    if (slot.match_id === null) {
+      if (slot.referee_assignment !== null) {
+        throw new ImportValidationError(
+          "INVALID_REFERENCE",
+          "1日目の空きスロットに審判が設定されています。",
+        );
+      }
+      continue;
+    }
+    if (
+      typeof slot.match_id !== "string" ||
+      !matchIds.has(slot.match_id) ||
+      assignedMatches.has(slot.match_id)
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "1日目の試合配置に未知または重複した試合があります。",
+      );
+    }
+    assignedMatches.add(slot.match_id);
+    const referee = objectValue(
+      slot.referee_assignment,
+      "1日目の審判割当てを読み取れませんでした。",
+    );
+    const kind = referee.kind ?? referee.type;
+    if (
+      (kind === "organizer" &&
+        (referee.team_id !== undefined && referee.team_id !== null ||
+          referee.source_match_id !== undefined && referee.source_match_id !== null)) ||
+      (kind === "team" &&
+        (typeof referee.team_id !== "string" ||
+          !teamIds.has(referee.team_id) ||
+          referee.source_match_id !== undefined && referee.source_match_id !== null)) ||
+      (kind !== "organizer" && kind !== "team")
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "1日目の審判割当てが不正です。");
+    }
+  }
+  if (assignedMatches.size !== matchIds.size) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "1日目日程に配置されていないリーグ試合があります。",
+    );
+  }
+
+  if (result.section_timings === undefined) return;
+  if (!currentDay1Format) day = validateDay1ScheduleSettings(input);
+  const timings = arrayValue(result.section_timings, "1日目時刻", LIMITS.sections);
+  const timingSections = new Set<number>();
+  const timingBySection = new Map<number, JsonObject>();
+  for (const timing of timings) {
+    const section = nonNegativeInteger(timing.section_no, "1日目時刻のセクション");
+    if (
+      timing.day_id !== "day1" ||
+      section < 1 ||
+      section > LIMITS.sections ||
+      timingSections.has(section) ||
+      clockMinutes(timing.start_time) === undefined ||
+      clockMinutes(timing.match_end_time) === undefined
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "1日目のセクション時刻が不正です。");
+    }
+    nonNegativeInteger(timing.break_after_minutes ?? 0, "1日目の休憩時間");
+    timingSections.add(section);
+    timingBySection.set(section, timing);
+  }
+  if (
+    timingSections.size !== slotSections.size ||
+    [...slotSections].some((section) => !timingSections.has(section))
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "1日目の時刻一覧が日程のセクションをすべて含んでいません。",
+    );
+  }
+
+  const startMinutes = clockMinutes(day.start_time);
+  const duration = day.game_duration_minutes;
+  const margin = day.margin_minutes;
+  const rawBreaks = day.breaks as JsonObject[] | undefined;
+  if (startMinutes === undefined || typeof duration !== "number" || typeof margin !== "number") {
+    throw new ImportValidationError("INVALID_DOCUMENT", "1日目の時刻設定が不正です。");
+  }
+  const breaks = new Map<number, number>();
+  for (const item of rawBreaks ?? []) {
+    breaks.set(Number(item.after_section), Number(item.duration_minutes));
+  }
+  for (const section of timingSections) {
+    const timing = timingBySection.get(section)!;
+    const expectedStart =
+      startMinutes +
+      (section - 1) * (duration + margin) +
+      [...breaks]
+        .filter(([afterSection]) => afterSection < section)
+        .reduce((total, [, minutes]) => total + minutes, 0);
+    if (
+      clockMinutes(timing.start_time) !== expectedStart ||
+      clockMinutes(timing.match_end_time) !== expectedStart + duration ||
+      Number(timing.break_after_minutes ?? 0) !== (breaks.get(section) ?? 0)
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "1日目のセクション時刻が大会設定と一致しません。",
+      );
+    }
+  }
 }
 
 function validateDay2ScheduleResult(
@@ -1295,11 +1503,17 @@ export function parseTournamentJson(text: string): TournamentDocument {
   validateReferences(input, teams, matches);
   validateDay2Settings(input);
   if (tournament.result !== undefined) {
-    validateLeagueResult(
-      objectValue(tournament.result, "生成結果を読み取れませんでした。"),
-      teams,
-      input,
-    );
+    const result = objectValue(tournament.result, "生成結果を読み取れませんでした。");
+    validateLeagueResult(result, teams, input);
+    const leaguePlan = result.league_plan;
+    const scheduleMatches = leaguePlan === undefined
+      ? matches
+      : arrayValue(
+          objectValue(leaguePlan, "リーグ日程を読み取れませんでした。").matches,
+          "リーグ試合",
+          LIMITS.matches,
+        );
+    validateDay1ScheduleResult(result, input, teams, courts, scheduleMatches);
   }
   if (typeof root.updatedAt !== "string" || Number.isNaN(Date.parse(root.updatedAt))) {
     throw new ImportValidationError("INVALID_DOCUMENT", "保存日時を読み取れませんでした。");

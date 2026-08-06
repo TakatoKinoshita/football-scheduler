@@ -28,6 +28,14 @@ import {
   unbindDay2ScheduleParticipants,
 } from "./day2-resolution";
 import { setupPwaUpdates } from "./pwa-update";
+import {
+  buildSchedulePresentation,
+  loadScheduleViewMode,
+  saveScheduleViewMode,
+  type SchedulePresentation,
+  type SchedulePresentationRow,
+  type ScheduleViewMode,
+} from "./schedule-presentation";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
   bindTournamentParticipants,
@@ -418,10 +426,119 @@ function appendTextElement<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
+type WebScheduleSlot = JsonObject & {
+  section_no: number;
+  court_id: string;
+  match_id: string | null;
+};
+
+function scheduleSlots(value: unknown): WebScheduleSlot[] {
+  return asObjectArray(value).filter(
+    (slot): slot is WebScheduleSlot =>
+      Number.isInteger(slot.section_no) &&
+      Number(slot.section_no) > 0 &&
+      typeof slot.court_id === "string" &&
+      (typeof slot.match_id === "string" || slot.match_id === null),
+  );
+}
+
+function buildWebSchedulePresentation(
+  dayId: "day1" | "day2",
+  schedule: JsonObject,
+): SchedulePresentation<WebScheduleSlot> {
+  const settings = asObject(
+    dayId === "day1"
+      ? documentState.tournament.input.day
+      : documentState.tournament.input.day2,
+  );
+  return buildSchedulePresentation({
+    dayId,
+    courts: asObjectArray(documentState.tournament.input.courts)
+      .filter(
+        (court): court is JsonObject & { id: string; name: string } =>
+          typeof court.id === "string" && typeof court.name === "string",
+      )
+      .map((court) => ({ id: court.id, name: court.name })),
+    slots: scheduleSlots(schedule.slots),
+    sectionTimings: asObjectArray(schedule.section_timings)
+      .filter(
+        (timing) => Number.isInteger(timing.section_no) && Number(timing.section_no) > 0,
+      )
+      .map((timing) => ({
+        section_no: Number(timing.section_no),
+        start_time: typeof timing.start_time === "string" ? timing.start_time : null,
+        match_end: typeof timing.match_end_time === "string" ? timing.match_end_time : null,
+      })),
+    daySettings: {
+      start_time: typeof settings?.start_time === "string" ? settings.start_time : null,
+      game_duration_minutes:
+        typeof settings?.game_duration_minutes === "number"
+          ? settings.game_duration_minutes
+          : null,
+      margin_minutes:
+        typeof settings?.margin_minutes === "number" ? settings.margin_minutes : null,
+      breaks: asObjectArray(settings?.breaks)
+        .filter(
+          (item) =>
+            Number.isInteger(item.after_section) &&
+            Number(item.after_section) > 0 &&
+            Number.isInteger(item.duration_minutes) &&
+            Number(item.duration_minutes) >= 0,
+        )
+        .map((item) => ({
+          after_section: Number(item.after_section),
+          duration_minutes: Number(item.duration_minutes),
+        })),
+    },
+  });
+}
+
+function appendMatchDisplayNumber(
+  parent: HTMLElement,
+  matchId: string,
+  displayNumber: string,
+): HTMLElement {
+  const badge = appendTextElement(parent, "span", displayNumber, "match-display-number");
+  badge.dataset.matchId = matchId;
+  badge.dataset.displayNumber = displayNumber;
+  badge.setAttribute("aria-label", `試合番号 ${displayNumber}`);
+  return badge;
+}
+
+function createScheduleViewToggle(
+  dayId: "day1" | "day2",
+  mode: ScheduleViewMode,
+  onChange: (mode: ScheduleViewMode) => void,
+): HTMLFieldSetElement {
+  const fieldset = window.document.createElement("fieldset");
+  fieldset.id = `${dayId}-schedule-view-toggle`;
+  fieldset.className = "schedule-view-toggle no-print";
+  appendTextElement(fieldset, "legend", "日程の表示");
+  for (const [value, label] of [
+    ["time", "時間順"],
+    ["court", "コート別"],
+  ] as const) {
+    const wrapper = window.document.createElement("label");
+    const input = window.document.createElement("input");
+    input.type = "radio";
+    input.name = `${dayId}-schedule-view`;
+    input.value = value;
+    input.checked = mode === value;
+    input.addEventListener("change", () => {
+      if (input.checked) onChange(value);
+    });
+    wrapper.append(input, window.document.createTextNode(label));
+    fieldset.append(wrapper);
+  }
+  return fieldset;
+}
+
 const storage = new TournamentStorage();
 const autosave = new AutosaveController((value) => storage.saveDraft(value));
 let documentState = createTournamentDocument();
 let currentStep: WizardStep = 1;
+let day1ScheduleViewMode = loadScheduleViewMode("day1");
+let day2ScheduleViewMode = loadScheduleViewMode("day2");
 let legacyCompatibility = false;
 let organizerCapacityTouched = false;
 let turnstileToken = "";
@@ -526,6 +643,30 @@ function idNameMap(field: "teams" | "courts"): Map<string, string> {
   );
 }
 
+function namedInputsWithStableIds(
+  existingValue: unknown,
+  names: readonly string[],
+  prefix: "team" | "court",
+): Array<{ id: string; name: string }> {
+  const existing = asObjectArray(existingValue);
+  const used = new Set<string>();
+  return names.map((name, index) => {
+    const existingId = existing[index]?.id;
+    let id = typeof existingId === "string" && existingId.length > 0 && !used.has(existingId)
+      ? existingId
+      : "";
+    if (id === "") {
+      let candidateNumber = index + 1;
+      do {
+        id = `${prefix}-${String(candidateNumber).padStart(2, "0")}`;
+        candidateNumber += 1;
+      } while (used.has(id));
+    }
+    used.add(id);
+    return { id, name };
+  });
+}
+
 function exactTeamId(match: JsonObject | undefined, side: "home" | "away"): string | undefined {
   if (match === undefined) return undefined;
   const direct = match[`${side}_team_id`];
@@ -534,28 +675,6 @@ function exactTeamId(match: JsonObject | undefined, side: "home" | "away"): stri
   return Array.isArray(possible) && possible.length === 1 && typeof possible[0] === "string"
     ? possible[0]
     : undefined;
-}
-
-function sectionLabel(sectionNumber: number): string {
-  const settings = asObject(documentState.tournament.input.day);
-  if (
-    typeof settings?.start_time !== "string" ||
-    typeof settings.game_duration_minutes !== "number" ||
-    typeof settings.margin_minutes !== "number"
-  ) {
-    return `第${sectionNumber}セクション`;
-  }
-  const [hoursText, minutesText] = settings.start_time.split(":");
-  const hours = Number(hoursText);
-  const minutes = Number(minutesText);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return `第${sectionNumber}セクション`;
-  const totalMinutes =
-    hours * 60 +
-    minutes +
-    (sectionNumber - 1) *
-      (settings.game_duration_minutes + settings.margin_minutes);
-  const time = `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
-  return `第${sectionNumber}・${time}`;
 }
 
 function day2SectionLabel(sectionNumber: number, schedule: JsonObject): string {
@@ -753,12 +872,25 @@ function saveDay2Settings(): void {
       day2Status.textContent = "2日目設定を保存できませんでした。ファイルへ保存してください。";
     },
   );
+  if (nextResult !== undefined) {
+    const tournamentPlan = asObject(nextResult.tournament_plan);
+    if (tournamentPlan !== undefined) {
+      renderDay2Preparation(
+        nextResult,
+        requiredElement<HTMLElement>("#day2-result-content"),
+        requiredElement<HTMLElement>("#day2-result-summary"),
+        asObject(nextResult.league_standings),
+        tournamentPlan,
+        idNameMap("teams"),
+        idNameMap("courts"),
+      );
+    }
+  }
   day2StatusOwner = "generation";
   day2Status.textContent =
     "2日目設定を変更したため、以前の日程を取り消しました。もう一度作成してください。";
   requiredElement<HTMLElement>("#day2-result-summary").textContent =
     "2日目設定が変更されました。日程をもう一度作成してください。";
-  document.querySelector("#day2-schedule-view")?.remove();
   refreshDay2Enabled();
 }
 
@@ -843,6 +975,99 @@ function refreshDay2Enabled(): void {
     day2TurnstileToken.length === 0;
 }
 
+interface ScheduleRowDetails {
+  matchup: string;
+  referee: string;
+  phase?: string;
+}
+
+function appendScheduleTable(
+  parent: HTMLElement,
+  rows: readonly SchedulePresentationRow<WebScheduleSlot>[],
+  options: {
+    tableLabel: string;
+    showCourt: boolean;
+    showPhase: boolean;
+    details: (row: SchedulePresentationRow<WebScheduleSlot>) => ScheduleRowDetails;
+  },
+): void {
+  const wrapper = window.document.createElement("div");
+  wrapper.className = "table-wrap schedule-table-wrap";
+  const table = window.document.createElement("table");
+  table.className = "schedule-table";
+  table.setAttribute("aria-label", options.tableLabel);
+  const head = window.document.createElement("thead");
+  const heading = window.document.createElement("tr");
+  const labels = ["試合", "セクション", "時間"];
+  if (options.showCourt) labels.push("コート");
+  if (options.showPhase) labels.push("区分");
+  labels.push("対戦", "審判");
+  for (const label of labels) appendTextElement(heading, "th", label);
+  head.append(heading);
+  table.append(head);
+  const body = window.document.createElement("tbody");
+  for (const row of rows) {
+    const details = options.details(row);
+    const tableRow = window.document.createElement("tr");
+    tableRow.dataset.matchId = row.matchId;
+    const numberCell = window.document.createElement("td");
+    appendMatchDisplayNumber(numberCell, row.matchId, row.displayNumber);
+    tableRow.append(numberCell);
+    appendTextElement(tableRow, "td", `第${row.sectionNo}`);
+    appendTextElement(tableRow, "td", row.timeLabel);
+    if (options.showCourt) appendTextElement(tableRow, "td", row.courtName);
+    if (options.showPhase) appendTextElement(tableRow, "td", details.phase ?? "-");
+    appendTextElement(tableRow, "td", details.matchup);
+    appendTextElement(tableRow, "td", details.referee);
+    body.append(tableRow);
+  }
+  table.append(body);
+  wrapper.append(table);
+  parent.append(wrapper);
+}
+
+function renderScheduleView(
+  container: HTMLElement,
+  presentation: SchedulePresentation<WebScheduleSlot>,
+  mode: ScheduleViewMode,
+  options: {
+    showPhase: boolean;
+    details: (row: SchedulePresentationRow<WebScheduleSlot>) => ScheduleRowDetails;
+  },
+): void {
+  container.replaceChildren();
+  container.dataset.scheduleView = mode;
+  if (mode === "time") {
+    appendScheduleTable(container, presentation.timeRows, {
+      tableLabel: "時間順の日程",
+      showCourt: true,
+      showPhase: options.showPhase,
+      details: options.details,
+    });
+    return;
+  }
+  const grid = window.document.createElement("div");
+  grid.className = "court-schedule-grid";
+  for (const group of presentation.courtGroups) {
+    const card = window.document.createElement("section");
+    card.className = "court-schedule-card";
+    card.dataset.courtId = group.court.id;
+    appendTextElement(card, "h4", `${group.courtCode}：${group.court.name}`);
+    if (group.rows.length === 0) {
+      appendTextElement(card, "p", "このコートに配置された試合はありません。", "muted");
+    } else {
+      appendScheduleTable(card, group.rows, {
+        tableLabel: `${group.court.name}の日程`,
+        showCourt: false,
+        showPhase: options.showPhase,
+        details: options.details,
+      });
+    }
+    grid.append(card);
+  }
+  container.append(grid);
+}
+
 function renderResult(): void {
   const summary = requiredElement<HTMLElement>("#result-summary");
   const content = requiredElement<HTMLElement>("#result-content");
@@ -867,13 +1092,8 @@ function renderResult(): void {
     return;
   }
 
-  const slots = asObjectArray(result.slots)
-    .filter((slot) => typeof slot.match_id === "string")
-    .sort(
-      (left, right) =>
-        Number(left.section_no) - Number(right.section_no) ||
-        String(left.court_id).localeCompare(String(right.court_id), "ja"),
-    );
+  const schedulePresentation = buildWebSchedulePresentation("day1", result);
+  const slots = schedulePresentation.timeRows.map((row) => row.slot);
   const teamNames = idNameMap("teams");
   const courtNames = idNameMap("courts");
   const matches = new Map(
@@ -916,22 +1136,16 @@ function renderResult(): void {
   goDay2Area.hidden = blocks.length === 0;
 
   appendTextElement(content, "h3", "1日目の日程表");
-  const tableWrapper = window.document.createElement("div");
-  tableWrapper.className = "table-wrap";
-  const table = window.document.createElement("table");
-  const head = window.document.createElement("thead");
-  const headingRow = window.document.createElement("tr");
-  for (const heading of ["時間", "コート", "対戦", "審判"]) {
-    appendTextElement(headingRow, "th", heading);
-  }
-  head.append(headingRow);
-  table.append(head);
-  const body = window.document.createElement("tbody");
+  const day1ScheduleContainer = window.document.createElement("div");
+  day1ScheduleContainer.id = "day1-schedule-view";
+  day1ScheduleContainer.className = "schedule-view-content";
   const teamSchedules = new Map<string, string[]>();
   for (const teamId of teamNames.keys()) teamSchedules.set(teamId, []);
-
-  for (const slot of slots) {
-    const match = matches.get(String(slot.match_id));
+  const day1Details = (
+    presentationRow: SchedulePresentationRow<WebScheduleSlot>,
+  ): ScheduleRowDetails => {
+    const slot = presentationRow.slot;
+    const match = matches.get(presentationRow.matchId);
     const homeId = exactTeamId(match, "home");
     const awayId = exactTeamId(match, "away");
     const homeName =
@@ -942,12 +1156,6 @@ function renderResult(): void {
       awayId === undefined
         ? "前の試合結果で決定"
         : (teamNames.get(awayId) ?? "名称未設定");
-    const courtName = courtNames.get(String(slot.court_id)) ?? "コート未設定";
-    const sectionNumber = Number(slot.section_no);
-    const row = window.document.createElement("tr");
-    appendTextElement(row, "td", sectionLabel(sectionNumber));
-    appendTextElement(row, "td", courtName);
-    appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
     const assignment = asObject(slot.referee_assignment);
     const kind = assignment?.kind ?? assignment?.type;
     const refereeTeamId =
@@ -958,28 +1166,53 @@ function renderResult(): void {
         : refereeTeamId === undefined
           ? "確認中"
           : (teamNames.get(refereeTeamId) ?? "名称未設定");
-    appendTextElement(row, "td", refereeName);
-    body.append(row);
-
+    return { matchup: `${homeName} 対 ${awayName}`, referee: refereeName };
+  };
+  for (const presentationRow of schedulePresentation.timeRows) {
+    const slot = presentationRow.slot;
+    const match = matches.get(presentationRow.matchId);
+    const homeId = exactTeamId(match, "home");
+    const awayId = exactTeamId(match, "away");
+    const homeName =
+      homeId === undefined ? "前の試合結果で決定" : (teamNames.get(homeId) ?? "名称未設定");
+    const awayName =
+      awayId === undefined ? "前の試合結果で決定" : (teamNames.get(awayId) ?? "名称未設定");
+    const assignment = asObject(slot.referee_assignment);
+    const refereeTeamId =
+      typeof assignment?.team_id === "string" ? assignment.team_id : undefined;
     if (homeId !== undefined) {
       teamSchedules
         .get(homeId)
-        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${awayName}`);
+        ?.push(`${presentationRow.timeLabel}　${presentationRow.courtName}　対 ${awayName}`);
     }
     if (awayId !== undefined) {
       teamSchedules
         .get(awayId)
-        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　対 ${homeName}`);
+        ?.push(`${presentationRow.timeLabel}　${presentationRow.courtName}　対 ${homeName}`);
     }
     if (refereeTeamId !== undefined) {
       teamSchedules
         .get(refereeTeamId)
-        ?.push(`${sectionLabel(sectionNumber)}　${courtName}　審判`);
+        ?.push(`${presentationRow.timeLabel}　${presentationRow.courtName}　審判`);
     }
   }
-  table.append(body);
-  tableWrapper.append(table);
-  content.append(tableWrapper);
+  const renderDay1Schedule = (): void => {
+    renderScheduleView(
+      day1ScheduleContainer,
+      schedulePresentation,
+      day1ScheduleViewMode,
+      { showPhase: false, details: day1Details },
+    );
+  };
+  content.append(
+    createScheduleViewToggle("day1", day1ScheduleViewMode, (mode) => {
+      day1ScheduleViewMode = mode;
+      saveScheduleViewMode("day1", mode);
+      renderDay1Schedule();
+    }),
+    day1ScheduleContainer,
+  );
+  renderDay1Schedule();
 
   if (blocks.length > 0) {
     appendTextElement(content, "h3", "ブロック分け");
@@ -1032,14 +1265,14 @@ function renderResult(): void {
     for (const match of leagueMatches) {
       const matchId = String(match.id);
       const current = resultsByMatch.get(matchId);
-      const scheduledSlot = slots.find((slot) => slot.match_id === matchId);
+      const scheduledRow = schedulePresentation.timeRows.find((item) => item.matchId === matchId);
       const row = window.document.createElement("tr");
       appendTextElement(
         row,
         "td",
-        scheduledSlot === undefined
+        scheduledRow === undefined
           ? "未配置"
-          : sectionLabel(Number(scheduledSlot.section_no)),
+          : scheduledRow.timeLabel,
       );
       const blockId = blocks.find(
         (block) =>
@@ -1275,6 +1508,7 @@ function tournamentEntryLabel(
   value: unknown,
   rankedTeams: Map<string, string>,
   teamNames: Map<string, string>,
+  displayNumberByMatchId?: ReadonlyMap<string, string>,
 ): string {
   const entry = asObject(value);
   if (entry?.type === "concrete_team" && typeof entry.team_id === "string") {
@@ -1291,10 +1525,10 @@ function tournamentEntryLabel(
       : (teamNames.get(teamId) ?? "名称未設定");
   }
   if (entry?.type === "winner_of" && typeof entry.match_id === "string") {
-    return `${entry.match_id}の勝者`;
+    return `${displayNumberByMatchId?.get(entry.match_id) ?? entry.match_id}の勝者`;
   }
   if (entry?.type === "loser_of" && typeof entry.match_id === "string") {
-    return `${entry.match_id}の敗者`;
+    return `${displayNumberByMatchId?.get(entry.match_id) ?? entry.match_id}の敗者`;
   }
   return "対戦結果で決定";
 }
@@ -1304,6 +1538,7 @@ function renderTournamentPlan(
   plan: JsonObject,
   standings: JsonObject | undefined,
   teamNames: Map<string, string>,
+  displayNumberByMatchId?: ReadonlyMap<string, string>,
 ): void {
   const provisional = tournamentParticipantResolution(plan) === "provisional";
   const section = window.document.createElement("section");
@@ -1374,7 +1609,7 @@ function renderTournamentPlan(
         appendTextElement(
           byeList,
           "li",
-          `${tournamentEntryLabel(bye.entry, rankedTeams, teamNames)} → ${String(bye.next_match_id)}`,
+          `${tournamentEntryLabel(bye.entry, rankedTeams, teamNames, displayNumberByMatchId)} → ${displayNumberByMatchId?.get(String(bye.next_match_id)) ?? String(bye.next_match_id)}`,
         );
       }
       poolSection.append(byeList);
@@ -1391,17 +1626,25 @@ function renderTournamentPlan(
     const body = window.document.createElement("tbody");
     for (const match of asObjectArray(pool.matches)) {
       const row = window.document.createElement("tr");
+      const matchId = String(match.id ?? "-");
       const rankRange = Array.isArray(match.rank_range)
         ? `${String(match.rank_range[0])}〜${String(match.rank_range[1])}位`
         : "-";
-      for (const value of [
-        match.id,
-        match.round,
-        `${tournamentEntryLabel(match.home, rankedTeams, teamNames)} 対 ${tournamentEntryLabel(match.away, rankedTeams, teamNames)}`,
-        rankRange,
-      ]) {
-        appendTextElement(row, "td", String(value ?? "-"));
+      const numberCell = window.document.createElement("td");
+      const displayNumber = displayNumberByMatchId?.get(matchId);
+      if (displayNumber === undefined) {
+        numberCell.textContent = matchId;
+      } else {
+        appendMatchDisplayNumber(numberCell, matchId, displayNumber);
       }
+      row.append(numberCell);
+      appendTextElement(row, "td", String(match.round ?? "-"));
+      appendTextElement(
+        row,
+        "td",
+        `${tournamentEntryLabel(match.home, rankedTeams, teamNames, displayNumberByMatchId)} 対 ${tournamentEntryLabel(match.away, rankedTeams, teamNames, displayNumberByMatchId)}`,
+      );
+      appendTextElement(row, "td", rankRange);
       body.append(row);
     }
     table.append(body);
@@ -1416,7 +1659,7 @@ function renderTournamentPlan(
       appendTextElement(
         placements,
         "li",
-        `${String(placement.rank)}位：${tournamentEntryLabel(placement.entry, rankedTeams, teamNames)}`,
+        `${String(placement.rank)}位：${tournamentEntryLabel(placement.entry, rankedTeams, teamNames, displayNumberByMatchId)}`,
       );
     }
     poolSection.append(placements);
@@ -1528,24 +1771,7 @@ function renderDay2Schedule(
       .filter((match) => typeof match.id === "string")
       .map((match) => [String(match.id), match]),
   );
-  const slots = asObjectArray(schedule.slots)
-    .filter((slot) => typeof slot.match_id === "string")
-    .sort(
-      (left, right) =>
-        Number(left.section_no) - Number(right.section_no) ||
-        String(left.court_id).localeCompare(String(right.court_id), "ja"),
-    );
-  const wrapper = window.document.createElement("div");
-  wrapper.className = "table-wrap";
-  const table = window.document.createElement("table");
-  const head = window.document.createElement("thead");
-  const heading = window.document.createElement("tr");
-  for (const label of ["時間", "コート", "区分", "対戦", "審判"]) {
-    appendTextElement(heading, "th", label);
-  }
-  head.append(heading);
-  table.append(head);
-  const body = window.document.createElement("tbody");
+  const schedulePresentation = buildWebSchedulePresentation("day2", schedule);
   const fallbackLabels: Record<string, string> = {
     no_previous_match: "直前の試合なし",
     source_may_play_target: "直前試合の勝者が出場する可能性",
@@ -1553,25 +1779,18 @@ function renderDay2Schedule(
     source_used_twice_in_section: "同じ勝者を同時に重複割当て",
     source_may_referee_twice_in_section: "異なる試合の勝者が同じ審判チームになる可能性",
   };
-  for (const slot of slots) {
-    const match = matches.get(String(slot.match_id));
-    const row = window.document.createElement("tr");
-    appendTextElement(row, "td", day2SectionLabel(Number(slot.section_no), schedule));
-    appendTextElement(row, "td", courtNames.get(String(slot.court_id)) ?? "コート未設定");
-    appendTextElement(
-      row,
-      "td",
-      match?.phase === "upper_tournament" ? "上位" : "下位",
-    );
-    appendTextElement(
-      row,
-      "td",
-      `${tournamentEntryLabel(match?.home, rankedTeams, teamNames)} 対 ${tournamentEntryLabel(match?.away, rankedTeams, teamNames)}`,
-    );
+  const day2Details = (
+    presentationRow: SchedulePresentationRow<WebScheduleSlot>,
+  ): ScheduleRowDetails => {
+    const slot = presentationRow.slot;
+    const match = matches.get(presentationRow.matchId);
     const assignment = asObject(slot.referee_assignment);
     let referee = "確認中";
     if (assignment?.kind === "team" && typeof assignment.source_match_id === "string") {
-      referee = `${assignment.source_match_id}の勝者`;
+      const sourceNumber =
+        schedulePresentation.displayNumberByMatchId.get(assignment.source_match_id) ??
+        assignment.source_match_id;
+      referee = `${sourceNumber}の勝者（同じコートの直前実試合）`;
     } else if (assignment?.kind === "organizer") {
       referee = "主催者";
       const reasons = Array.isArray(assignment.fallback_reasons)
@@ -1579,12 +1798,29 @@ function renderDay2Schedule(
         : [];
       if (reasons.length > 0) referee += `（${reasons.join("、")}）`;
     }
-    appendTextElement(row, "td", referee);
-    body.append(row);
-  }
-  table.append(body);
-  wrapper.append(table);
-  section.append(wrapper);
+    return {
+      phase: match?.phase === "upper_tournament" ? "上位" : "下位",
+      matchup: `${tournamentEntryLabel(match?.home, rankedTeams, teamNames, schedulePresentation.displayNumberByMatchId)} 対 ${tournamentEntryLabel(match?.away, rankedTeams, teamNames, schedulePresentation.displayNumberByMatchId)}`,
+      referee,
+    };
+  };
+  const scheduleContainer = window.document.createElement("div");
+  scheduleContainer.className = "schedule-view-content";
+  const renderCurrentSchedule = (): void => {
+    renderScheduleView(scheduleContainer, schedulePresentation, day2ScheduleViewMode, {
+      showPhase: true,
+      details: day2Details,
+    });
+  };
+  section.append(
+    createScheduleViewToggle("day2", day2ScheduleViewMode, (mode) => {
+      day2ScheduleViewMode = mode;
+      saveScheduleViewMode("day2", mode);
+      renderCurrentSchedule();
+    }),
+    scheduleContainer,
+  );
+  renderCurrentSchedule();
 
   appendTextElement(section, "h4", "チーム別の可能な経路");
   const routeGrid = window.document.createElement("div");
@@ -1614,10 +1850,19 @@ function renderDay2Schedule(
     appendTextElement(card, "h5", label);
     const list = window.document.createElement("ul");
     for (const route of routes) {
+      const routeRow = schedulePresentation.timeRows.find(
+        (row) =>
+          row.sectionNo === Number(route.section_no) &&
+          row.courtId === String(route.court_id) &&
+          row.matchId === String(route.match_id),
+      );
+      const routeMatchNumber = schedulePresentation.displayNumberByMatchId.get(
+        String(route.match_id),
+      );
       appendTextElement(
         list,
         "li",
-        `${day2SectionLabel(Number(route.section_no), schedule)}　${courtNames.get(String(route.court_id)) ?? String(route.court_id)}　${route.role === "referee" ? "審判候補" : `${String(route.match_id)}出場候補`}`,
+        `${routeRow?.timeLabel ?? day2SectionLabel(Number(route.section_no), schedule)}　${courtNames.get(String(route.court_id)) ?? String(route.court_id)}　${route.role === "referee" ? "審判候補" : `${routeMatchNumber ?? String(route.match_id)}出場候補`}`,
       );
     }
     card.append(list);
@@ -1927,6 +2172,8 @@ function updateDraft(invalidateResult = false): void {
   } else {
     const teamNames = lines(teamsInput.value).slice(0, 32);
     const courtNames = lines(courtsInput.value).slice(0, 16);
+    const teams = namedInputsWithStableIds(previous.tournament.input.teams, teamNames, "team");
+    const courts = namedInputsWithStableIds(previous.tournament.input.courts, courtNames, "court");
     const seeded = assignmentModeInput.value === "seeded_snake";
     documentState = {
       ...previous,
@@ -1936,15 +2183,11 @@ function updateDraft(invalidateResult = false): void {
         input: {
           schema_version: "0.1.0",
           request_kind: "day1_league",
-          teams: teamNames.map((name, index) => ({
-            id: `team-${String(index + 1).padStart(2, "0")}`,
-            name,
+          teams: teams.map((team, index) => ({
+            ...team,
             ...(seeded ? { seed: index + 1 } : {}),
           })),
-          courts: courtNames.map((name, index) => ({
-            id: `court-${String(index + 1).padStart(2, "0")}`,
-            name,
-          })),
+          courts,
           league: {
             block_count: blockCountInput.value === "" ? null : Number(blockCountInput.value),
             assignment_mode: assignmentModeInput.value,
@@ -2045,11 +2288,21 @@ function renderDay2Preparation(
   day2Confirmation.hidden = true;
   day2PrintButton.disabled = tournamentPlan === undefined;
   if (tournamentPlan === undefined) return;
-  renderTournamentPlan(day2Content, tournamentPlan, standings, teamNames);
+  const day2Schedule = asObject(result.day2_schedule);
+  const displayNumberByMatchId =
+    day2Schedule === undefined
+      ? undefined
+      : buildWebSchedulePresentation("day2", day2Schedule).displayNumberByMatchId;
+  renderTournamentPlan(
+    day2Content,
+    tournamentPlan,
+    standings,
+    teamNames,
+    displayNumberByMatchId,
+  );
   day2Confirmation.hidden = false;
   setupDay2Turnstile();
   refreshDay2Enabled();
-  const day2Schedule = asObject(result.day2_schedule);
   if (day2Schedule !== undefined) {
     day2Summary.textContent =
       day2ParticipantResolution(day2Schedule) === "provisional"

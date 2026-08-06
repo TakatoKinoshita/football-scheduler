@@ -115,6 +115,19 @@ table { width: 100%; min-width: 680px; border-collapse: collapse; background: wh
 th, td { padding: .7rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { color: white; background: var(--green); }
 tbody tr:last-child td { border-bottom: 0; }
+.schedule-view-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: 0 0 .75rem; padding: 0; border: 0; }
+.schedule-view-toggle legend { width: 100%; margin-bottom: .2rem; color: var(--muted); font-size: .85rem; font-weight: 800; }
+.schedule-view-toggle label { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: .45rem .9rem; color: var(--green); background: white; border: 2px solid var(--green); border-radius: .4rem; cursor: pointer; font-weight: 800; }
+.schedule-view-toggle label:has(input:checked) { color: white; background: var(--green); }
+.schedule-view-toggle input { position: absolute; width: 1px; min-height: 1px; margin: 0; padding: 0; opacity: 0; }
+.schedule-view-toggle label:focus-within { outline: 4px solid #efb244; outline-offset: 2px; }
+[data-schedule-view][hidden] { display: none !important; }
+.court-schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: 1rem; min-width: 0; }
+.court-schedule-card { min-width: 0; padding: .9rem; background: white; border: 1px solid var(--border); border-radius: .4rem; break-inside: avoid; }
+.court-schedule-card h4 { margin: 0 0 .55rem; color: var(--green); }
+.court-schedule-card .table-wrap { max-width: 100%; overflow-x: auto; }
+.court-schedule-card table { min-width: 560px; }
+.match-display-number { white-space: nowrap; font-weight: 800; }
 .team-schedule-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .7rem; }
 .team-card { padding: .9rem; background: white; border: 1px solid var(--border); border-radius: .4rem; break-inside: avoid; }
 .team-card h4 { margin: 0 0 .4rem; }
@@ -131,6 +144,8 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   main { width: min(100% - 1rem, 1100px); margin-top: 1rem; }
   .steps { grid-template-columns: 1fr 1fr; }
   .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid { grid-template-columns: 1fr; }
+  .court-schedule-grid { grid-template-columns: 1fr; }
+  .schedule-view-toggle label { flex: 1 1 8rem; }
   .field-wide { grid-column: auto; }
   .button-row > * { width: 100%; }
   .seed-list { columns: 1; }
@@ -150,6 +165,11 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .result-content { background: white; border: 1px solid #777; }
   .table-wrap { overflow: visible; }
   table { min-width: 0; font-size: 9pt; }
+  #day1-schedule-view-toggle, #day2-schedule-view-toggle { display: none !important; }
+  .court-schedule-grid { grid-template-columns: 1fr; }
+  .court-schedule-card { break-inside: avoid; }
+  .court-schedule-card .table-wrap { overflow: visible; }
+  .court-schedule-card table { min-width: 0; }
   .team-schedule-grid { grid-template-columns: repeat(2, 1fr); }
   .block-grid { grid-template-columns: repeat(3, 1fr); }
   .tournament-pool { break-inside: auto; }

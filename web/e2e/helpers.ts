@@ -45,10 +45,24 @@ export async function mockExternalServices(
     });
   });
   await page.route(GENERATE_API, async (route) => {
+    const request = route.request().postDataJSON() as {
+      request_kind?: unknown;
+      courts?: Array<{ id?: unknown }>;
+    } | null;
+    const requestedCourtId =
+      request?.request_kind === "day1_league" && typeof request.courts?.[0]?.id === "string"
+        ? request.courts[0].id
+        : undefined;
+    const response = requestedCourtId === undefined
+      ? scheduleResult
+      : {
+          ...scheduleResult,
+          slots: scheduleResult.slots.map((slot) => ({ ...slot, court_id: requestedCourtId })),
+        };
     await route.fulfill({
       contentType: "application/json",
       status: 200,
-      body: JSON.stringify(scheduleResult),
+      body: JSON.stringify(response),
     });
   });
 }
