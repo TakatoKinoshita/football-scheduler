@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   day2ScheduleResult,
+  provisionalTournamentPlanResult,
   scheduleResult,
   standingsResult,
   tournamentFixture,
@@ -22,17 +23,39 @@ async function enterOnlyResult(page: import("@playwright/test").Page): Promise<v
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
-test("順位未確定の2日目タブでは次の操作を始めず案内を表示する", async ({ page }) => {
+test("順位未確定でも順位枠の仮トーナメントを作成・印刷・復元する", async ({ page }) => {
   await openGeneratedLeague(page);
+  await page.unroute(GENERATE_API);
+  const requests: unknown[] = [];
+  await page.route(GENERATE_API, async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(provisionalTournamentPlanResult),
+    });
+  });
 
   await page.locator('.step[data-step="5"]').click();
 
   await expect(page.locator('[data-panel="5"]')).toBeVisible();
-  await expect(page.locator("#day2-result-content")).toContainText("順位を確定してください");
-  await expect(page.locator("#tournament-confirmation")).toBeHidden();
+  await expect(page.locator("#tournament-confirmation")).toBeVisible();
+  await expect(page.getByRole("button", { name: "仮トーナメントを作成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "仮トーナメントを作成する" }).click();
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ request_kind: "tournament_plan" });
+  expect(requests[0]).not.toHaveProperty("league_standings");
+  await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
+  await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
   await expect(page.locator("#day2-confirmation")).toBeHidden();
-  await page.getByRole("button", { name: "1日目へ戻る" }).click();
-  await expect(page.locator('[data-panel="4"]')).toBeVisible();
+  await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("#tournament-plan-view")).toBeVisible();
+  await page.emulateMedia({ media: "screen" });
+  await page.context().setOffline(true);
+  await page.reload();
+  await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
 });
 
 test("最終試合の入力直後に順位を確定し、変更時は確定順位を失効する", async ({ page }) => {
@@ -70,6 +93,42 @@ test("最終試合の入力直後に順位を確定し、変更時は確定順�
   await expect(page.getByLabel("青空FC 対 みどりSC・みどりSCの得点")).toHaveValue("1");
 });
 
+test("順位確定時に仮トーナメントの構造を保ったままチーム名を反映する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const base = tournamentFixture({ withResult: true });
+  await importDocument(page, {
+    ...base,
+    tournament: {
+      ...base.tournament,
+      result: {
+        ...scheduleResult,
+        tournament_plan: provisionalTournamentPlanResult,
+      },
+    },
+  });
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(standingsResult),
+    });
+  });
+
+  await page.locator('.step[data-step="5"]').click();
+  await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
+  await expect(page.locator("#tournament-plan-view")).not.toContainText("青空FC");
+  await page.locator('.step[data-step="4"]').click();
+  await enterOnlyResult(page);
+  await page.getByRole("button", { name: "順位を確定する" }).click();
+  await page.locator('.step[data-step="5"]').click();
+
+  await expect(page.locator("#tournament-plan-view")).not.toContainText("【仮】");
+  await expect(page.locator("#tournament-plan-view")).toContainText("青空FC（Aブロック 1位）");
+  await expect(page.locator("#day2-confirmation")).toBeVisible();
+});
+
 test("順位API失敗時も得点を保持して結果画面内に説明する", async ({ page }) => {
   await openGeneratedLeague(page);
   await page.unroute(GENERATE_API);
@@ -96,7 +155,7 @@ test("順位API失敗時も得点を保持して結果画面内に説明する",
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toHaveValue("2");
 });
 
-test("確定順位から2日目トーナメントを作成し、得点変更時は一緒に失効する", async ({
+test("確定順位から2日目トーナメントを作成し、得点変更時は仮表を保持する", async ({
   page,
 }) => {
   await mockExternalServices(page);
@@ -143,8 +202,12 @@ test("確定順位から2日目トーナメントを作成し、得点変更時�
   await page.locator('.step[data-step="4"]').click();
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
   await expect(page.locator("#league-standings-view")).toHaveCount(0);
-  await expect(page.locator("#tournament-plan-view")).toHaveCount(0);
-  await expect(page.locator("#tournament-confirmation")).toBeHidden();
+  await expect(page.locator("#standings-status")).toContainText("仮トーナメントへ戻しました");
+  await page.locator('.step[data-step="5"]').click();
+  await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
+  await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
+  await expect(page.locator("#tournament-confirmation")).toBeVisible();
+  await expect(page.locator("#day2-confirmation")).toBeHidden();
 });
 
 test("1日目と2日目をモバイルで分け、日別に印刷表示できる", async ({ page }) => {

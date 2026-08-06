@@ -95,6 +95,7 @@ const emptyTournamentEvaluation = {
 export const tournamentPlanResult = {
   schema_version: "0.1.0",
   status: "COMPLETE",
+  participant_resolution: "resolved",
   odd_split_policy: "upper",
   random_seed: 20260803,
   upper: {
@@ -139,6 +140,27 @@ export const tournamentPlanResult = {
   },
   seed_draws: [],
   warnings: [],
+};
+
+export const provisionalTournamentPlanResult = {
+  ...tournamentPlanResult,
+  participant_resolution: "provisional",
+  upper: {
+    ...tournamentPlanResult.upper,
+    seeds: tournamentPlanResult.upper.seeds.map((seed) => ({
+      ...seed,
+      team_id: null,
+      team: null,
+    })),
+  },
+  lower: {
+    ...tournamentPlanResult.lower,
+    seeds: tournamentPlanResult.lower.seeds.map((seed) => ({
+      ...seed,
+      team_id: null,
+      team: null,
+    })),
+  },
 };
 
 export const day2ScheduleResult = {

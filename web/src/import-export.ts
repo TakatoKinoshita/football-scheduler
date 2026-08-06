@@ -560,14 +560,22 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
 
   if (result.league_standings === undefined) {
-    if (
-      result.tournament_plan !== undefined ||
-      result.day2_schedule !== undefined ||
-      result.integrated_validation !== undefined
-    ) {
+    if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
-        "確定順位がないため、2日目トーナメントを復元できませんでした。",
+        "確定順位がないため、2日目日程を復元できませんでした。",
+      );
+    }
+    if (result.tournament_plan !== undefined) {
+      const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
+      const oddSplitPolicy = validateOddSplitPolicy(leagueSettings.odd_split_policy);
+      const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
+      validateTournamentPlan(
+        objectValue(result.tournament_plan, "2日目トーナメントを読み取れませんでした。"),
+        undefined,
+        teamIds,
+        oddSplitPolicy,
+        rankSets,
       );
     }
     return;
@@ -629,42 +637,8 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
   if (result.tournament_plan !== undefined) {
     const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
-    const oddSplitPolicy =
-      leagueSettings.odd_split_policy === undefined
-        ? "upper"
-        : String(leagueSettings.odd_split_policy);
-    if (!new Set(["upper", "lower", "alternate"]).has(oddSplitPolicy)) {
-      throw new ImportValidationError(
-        "INVALID_DOCUMENT",
-        "奇数人数ブロックの上下振り分けを読み取れませんでした。",
-      );
-    }
-    const rowsByBlock = new Map<string, JsonObject[]>();
-    for (const row of rows) {
-      const blockRows = rowsByBlock.get(String(row.block_id)) ?? [];
-      blockRows.push(row);
-      rowsByBlock.set(String(row.block_id), blockRows);
-    }
-    const expectedUpperTeams = new Set<string>();
-    let oddIndex = 0;
-    for (const block of blocks) {
-      const blockRows = (rowsByBlock.get(String(block.id)) ?? []).sort(
-        (left, right) => Number(left.rank) - Number(right.rank),
-      );
-      const count = blockRows.length;
-      let upperCount = count / 2;
-      if (count % 2 === 1) {
-        if (oddSplitPolicy === "upper") upperCount = (count + 1) / 2;
-        else if (oddSplitPolicy === "lower") upperCount = (count - 1) / 2;
-        else {
-          upperCount = oddIndex % 2 === 0 ? (count + 1) / 2 : (count - 1) / 2;
-          oddIndex += 1;
-        }
-      }
-      for (const row of blockRows.slice(0, upperCount)) {
-        expectedUpperTeams.add(String(row.team_id));
-      }
-    }
+    const oddSplitPolicy = validateOddSplitPolicy(leagueSettings.odd_split_policy);
+    const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
     const tournamentPlan = objectValue(
       result.tournament_plan,
       "2日目トーナメントを読み取れませんでした。",
@@ -674,7 +648,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       rows,
       teamIds,
       oddSplitPolicy,
-      expectedUpperTeams,
+      rankSets,
     );
     validateDay2ScheduleResult(result, input, teams, tournamentPlan);
   } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
@@ -697,6 +671,50 @@ function expectedTournamentMatchCount(participantCount: number): number {
     expectedTournamentMatchCount(mainSize) +
     expectedTournamentMatchCount(preliminaryCount)
   );
+}
+
+type TournamentRankSets = {
+  all: Set<string>;
+  upper: Set<string>;
+};
+
+function validateOddSplitPolicy(value: unknown): "upper" | "lower" | "alternate" {
+  const policy = value === undefined ? "upper" : String(value);
+  if (policy !== "upper" && policy !== "lower" && policy !== "alternate") {
+    throw new ImportValidationError(
+      "INVALID_DOCUMENT",
+      "奇数人数ブロックの上下振り分けを読み取れませんでした。",
+    );
+  }
+  return policy;
+}
+
+function tournamentRankSets(
+  blocks: JsonObject[],
+  policy: "upper" | "lower" | "alternate",
+): TournamentRankSets {
+  const all = new Set<string>();
+  const upper = new Set<string>();
+  let oddIndex = 0;
+  for (const block of blocks) {
+    const blockId = String(block.id);
+    const count = Array.isArray(block.team_ids) ? block.team_ids.length : 0;
+    let upperCount = count / 2;
+    if (count % 2 === 1) {
+      if (policy === "upper") upperCount = (count + 1) / 2;
+      else if (policy === "lower") upperCount = (count - 1) / 2;
+      else {
+        upperCount = oddIndex % 2 === 0 ? (count + 1) / 2 : (count - 1) / 2;
+        oddIndex += 1;
+      }
+    }
+    for (let rank = 1; rank <= count; rank += 1) {
+      const key = `${blockId}:${rank}`;
+      all.add(key);
+      if (rank <= upperCount) upper.add(key);
+    }
+  }
+  return { all, upper };
 }
 
 function expectedTournamentByeCount(participantCount: number): number {
@@ -759,10 +777,13 @@ function validateTournamentPool(
   value: unknown,
   expectedPool: "upper" | "lower",
   teamByRank: Map<string, string>,
+  validLeagueRanks: Set<string>,
+  resolution: "provisional" | "resolved",
 ): {
   seedTeams: Set<string>;
+  seedRanks: Set<string>;
   matchIds: Set<string>;
-  seedTeamsByRank: Map<number, string[]>;
+  seedRanksByRank: Map<number, string[]>;
   firstMatchCount: number;
 } {
   const pool = objectValue(value, "トーナメント区分を読み取れませんでした。");
@@ -783,7 +804,7 @@ function validateTournamentPool(
   const seedTeams = new Set<string>();
   const seedNumbers = new Set<number>();
   const poolLeagueRanks = new Set<string>();
-  const seedTeamsByRank = new Map<number, string[]>();
+  const seedRanksByRank = new Map<number, string[]>();
   for (const seed of seeds) {
     const seedNo = nonNegativeInteger(seed.seed_no, "シード番号");
     const rank = nonNegativeInteger(seed.block_rank, "ブロック順位");
@@ -791,26 +812,48 @@ function validateTournamentPool(
     if (
       seedNo === 0 ||
       seedNumbers.has(seedNo) ||
-      typeof seed.team_id !== "string" ||
-      seedTeams.has(seed.team_id) ||
-      teamByRank.get(rankKey) !== seed.team_id
+      rank === 0 ||
+      poolLeagueRanks.has(rankKey) ||
+      !validLeagueRanks.has(rankKey)
     ) {
       throw new ImportValidationError("DUPLICATE_ID", "トーナメントシードの内容が不正です。");
     }
     seedNumbers.add(seedNo);
-    seedTeams.add(seed.team_id);
     poolLeagueRanks.add(rankKey);
-    seedTeamsByRank.set(rank, [...(seedTeamsByRank.get(rank) ?? []), seed.team_id]);
+    seedRanksByRank.set(rank, [...(seedRanksByRank.get(rank) ?? []), rankKey]);
     const entry = objectValue(seed.entry, "シードのリーグ順位参照を読み取れませんでした。");
-    const team = objectValue(seed.team, "シードのチーム参照を読み取れませんでした。");
     if (
       entry.type !== "league_rank" ||
       entry.block_id !== seed.block_id ||
-      entry.rank !== rank ||
-      team.type !== "concrete_team" ||
-      team.team_id !== seed.team_id
+      entry.rank !== rank
     ) {
       throw new ImportValidationError("INVALID_REFERENCE", "シードの参照内容が一致しません。");
+    }
+    if (resolution === "provisional") {
+      if (
+        (seed.team_id !== undefined && seed.team_id !== null) ||
+        (seed.team !== undefined && seed.team !== null)
+      ) {
+        throw new ImportValidationError(
+          "INVALID_REFERENCE",
+          "仮トーナメントに確定チームが混在しています。",
+        );
+      }
+    } else {
+      const team = objectValue(seed.team, "シードのチーム参照を読み取れませんでした。");
+      if (
+        typeof seed.team_id !== "string" ||
+        seedTeams.has(seed.team_id) ||
+        teamByRank.get(rankKey) !== seed.team_id ||
+        team.type !== "concrete_team" ||
+        team.team_id !== seed.team_id
+      ) {
+        throw new ImportValidationError(
+          "INVALID_REFERENCE",
+          "確定トーナメントのチーム参照が順位と一致しません。",
+        );
+      }
+      seedTeams.add(seed.team_id);
     }
   }
   if (
@@ -918,15 +961,21 @@ function validateTournamentPool(
   ) {
     throw new ImportValidationError("INVALID_DOCUMENT", "組合せ評価の内容が不正です。");
   }
-  return { seedTeams, matchIds, seedTeamsByRank, firstMatchCount };
+  return {
+    seedTeams,
+    seedRanks: poolLeagueRanks,
+    matchIds,
+    seedRanksByRank,
+    firstMatchCount,
+  };
 }
 
 function validateTournamentPlan(
   plan: JsonObject,
-  standings: JsonObject[],
+  standings: JsonObject[] | undefined,
   teamIds: Set<string>,
-  expectedPolicy: string,
-  expectedUpperTeams: Set<string>,
+  expectedPolicy: "upper" | "lower" | "alternate",
+  rankSets: TournamentRankSets,
 ): void {
   if (
     plan.schema_version !== SCHEMA_VERSION ||
@@ -938,21 +987,52 @@ function validateTournamentPlan(
   ) {
     throw new ImportValidationError("INVALID_DOCUMENT", "2日目トーナメントの状態が不正です。");
   }
-  const teamByRank = new Map(
-    standings.map((row) => [`${String(row.block_id)}:${String(row.rank)}`, String(row.team_id)]),
-  );
-  const upper = validateTournamentPool(plan.upper, "upper", teamByRank);
-  const lower = validateTournamentPool(plan.lower, "lower", teamByRank);
-  const allSeeds = new Set([...upper.seedTeams, ...lower.seedTeams]);
+  const legacyPlan = plan.participant_resolution === undefined;
+  const resolution = legacyPlan ? "resolved" : plan.participant_resolution;
   if (
-    allSeeds.size !== teamIds.size ||
-    [...upper.seedTeams].some((teamId) => lower.seedTeams.has(teamId)) ||
-    upper.seedTeams.size !== expectedUpperTeams.size ||
-    [...upper.seedTeams].some((teamId) => !expectedUpperTeams.has(teamId))
+    (resolution !== "provisional" && resolution !== "resolved") ||
+    (resolution === "resolved") !== (standings !== undefined)
   ) {
     throw new ImportValidationError(
       "INVALID_REFERENCE",
-      "上位・下位トーナメントの参加チームに重複または不足があります。",
+      "トーナメントの仮・確定状態とリーグ順位が一致しません。",
+    );
+  }
+  const teamByRank = new Map(
+    (standings ?? []).map((row) => [
+      `${String(row.block_id)}:${String(row.rank)}`,
+      String(row.team_id),
+    ]),
+  );
+  const upper = validateTournamentPool(
+    plan.upper,
+    "upper",
+    teamByRank,
+    rankSets.all,
+    resolution,
+  );
+  const lower = validateTournamentPool(
+    plan.lower,
+    "lower",
+    teamByRank,
+    rankSets.all,
+    resolution,
+  );
+  const allSeeds = new Set([...upper.seedTeams, ...lower.seedTeams]);
+  const allSeedRanks = new Set([...upper.seedRanks, ...lower.seedRanks]);
+  if (
+    allSeedRanks.size !== rankSets.all.size ||
+    [...rankSets.all].some((rank) => !allSeedRanks.has(rank)) ||
+    [...upper.seedRanks].some((rank) => lower.seedRanks.has(rank)) ||
+    upper.seedRanks.size !== rankSets.upper.size ||
+    [...upper.seedRanks].some((rank) => !rankSets.upper.has(rank)) ||
+    (resolution === "resolved" &&
+      (allSeeds.size !== teamIds.size ||
+        [...upper.seedTeams].some((teamId) => lower.seedTeams.has(teamId))))
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "上位・下位トーナメントの順位枠または参加チームに重複・不足があります。",
     );
   }
   if ([...upper.matchIds].some((matchId) => lower.matchIds.has(matchId))) {
@@ -966,7 +1046,24 @@ function validateTournamentPlan(
     const candidates = stringArray(draw.candidates, "シード抽選候補");
     const decidedOrder = stringArray(draw.decided_order, "シード抽選確定順");
     const blockRank = nonNegativeInteger(draw.block_rank, "シード抽選のブロック順位");
-    const expectedCandidates = pool?.seedTeamsByRank.get(blockRank) ?? [];
+    const expectedRankCandidates = pool?.seedRanksByRank.get(blockRank) ?? [];
+    const candidateRankRefs =
+      draw.candidate_rank_refs === undefined
+        ? []
+        : arrayValue(draw.candidate_rank_refs, "シード抽選の順位枠候補", LIMITS.teams);
+    const decidedRankRefs =
+      draw.decided_rank_refs === undefined
+        ? []
+        : arrayValue(draw.decided_rank_refs, "シード抽選の順位枠確定順", LIMITS.teams);
+    const candidateRankKeys = candidateRankRefs.map((entry) => {
+      validateTournamentEntry(entry, pool?.seedRanks ?? new Set(), new Set(), new Set());
+      return `${String(entry.block_id)}:${String(entry.rank)}`;
+    });
+    const decidedRankKeys = decidedRankRefs.map((entry) => {
+      validateTournamentEntry(entry, pool?.seedRanks ?? new Set(), new Set(), new Set());
+      return `${String(entry.block_id)}:${String(entry.rank)}`;
+    });
+    const expectedTeams = expectedRankCandidates.map((rank) => teamByRank.get(rank));
     const drawKey = `${String(draw.pool)}:${blockRank}`;
     if (
       pool === undefined ||
@@ -977,9 +1074,21 @@ function validateTournamentPlan(
       candidates.length !== decidedOrder.length ||
       new Set(candidates).size !== candidates.length ||
       decidedOrder.some((teamId) => !candidates.includes(teamId)) ||
-      candidates.some((teamId) => !pool.seedTeams.has(teamId)) ||
-      candidates.length !== expectedCandidates.length ||
-      candidates.some((teamId) => !expectedCandidates.includes(teamId)) ||
+      (resolution === "provisional" && (candidates.length > 0 || decidedOrder.length > 0)) ||
+      (resolution === "resolved" &&
+        (candidates.length !== expectedTeams.length ||
+          candidates.some((teamId) => !expectedTeams.includes(teamId)) ||
+          (!legacyPlan &&
+            decidedOrder.some(
+              (teamId, index) => teamByRank.get(decidedRankKeys[index] ?? "") !== teamId,
+            )))) ||
+      (!legacyPlan &&
+        (candidateRankKeys.length !== expectedRankCandidates.length ||
+          new Set(candidateRankKeys).size !== candidateRankKeys.length ||
+          candidateRankKeys.some((rank) => !expectedRankCandidates.includes(rank)) ||
+          decidedRankKeys.length !== candidateRankKeys.length ||
+          new Set(decidedRankKeys).size !== decidedRankKeys.length ||
+          decidedRankKeys.some((rank) => !candidateRankKeys.includes(rank)))) ||
       drawKeys.has(drawKey)
     ) {
       throw new ImportValidationError("INVALID_REFERENCE", "シード抽選記録の内容が不正です。");
@@ -987,8 +1096,12 @@ function validateTournamentPlan(
     drawKeys.add(drawKey);
   }
   const expectedDrawKeys = [
-    ...[...upper.seedTeamsByRank].filter(([, teams]) => teams.length > 1).map(([rank]) => `upper:${rank}`),
-    ...[...lower.seedTeamsByRank].filter(([, teams]) => teams.length > 1).map(([rank]) => `lower:${rank}`),
+    ...[...upper.seedRanksByRank]
+      .filter(([, ranks]) => ranks.length > 1)
+      .map(([rank]) => `upper:${rank}`),
+    ...[...lower.seedRanksByRank]
+      .filter(([, ranks]) => ranks.length > 1)
+      .map(([rank]) => `lower:${rank}`),
   ];
   if (
     drawKeys.size !== expectedDrawKeys.length ||

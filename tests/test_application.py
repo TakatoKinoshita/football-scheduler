@@ -215,6 +215,27 @@ def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> No
     assert len(result["lower"]["matches"]) == 1
 
 
+def test_tournament_plan_request_returns_provisional_table_without_standings() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=8, block_count=2))
+
+    result = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": generated["league_plan"],
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+
+    assert result["status"] == "COMPLETE"
+    assert result["participant_resolution"] == "provisional"
+    assert all(
+        seed["team_id"] is None and seed["team"] is None
+        for pool in (result["upper"], result["lower"])
+        for seed in pool["seeds"]
+    )
+
+
 def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() -> None:
     generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
     standings = application.handle_request(

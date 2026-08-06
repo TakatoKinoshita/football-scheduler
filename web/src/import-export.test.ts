@@ -138,6 +138,19 @@ function completedTournamentPlan() {
   };
 }
 
+function provisionalTournamentPlan() {
+  const plan = completedTournamentPlan();
+  const provisional = plan as typeof plan & { participant_resolution: string };
+  provisional.participant_resolution = "provisional";
+  for (const pool of [provisional.upper, provisional.lower]) {
+    for (const seed of pool.seeds) {
+      seed.team_id = null as unknown as string;
+      seed.team = null as unknown as typeof seed.team;
+    }
+  }
+  return provisional;
+}
+
 function day2Document() {
   const document = rankedDocument();
   const result = document.tournament.result as Record<string, unknown>;
@@ -292,7 +305,27 @@ describe("大会JSONの入出力", () => {
     delete result.league_standings;
     result.tournament_plan = completedTournamentPlan();
 
-    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/確定順位がない/);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/仮・確定状態/);
+  });
+
+  it("確定順位がなくても順位枠だけの仮トーナメントを復元する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.league_standings;
+    result.tournament_plan = provisionalTournamentPlan();
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("仮トーナメントに混在した具体チーム参照を拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.league_standings;
+    const plan = provisionalTournamentPlan();
+    plan.upper.seeds[0]!.team_id = "team-01";
+    result.tournament_plan = plan;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/確定チームが混在/);
   });
 
   it("2日目設定・日程・統合検証を同じ内容で復元する", () => {

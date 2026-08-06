@@ -25,6 +25,11 @@ import {
 import { setupPwaUpdates } from "./pwa-update";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
+  bindTournamentParticipants,
+  tournamentParticipantResolution,
+  unbindTournamentParticipants,
+} from "./tournament-resolution";
+import {
   cloneDocument,
   createTournamentDocument,
   type JsonObject,
@@ -63,7 +68,7 @@ root.innerHTML = `
   </header>
   <main>
     <div class="scope-notice no-print" role="note">
-      <strong>1日目のリーグ日程・ブロック順位から、2日目の日程と審判まで作成できます。</strong>
+      <strong>1日目の日程から仮トーナメントを作り、順位確定後は2日目の日程と審判まで作成できます。</strong>
       2日目の試合結果と最終順位の入力は、今後追加します。
     </div>
     <div id="legacy-banner" class="notice no-print" role="note" hidden>
@@ -243,8 +248,8 @@ root.innerHTML = `
       </div>
       <div id="go-day2-area" class="next-day-callout no-print" hidden>
         <div>
-          <h3>1日目の順位が確定しました</h3>
-          <p>2日目タブで、確定順位からトーナメント表と日程を作成できます。</p>
+          <h3>2日目の準備へ進めます</h3>
+          <p>順位未確定でも仮トーナメントを作成でき、確定後はチーム名を反映します。</p>
         </div>
         <button id="go-day2" class="primary" type="button">2日目へ進む</button>
       </div>
@@ -259,16 +264,16 @@ root.innerHTML = `
         <div>
           <p class="section-number">手順 5 / 5</p>
           <h2 id="day2-results-heading">2日目のトーナメントと日程</h2>
-          <p id="day2-result-summary">1日目の順位を確定すると、2日目を作成できます。</p>
+          <p id="day2-result-summary">1日目の日程を作成すると、仮トーナメントを作成できます。</p>
         </div>
         <button id="print-day2" class="secondary no-print" type="button" disabled>2日目を印刷</button>
       </div>
       <div id="day2-result-content" class="result-content empty">
-        1日目タブで全試合の得点を入力し、順位を確定してください。
+        1日目タブで日程を作成してください。
       </div>
       <div id="tournament-confirmation" class="standings-confirmation no-print" hidden>
         <h3>2日目トーナメントを作成する</h3>
-        <p id="tournament-review">確定順位を確認しています。</p>
+        <p id="tournament-review">リーグ順位枠を確認しています。</p>
         <div id="tournament-turnstile-widget" class="turnstile-box" aria-label="トーナメント作成の安全確認">
           安全確認を読み込んでいます。
         </div>
@@ -577,15 +582,25 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return false;
   const hadStandings = asObject(result.league_standings) !== undefined;
-  const hadTournament = asObject(result.tournament_plan) !== undefined;
   const hadDay2 = asObject(result.day2_schedule) !== undefined;
+  const existingPlan = asObject(result.tournament_plan);
+  const hadResolvedTournament =
+    existingPlan !== undefined && tournamentParticipantResolution(existingPlan) === "resolved";
   const nextResult: JsonObject = { ...result, league_results: results };
   if (standings === undefined) {
     delete nextResult.league_standings;
+    if (existingPlan !== undefined) {
+      nextResult.tournament_plan =
+        tournamentParticipantResolution(existingPlan) === "resolved"
+          ? unbindTournamentParticipants(existingPlan)
+          : existingPlan;
+    }
   } else {
     nextResult.league_standings = standings;
+    if (existingPlan !== undefined) {
+      nextResult.tournament_plan = bindTournamentParticipants(existingPlan, standings);
+    }
   }
-  delete nextResult.tournament_plan;
   delete nextResult.day2_schedule;
   delete nextResult.integrated_validation;
   documentState = {
@@ -608,7 +623,7 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
         "試合結果を保存できませんでした。端末の空き容量を確認してください。";
     },
   );
-  return hadStandings || hadTournament || hadDay2;
+  return hadStandings || hadResolvedTournament || hadDay2;
 }
 
 function saveTournamentPlan(plan: JsonObject): void {
@@ -788,21 +803,25 @@ function refreshLeagueResultsProgress(totalMatches: number): void {
 
 function refreshTournamentEnabled(): void {
   const result = asObject(documentState.tournament.result);
-  const hasStandings = asObject(result?.league_standings) !== undefined;
+  const hasLeaguePlan = asObject(result?.league_plan) !== undefined;
   tournamentButton.disabled =
-    !hasStandings || !navigator.onLine || tournamentTurnstileToken.length === 0;
+    !hasLeaguePlan || !navigator.onLine || tournamentTurnstileToken.length === 0;
 }
 
 function refreshDay2Enabled(): void {
   const result = asObject(documentState.tournament.result);
-  const hasTournament = asObject(result?.tournament_plan) !== undefined;
+  const tournamentPlan = asObject(result?.tournament_plan);
+  const hasResolvedTournament =
+    tournamentPlan !== undefined && tournamentParticipantResolution(tournamentPlan) === "resolved";
   const settings = currentDay2Settings();
   day2Review.textContent =
-    settings === undefined
+    !hasResolvedTournament
+      ? "仮トーナメントの日程作成は次の対応で追加します。リーグ順位を確定してください。"
+      : settings === undefined
       ? "2日目設定に入力誤りがあります。休憩は「4:60」の形式で入力してください。"
       : `${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
   day2Button.disabled =
-    !hasTournament ||
+    !hasResolvedTournament ||
     settings === undefined ||
     !navigator.onLine ||
     day2TurnstileToken.length === 0;
@@ -823,9 +842,9 @@ function renderResult(): void {
     content.textContent =
       "日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。";
     content.classList.add("empty");
-    day2Summary.textContent = "1日目の順位を確定すると、2日目を作成できます。";
+    day2Summary.textContent = "1日目の日程を作成すると、仮トーナメントを作成できます。";
     day2Content.textContent =
-      "1日目タブで全試合の得点を入力し、順位を確定してください。";
+      "1日目タブで日程を作成してください。";
     day2Content.classList.add("empty");
     standingsConfirmation.hidden = true;
     printButton.disabled = true;
@@ -853,8 +872,8 @@ function renderResult(): void {
   day2Content.replaceChildren();
   day2Content.classList.add("empty");
   day2Content.textContent =
-    "1日目タブで全試合の得点を入力し、順位を確定してください。";
-  day2Summary.textContent = "1日目の順位を確定すると、2日目を作成できます。";
+    "順位未確定でも、ブロック順位枠から仮トーナメントを作成できます。";
+  day2Summary.textContent = "1日目の日程から2日目の仮トーナメントを作成できます。";
 
   const overview = window.document.createElement("dl");
   for (const [label, value] of [
@@ -878,6 +897,7 @@ function renderResult(): void {
   const leaguePlan = resultLeaguePlan();
   const blocks = asObjectArray(leaguePlan?.blocks);
   standingsConfirmation.hidden = blocks.length === 0;
+  goDay2Area.hidden = blocks.length === 0;
 
   appendTextElement(content, "h3", "1日目の日程表");
   const tableWrapper = window.document.createElement("div");
@@ -1065,20 +1085,24 @@ function renderResult(): void {
         saved.className = "muted";
         refreshLeagueResultsProgress(leagueMatches.length);
         if (invalidated) {
+          document.querySelector("#league-standings-view")?.remove();
+          const updatedResult = asObject(documentState.tournament.result);
+          if (updatedResult !== undefined) {
+            renderDay2Preparation(
+              updatedResult,
+              day2Content,
+              day2Summary,
+              undefined,
+              asObject(updatedResult.tournament_plan),
+              teamNames,
+              courtNames,
+            );
+          }
           standingsStatusOwner = "calculation";
           standingsStatus.textContent =
-            "得点を変更したため、確定順位を取り消しました。もう一度順位を確定してください。";
-          document.querySelector("#league-standings-view")?.remove();
-          document.querySelector("#tournament-plan-view")?.remove();
-          document.querySelector("#day2-schedule-view")?.remove();
-          tournamentConfirmation.hidden = true;
-          day2Confirmation.hidden = true;
-          goDay2Area.hidden = true;
-          day2PrintButton.disabled = true;
-          day2Summary.textContent = "得点が変更されました。順位を再確定してください。";
-          day2Content.textContent =
-            "1日目タブで順位を再確定すると、2日目の作成を再開できます。";
-          day2Content.classList.add("empty");
+            "得点を変更したため、確定順位を取り消しました。2日目は順位枠の仮トーナメントへ戻しました。";
+          day2Summary.textContent =
+            "得点が変更されました。仮トーナメントを保持し、確定チーム名だけを外しました。";
         }
       };
       homeScore.addEventListener("input", save);
@@ -1095,43 +1119,17 @@ function renderResult(): void {
     const standings = asObject(result.league_standings);
     if (standings !== undefined) {
       renderLeagueStandings(content, standings, teamNames);
-      goDay2Area.hidden = false;
-      day2Content.replaceChildren();
-      day2Content.classList.remove("empty");
-      day2Summary.textContent = "1日目の確定順位から2日目を作成します。";
-      renderDay2StandingsSummary(day2Content, standings, teamNames);
-      tournamentConfirmation.hidden = false;
-      const league = asObject(documentState.tournament.input.league);
-      const splitLabels: Record<string, string> = {
-        upper: "中央順位を上位へ入れる",
-        lower: "中央順位を下位へ入れる",
-        alternate: "ブロック順に上位・下位を交互にする",
-      };
-      const policy = String(league?.odd_split_policy ?? "upper");
-      tournamentReview.textContent = `上下振り分け：${splitLabels[policy] ?? splitLabels.upper}`;
-      setupTournamentTurnstile();
-      refreshTournamentEnabled();
-      const tournamentPlan = asObject(result.tournament_plan);
-      if (tournamentPlan !== undefined) {
-        renderTournamentPlan(day2Content, tournamentPlan, standings, teamNames);
-        day2PrintButton.disabled = false;
-        day2Confirmation.hidden = false;
-        setupDay2Turnstile();
-        refreshDay2Enabled();
-        const day2Schedule = asObject(result.day2_schedule);
-        if (day2Schedule !== undefined) {
-          day2Summary.textContent = "2日目のトーナメントと日程を作成済みです。";
-          renderDay2Schedule(
-            day2Content,
-            day2Schedule,
-            tournamentPlan,
-            standings,
-            teamNames,
-            courtNames,
-          );
-        }
-      }
     }
+    const tournamentPlan = asObject(result.tournament_plan);
+    renderDay2Preparation(
+      result,
+      day2Content,
+      day2Summary,
+      standings,
+      tournamentPlan,
+      teamNames,
+      courtNames,
+    );
   }
 
   appendTextElement(content, "h3", "チーム別予定");
@@ -1228,7 +1226,7 @@ function renderDay2StandingsSummary(
   appendTextElement(
     section,
     "p",
-    "この順位をもとに上位・下位トーナメントへ振り分けます。得点を変更すると、2日目の内容は取り消されます。",
+    "この順位を順位枠へ対応させます。得点を変更するとチーム名だけを外し、仮トーナメントの組合せは保持します。",
     "muted",
   );
   const grouped = new Map<string, JsonObject[]>();
@@ -1288,12 +1286,25 @@ function tournamentEntryLabel(
 function renderTournamentPlan(
   content: HTMLElement,
   plan: JsonObject,
-  standings: JsonObject,
+  standings: JsonObject | undefined,
   teamNames: Map<string, string>,
 ): void {
+  const provisional = tournamentParticipantResolution(plan) === "provisional";
   const section = window.document.createElement("section");
   section.id = "tournament-plan-view";
-  appendTextElement(section, "h3", "2日目トーナメント組合せ");
+  appendTextElement(
+    section,
+    "h3",
+    provisional ? "【仮】2日目トーナメント組合せ" : "2日目トーナメント組合せ",
+  );
+  if (provisional) {
+    appendTextElement(
+      section,
+      "p",
+      "この表はリーグ順位枠で作成した仮トーナメントです。順位確定後も組合せと試合番号は変わりません。",
+      "notice",
+    );
+  }
   appendTextElement(
     section,
     "p",
@@ -1301,7 +1312,7 @@ function renderTournamentPlan(
     "muted",
   );
   const rankedTeams = new Map(
-    asObjectArray(standings.standings)
+    asObjectArray(standings?.standings)
       .filter(
         (row) =>
           typeof row.block_id === "string" &&
@@ -1328,10 +1339,13 @@ function renderTournamentPlan(
     const seedList = window.document.createElement("ol");
     seedList.className = "seed-list";
     for (const seed of asObjectArray(pool.seeds)) {
+      const rankLabel = `${String(seed.block_id)}ブロック ${String(seed.block_rank)}位`;
+      const teamName =
+        typeof seed.team_id === "string" ? teamNames.get(seed.team_id) : undefined;
       appendTextElement(
         seedList,
         "li",
-        `${teamNames.get(String(seed.team_id)) ?? "名称未設定"}（${String(seed.block_id)}ブロック ${String(seed.block_rank)}位）`,
+        teamName === undefined ? rankLabel : `${teamName}（${rankLabel}）`,
       );
     }
     poolSection.append(seedList);
@@ -1394,9 +1408,14 @@ function renderTournamentPlan(
   }
 
   for (const draw of asObjectArray(plan.seed_draws)) {
-    const order = Array.isArray(draw.decided_order)
-      ? draw.decided_order.map((team) => teamNames.get(String(team)) ?? String(team)).join("、")
-      : "";
+    const concreteOrder = Array.isArray(draw.decided_order) ? draw.decided_order : [];
+    const rankOrder = asObjectArray(draw.decided_rank_refs);
+    const order =
+      concreteOrder.length > 0
+        ? concreteOrder.map((team) => teamNames.get(String(team)) ?? String(team)).join("、")
+        : rankOrder
+            .map((entry) => `${String(entry.block_id)}ブロック ${String(entry.rank)}位`)
+            .join("、");
     appendTextElement(
       section,
       "p",
@@ -1616,36 +1635,42 @@ function requestTournamentPlan(): void {
   const result = asObject(documentState.tournament.result);
   const leaguePlan = resultLeaguePlan();
   const standings = asObject(result?.league_standings);
-  if (result === undefined || leaguePlan === undefined || standings === undefined) return;
+  if (result === undefined || leaguePlan === undefined) return;
   if (tournamentTurnstileToken.length === 0) {
     tournamentStatus.textContent = "トーナメント作成の安全確認を完了してください。";
     return;
   }
   tournamentButton.disabled = true;
   tournamentStatusOwner = "generation";
-  tournamentStatus.textContent = "2日目トーナメントを作成しています…";
+  tournamentStatus.textContent =
+    standings === undefined
+      ? "仮トーナメントを作成しています…"
+      : "2日目トーナメントを作成しています…";
   const league = asObject(documentState.tournament.input.league);
+  const request: JsonObject = {
+    request_kind: "tournament_plan",
+    league_plan: leaguePlan,
+    odd_split_policy: league?.odd_split_policy ?? "upper",
+    random_seed: documentState.tournament.input.random_seed ?? 20260803,
+  };
+  if (standings !== undefined) request.league_standings = standings;
   void generateTournamentPlan(
-    {
-      request_kind: "tournament_plan",
-      league_plan: leaguePlan,
-      league_standings: standings,
-      odd_split_policy: league?.odd_split_policy ?? "upper",
-      random_seed: documentState.tournament.input.random_seed ?? 20260803,
-    },
+    request,
     tournamentTurnstileToken,
   )
     .then((plan) => {
       saveTournamentPlan(plan);
       tournamentStatus.textContent =
-        "2日目トーナメントを作成し、この端末へ保存しました。";
+        standings === undefined
+          ? "仮トーナメントを作成し、この端末へ保存しました。"
+          : "2日目トーナメントを作成し、この端末へ保存しました。";
       renderResult();
     })
     .catch((error: unknown) => {
       tournamentStatus.textContent =
         error instanceof ScheduleApiError
           ? error.message
-          : "トーナメントを作成できませんでした。確定順位は保存されています。";
+          : "トーナメントを作成できませんでした。1日目の内容は保存されています。";
       refreshTournamentEnabled();
     })
     .finally(() => {
@@ -1677,6 +1702,11 @@ function requestDay2Schedule(): void {
     day2 === undefined
   ) {
     day2Status.textContent = "2日目日程の作成に必要な設定またはトーナメント表がありません。";
+    return;
+  }
+  if (tournamentParticipantResolution(tournamentPlan) !== "resolved") {
+    day2Status.textContent =
+      "仮トーナメントの日程作成は次の対応で追加します。先にリーグ順位を確定してください。";
     return;
   }
   if (day2TurnstileToken.length === 0) {
@@ -1928,6 +1958,74 @@ function clearFieldIssues(): void {
   }
   for (const invalid of document.querySelectorAll<HTMLElement>("[aria-invalid='true']")) {
     invalid.removeAttribute("aria-invalid");
+  }
+}
+
+function renderDay2Preparation(
+  result: JsonObject,
+  day2Content: HTMLElement,
+  day2Summary: HTMLElement,
+  standings: JsonObject | undefined,
+  tournamentPlan: JsonObject | undefined,
+  teamNames: Map<string, string>,
+  courtNames: Map<string, string>,
+): void {
+  day2Content.replaceChildren();
+  day2Content.classList.remove("empty");
+  day2Summary.textContent =
+    standings === undefined
+      ? "順位枠から2日目の仮トーナメントを作成します。"
+      : "1日目の確定順位から2日目を作成します。";
+  if (standings !== undefined) {
+    renderDay2StandingsSummary(day2Content, standings, teamNames);
+  } else {
+    appendTextElement(
+      day2Content,
+      "p",
+      "リーグ順位の確定前に配布できる仮の組合せです。順位確定後はチーム名を自動で反映します。",
+      "notice",
+    );
+  }
+  tournamentConfirmation.hidden = false;
+  const league = asObject(documentState.tournament.input.league);
+  const splitLabels: Record<string, string> = {
+    upper: "中央順位を上位へ入れる",
+    lower: "中央順位を下位へ入れる",
+    alternate: "ブロック順に上位・下位を交互にする",
+  };
+  const policy = String(league?.odd_split_policy ?? "upper");
+  tournamentReview.textContent = `${standings === undefined ? "仮トーナメント／" : ""}上下振り分け：${splitLabels[policy] ?? splitLabels.upper}`;
+  tournamentButton.textContent =
+    standings === undefined ? "仮トーナメントを作成する" : "2日目トーナメントを作成する";
+  setupTournamentTurnstile();
+  refreshTournamentEnabled();
+  day2Confirmation.hidden = true;
+  day2PrintButton.disabled = tournamentPlan === undefined;
+  if (tournamentPlan === undefined) return;
+  renderTournamentPlan(day2Content, tournamentPlan, standings, teamNames);
+  if (tournamentParticipantResolution(tournamentPlan) === "resolved") {
+    day2Confirmation.hidden = false;
+    setupDay2Turnstile();
+    refreshDay2Enabled();
+    const day2Schedule = asObject(result.day2_schedule);
+    if (day2Schedule !== undefined && standings !== undefined) {
+      day2Summary.textContent = "2日目のトーナメントと日程を作成済みです。";
+      renderDay2Schedule(
+        day2Content,
+        day2Schedule,
+        tournamentPlan,
+        standings,
+        teamNames,
+        courtNames,
+      );
+    }
+  } else {
+    appendTextElement(
+      day2Content,
+      "p",
+      "2日目の日程は、現在はリーグ順位を確定してから作成できます。",
+      "notice no-print",
+    );
   }
 }
 

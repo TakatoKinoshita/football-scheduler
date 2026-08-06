@@ -1,4 +1,4 @@
-"""確定したリーグ順位から2日目の完全順位決定トーナメントを生成する。"""
+"""リーグ順位枠から2日目の完全順位決定トーナメントを生成する。"""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
 from hashlib import sha256
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from football_scheduler.league import LeaguePlan
 from football_scheduler.league_results import LeagueStandings
@@ -26,6 +26,13 @@ class OddSplitPolicy(StrEnum):
 class TournamentPool(StrEnum):
     UPPER = "upper"
     LOWER = "lower"
+
+
+class ParticipantResolution(StrEnum):
+    """順位枠へ具体的なチームが対応済みかを示す。"""
+
+    PROVISIONAL = "provisional"
+    RESOLVED = "resolved"
 
 
 class ConcreteTeamRef(ContractModel):
@@ -59,26 +66,56 @@ class TournamentPlanRequest(ContractModel):
     schema_version: Literal["0.1.0"] = "0.1.0"
     request_kind: Literal["tournament_plan"]
     league_plan: LeaguePlan
-    league_standings: LeagueStandings
+    league_standings: LeagueStandings | None = None
     odd_split_policy: OddSplitPolicy = OddSplitPolicy.UPPER
     random_seed: int = 20260803
 
 
 class TournamentSeed(ContractModel):
     seed_no: Annotated[int, Field(gt=0)]
-    team_id: Identifier
+    team_id: Identifier | None = None
     block_id: Identifier
     block_rank: Annotated[int, Field(gt=0)]
     entry: LeagueRankRef
-    team: ConcreteTeamRef
+    team: ConcreteTeamRef | None = None
+
+    @model_validator(mode="after")
+    def validate_references(self) -> Self:
+        if self.entry.block_id != self.block_id or self.entry.rank != self.block_rank:
+            raise ValueError("シードの順位枠参照が一致しません")
+        if (self.team_id is None) != (self.team is None):
+            raise ValueError("シードのチームIDとチーム参照は同時に指定してください")
+        if self.team is not None and self.team.team_id != self.team_id:
+            raise ValueError("シードのチーム参照が一致しません")
+        return self
 
 
 class SeedDrawRecord(ContractModel):
     pool: TournamentPool
     block_rank: Annotated[int, Field(gt=0)]
-    candidates: tuple[Identifier, ...]
-    decided_order: tuple[Identifier, ...]
+    candidates: tuple[Identifier, ...] = ()
+    decided_order: tuple[Identifier, ...] = ()
+    candidate_rank_refs: tuple[LeagueRankRef, ...] = ()
+    decided_rank_refs: tuple[LeagueRankRef, ...] = ()
     random_seed: int
+
+    @model_validator(mode="after")
+    def validate_draw(self) -> Self:
+        if len(set(self.candidates)) != len(self.candidates):
+            raise ValueError("シード抽選候補が重複しています")
+        if len(self.candidates) != len(self.decided_order) or set(self.candidates) != set(
+            self.decided_order
+        ):
+            raise ValueError("シード抽選の候補と確定順が一致しません")
+        candidate_keys = tuple((ref.block_id, ref.rank) for ref in self.candidate_rank_refs)
+        decided_keys = tuple((ref.block_id, ref.rank) for ref in self.decided_rank_refs)
+        if len(set(candidate_keys)) != len(candidate_keys):
+            raise ValueError("シード抽選の順位枠候補が重複しています")
+        if len(candidate_keys) != len(decided_keys) or set(candidate_keys) != set(decided_keys):
+            raise ValueError("シード抽選の順位枠候補と確定順が一致しません")
+        if any(ref.rank != self.block_rank for ref in self.candidate_rank_refs):
+            raise ValueError("シード抽選候補のブロック順位が一致しません")
+        return self
 
 
 class TournamentMatch(ContractModel):
@@ -128,12 +165,59 @@ class TournamentWarning(ContractModel):
 class TournamentPlan(ContractModel):
     schema_version: Literal["0.1.0"] = "0.1.0"
     status: Literal["COMPLETE"] = "COMPLETE"
+    participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     odd_split_policy: OddSplitPolicy
     random_seed: int
     upper: TournamentPoolPlan
     lower: TournamentPoolPlan
     seed_draws: tuple[SeedDrawRecord, ...]
     warnings: tuple[TournamentWarning, ...]
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> Self:
+        seeds = (*self.upper.seeds, *self.lower.seeds)
+        resolved = [seed.team_id is not None for seed in seeds]
+        explicit_resolution = "participant_resolution" in self.model_fields_set
+        if self.participant_resolution is ParticipantResolution.PROVISIONAL:
+            if any(resolved):
+                raise ValueError("仮トーナメントに具体的なチームを指定できません")
+            if any(draw.candidates or draw.decided_order for draw in self.seed_draws):
+                raise ValueError("仮トーナメントの抽選記録に具体的なチームを指定できません")
+            if any(
+                not draw.candidate_rank_refs or not draw.decided_rank_refs
+                for draw in self.seed_draws
+            ):
+                raise ValueError("仮トーナメントの抽選記録に順位枠が不足しています")
+        elif not all(resolved):
+            raise ValueError("確定トーナメントの参加チームが不足しています")
+        for draw in self.seed_draws:
+            pool = self.upper if draw.pool is TournamentPool.UPPER else self.lower
+            draw_seeds = [seed for seed in pool.seeds if seed.block_rank == draw.block_rank]
+            expected_rank_keys = {(seed.block_id, seed.block_rank) for seed in draw_seeds}
+            candidate_rank_keys = {
+                (entry.block_id, entry.rank) for entry in draw.candidate_rank_refs
+            }
+            if explicit_resolution or candidate_rank_keys:
+                if candidate_rank_keys != expected_rank_keys:
+                    raise ValueError("シード抽選の順位枠候補がシードと一致しません")
+                if len(draw.decided_rank_refs) != len(expected_rank_keys):
+                    raise ValueError("シード抽選の順位枠確定順が不足しています")
+            if self.participant_resolution is ParticipantResolution.RESOLVED:
+                expected_team_ids = {
+                    seed.team_id for seed in draw_seeds if seed.team_id is not None
+                }
+                if set(draw.candidates) != expected_team_ids:
+                    raise ValueError("シード抽選候補が確定チームと一致しません")
+                if draw.decided_rank_refs and any(
+                    pool_seed.team_id != team_id
+                    for entry, team_id in zip(
+                        draw.decided_rank_refs, draw.decided_order, strict=True
+                    )
+                    for pool_seed in draw_seeds
+                    if pool_seed.entry == entry
+                ):
+                    raise ValueError("シード抽選の順位枠順とチーム順が一致しません")
+        return self
 
 
 class TournamentGenerationError(ValueError):
@@ -157,6 +241,17 @@ class _MatchAudit:
     round_no: int
     first_same_block: bool
     possible_same_block: bool
+
+
+@dataclass(frozen=True)
+class _RankSlot:
+    block_id: str
+    rank: int
+    team_id: str | None = None
+
+    @property
+    def entry(self) -> LeagueRankRef:
+        return LeagueRankRef(block_id=self.block_id, rank=self.rank)
 
 
 class _BracketBuilder:
@@ -320,22 +415,27 @@ class _BracketBuilder:
 def generate_tournament_plan(
     request: TournamentPlanRequest | dict[str, object],
 ) -> TournamentPlan:
-    """確定済み順位を上下へ分け、1位から最下位まで決まる表を返す。"""
+    """順位枠を上下へ分け、1位から最下位まで決まる表を返す。"""
 
     data = (
         request
         if isinstance(request, TournamentPlanRequest)
         else TournamentPlanRequest.model_validate(request)
     )
-    standings_by_block = _validate_source(data.league_plan, data.league_standings)
-    upper_rows, lower_rows = _split_standings(
-        data.league_plan, standings_by_block, data.odd_split_policy
+    slots_by_block = _validate_source(data.league_plan, data.league_standings)
+    upper_rows, lower_rows = _split_rank_slots(
+        data.league_plan, slots_by_block, data.odd_split_policy
     )
     upper_seeds, upper_draws = _seed_pool(TournamentPool.UPPER, upper_rows, data.random_seed)
     lower_seeds, lower_draws = _seed_pool(TournamentPool.LOWER, lower_rows, data.random_seed)
     upper, upper_warnings = _generate_pool(TournamentPool.UPPER, upper_seeds, data.random_seed)
     lower, lower_warnings = _generate_pool(TournamentPool.LOWER, lower_seeds, data.random_seed)
     return TournamentPlan(
+        participant_resolution=(
+            ParticipantResolution.RESOLVED
+            if data.league_standings is not None
+            else ParticipantResolution.PROVISIONAL
+        ),
         odd_split_policy=data.odd_split_policy,
         random_seed=data.random_seed,
         upper=upper,
@@ -346,8 +446,8 @@ def generate_tournament_plan(
 
 
 def _validate_source(
-    plan: LeaguePlan, standings: LeagueStandings
-) -> dict[str, list[tuple[int, str]]]:
+    plan: LeaguePlan, standings: LeagueStandings | None
+) -> dict[str, list[_RankSlot]]:
     block_ids = [block.id for block in plan.blocks]
     if len(set(block_ids)) != len(block_ids):
         raise _source_error("duplicate_block_id")
@@ -360,10 +460,19 @@ def _validate_source(
                 raise _source_error("team_in_multiple_blocks", team_id=team_id)
             team_to_block[team_id] = block.id
 
-    rows_by_block: dict[str, list[tuple[int, str]]] = {block_id: [] for block_id in block_ids}
+    slots_by_block = {
+        block.id: [
+            _RankSlot(block_id=block.id, rank=rank) for rank in range(1, len(block.team_ids) + 1)
+        ]
+        for block in plan.blocks
+    }
+    if standings is None:
+        return slots_by_block
+
+    teams_by_rank: dict[tuple[str, int], str] = {}
     seen_teams: set[str] = set()
     for row in standings.standings:
-        if row.block_id not in rows_by_block:
+        if row.block_id not in slots_by_block:
             raise _source_error("unknown_standings_block", block_id=row.block_id)
         if team_to_block.get(row.team_id) != row.block_id:
             raise _source_error(
@@ -374,14 +483,16 @@ def _validate_source(
         if row.team_id in seen_teams:
             raise _source_error("duplicate_team_in_standings", team_id=row.team_id)
         seen_teams.add(row.team_id)
-        rows_by_block[row.block_id].append((row.rank, row.team_id))
+        key = (row.block_id, row.rank)
+        if key in teams_by_rank:
+            raise _source_error("duplicate_block_rank", block_id=row.block_id, rank=row.rank)
+        teams_by_rank[key] = row.team_id
 
     missing = sorted(set(team_to_block) - seen_teams)
     if missing:
         raise _source_error("team_missing_from_standings", team_ids=missing)
     for block in plan.blocks:
-        rows = rows_by_block[block.id]
-        actual_ranks = sorted(rank for rank, _team_id in rows)
+        actual_ranks = sorted(rank for block_id, rank in teams_by_rank if block_id == block.id)
         expected_ranks = list(range(1, len(block.team_ids) + 1))
         if actual_ranks != expected_ranks:
             raise _source_error(
@@ -390,30 +501,33 @@ def _validate_source(
                 expected_ranks=expected_ranks,
                 actual_ranks=actual_ranks,
             )
-        rows.sort()
-    return rows_by_block
+        slots_by_block[block.id] = [
+            _RankSlot(block_id=block.id, rank=rank, team_id=teams_by_rank[(block.id, rank)])
+            for rank in expected_ranks
+        ]
+    return slots_by_block
 
 
 def _source_error(reason: str, **details: object) -> TournamentGenerationError:
     return TournamentGenerationError(
         "TOURNAMENT_SOURCE_INVALID",
-        "リーグ順位とブロック情報の対応を確認できませんでした。順位を再確定してください。",
+        "リーグ計画と順位の対応を確認できませんでした。日程を再作成するか、順位を再確定してください。",
         reason=reason,
         **details,
     )
 
 
-def _split_standings(
+def _split_rank_slots(
     plan: LeaguePlan,
-    rows_by_block: dict[str, list[tuple[int, str]]],
+    slots_by_block: dict[str, list[_RankSlot]],
     policy: OddSplitPolicy,
-) -> tuple[list[tuple[int, str, str]], list[tuple[int, str, str]]]:
-    upper: list[tuple[int, str, str]] = []
-    lower: list[tuple[int, str, str]] = []
+) -> tuple[list[_RankSlot], list[_RankSlot]]:
+    upper: list[_RankSlot] = []
+    lower: list[_RankSlot] = []
     odd_index = 0
     for block in plan.blocks:
-        rows = rows_by_block[block.id]
-        count = len(rows)
+        slots = slots_by_block[block.id]
+        count = len(slots)
         if count % 2 == 0:
             upper_count = count // 2
         elif policy is OddSplitPolicy.UPPER:
@@ -423,28 +537,30 @@ def _split_standings(
         else:
             upper_count = (count + 1) // 2 if odd_index % 2 == 0 else count // 2
             odd_index += 1
-        upper.extend((rank, block.id, team_id) for rank, team_id in rows[:upper_count])
-        lower.extend((rank, block.id, team_id) for rank, team_id in rows[upper_count:])
+        upper.extend(slots[:upper_count])
+        lower.extend(slots[upper_count:])
     return upper, lower
 
 
 def _seed_pool(
     pool: TournamentPool,
-    rows: list[tuple[int, str, str]],
+    rows: list[_RankSlot],
     random_seed: int,
 ) -> tuple[tuple[TournamentSeed, ...], tuple[SeedDrawRecord, ...]]:
-    groups: dict[int, list[tuple[int, str, str]]] = {}
+    groups: dict[int, list[_RankSlot]] = {}
     for row in rows:
-        groups.setdefault(row[0], []).append(row)
-    ordered: list[tuple[int, str, str]] = []
+        groups.setdefault(row.rank, []).append(row)
+    ordered: list[_RankSlot] = []
     draws: list[SeedDrawRecord] = []
     for rank in sorted(groups):
         candidates = groups[rank]
         decided = sorted(
             candidates,
             key=lambda row: (
-                sha256(f"{random_seed}:seed:{pool.value}:{rank}:{row[2]}".encode()).digest(),
-                row[2],
+                sha256(
+                    f"{random_seed}:seed:{pool.value}:{rank}:{row.block_id}:{row.rank}".encode()
+                ).digest(),
+                row.block_id,
             ),
         )
         ordered.extend(decided)
@@ -453,21 +569,27 @@ def _seed_pool(
                 SeedDrawRecord(
                     pool=pool,
                     block_rank=rank,
-                    candidates=tuple(sorted(row[2] for row in candidates)),
-                    decided_order=tuple(row[2] for row in decided),
+                    candidates=tuple(
+                        sorted(row.team_id for row in candidates if row.team_id is not None)
+                    ),
+                    decided_order=tuple(row.team_id for row in decided if row.team_id is not None),
+                    candidate_rank_refs=tuple(
+                        row.entry for row in sorted(candidates, key=lambda row: row.block_id)
+                    ),
+                    decided_rank_refs=tuple(row.entry for row in decided),
                     random_seed=random_seed,
                 )
             )
     seeds = tuple(
         TournamentSeed(
             seed_no=index,
-            team_id=team_id,
-            block_id=block_id,
-            block_rank=rank,
-            entry=LeagueRankRef(block_id=block_id, rank=rank),
-            team=ConcreteTeamRef(team_id=team_id),
+            team_id=row.team_id,
+            block_id=row.block_id,
+            block_rank=row.rank,
+            entry=row.entry,
+            team=ConcreteTeamRef(team_id=row.team_id) if row.team_id is not None else None,
         )
-        for index, (rank, block_id, team_id) in enumerate(ordered, 1)
+        for index, row in enumerate(ordered, 1)
     )
     return seeds, tuple(draws)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from football_scheduler.league import LeaguePlan, generate_league_plan
 from football_scheduler.league_results import LeagueStandings, Standing
@@ -10,6 +11,7 @@ from football_scheduler.tournament import (
     LoserOfRef,
     TournamentGenerationError,
     TournamentPlan,
+    TournamentSeed,
     WinnerOfRef,
     generate_tournament_plan,
 )
@@ -62,16 +64,22 @@ def _source(block_sizes: tuple[int, ...], *, seed: int = 17) -> tuple[LeaguePlan
 
 
 def _request(
-    block_sizes: tuple[int, ...], *, policy: str = "upper", seed: int = 17
+    block_sizes: tuple[int, ...],
+    *,
+    policy: str = "upper",
+    seed: int = 17,
+    with_standings: bool = True,
 ) -> dict[str, object]:
     plan, standings = _source(block_sizes, seed=seed)
-    return {
+    request: dict[str, object] = {
         "request_kind": "tournament_plan",
         "league_plan": plan.model_dump(mode="json"),
-        "league_standings": standings.model_dump(mode="json"),
         "odd_split_policy": policy,
         "random_seed": seed,
     }
+    if with_standings:
+        request["league_standings"] = standings.model_dump(mode="json")
+    return request
 
 
 @pytest.mark.parametrize(
@@ -81,7 +89,7 @@ def _request(
 def test_power_of_two_complete_placement_tables(
     participant_count: int, expected_matches: int
 ) -> None:
-    result = generate_tournament_plan(_request((participant_count * 2,)))
+    result = generate_tournament_plan(_request((participant_count * 2,), with_standings=False))
 
     assert result.upper.participant_count == participant_count
     assert len(result.upper.matches) == expected_matches
@@ -98,7 +106,7 @@ def test_power_of_two_complete_placement_tables(
 def test_arbitrary_size_tables_cover_every_rank_without_bye_matches(
     participant_count: int, expected_matches: int, expected_byes: int
 ) -> None:
-    result = generate_tournament_plan(_request((participant_count * 2,)))
+    result = generate_tournament_plan(_request((participant_count * 2,), with_standings=False))
     plan = result.upper
 
     assert len(plan.matches) == expected_matches
@@ -149,6 +157,9 @@ def test_equal_block_rank_seed_draw_is_reproducible_and_audited() -> None:
     assert first.seed_draws
     assert all(draw.random_seed == 99 for draw in first.seed_draws)
     assert set(first.seed_draws[0].candidates) == set(first.seed_draws[0].decided_order)
+    assert set(first.seed_draws[0].candidate_rank_refs) == set(
+        first.seed_draws[0].decided_rank_refs
+    )
     assert [seed.block_rank for seed in first.upper.seeds] == sorted(
         seed.block_rank for seed in first.upper.seeds
     )
@@ -180,6 +191,93 @@ def test_seed_entries_keep_league_rank_and_concrete_team_separate() -> None:
     assert seed.team.team_id == seed.team_id
 
 
+def test_provisional_plan_uses_only_rank_slots() -> None:
+    result = generate_tournament_plan(_request((4, 4, 4, 4), seed=99, with_standings=False))
+
+    assert result.participant_resolution == "provisional"
+    assert all(
+        seed.team_id is None and seed.team is None
+        for pool in (result.upper, result.lower)
+        for seed in pool.seeds
+    )
+    assert result.seed_draws
+    assert all(
+        not draw.candidates
+        and not draw.decided_order
+        and draw.candidate_rank_refs
+        and draw.decided_rank_refs
+        for draw in result.seed_draws
+    )
+
+
+def test_resolving_rank_slots_does_not_change_bracket_structure() -> None:
+    request = _request((4, 4, 4, 4), seed=101)
+    provisional_request = {
+        key: value for key, value in request.items() if key != "league_standings"
+    }
+
+    provisional = generate_tournament_plan(provisional_request)
+    resolved = generate_tournament_plan(request)
+
+    assert provisional.participant_resolution == "provisional"
+    assert resolved.participant_resolution == "resolved"
+    for provisional_pool, resolved_pool in (
+        (provisional.upper, resolved.upper),
+        (provisional.lower, resolved.lower),
+    ):
+        assert [seed.seed_no for seed in provisional_pool.seeds] == [
+            seed.seed_no for seed in resolved_pool.seeds
+        ]
+        assert [seed.entry for seed in provisional_pool.seeds] == [
+            seed.entry for seed in resolved_pool.seeds
+        ]
+        assert provisional_pool.matches == resolved_pool.matches
+        assert provisional_pool.byes == resolved_pool.byes
+        assert provisional_pool.placements == resolved_pool.placements
+        assert provisional_pool.evaluation == resolved_pool.evaluation
+    assert [draw.decided_rank_refs for draw in provisional.seed_draws] == [
+        draw.decided_rank_refs for draw in resolved.seed_draws
+    ]
+
+
+def test_rank_slot_draw_does_not_depend_on_assigned_team_ids() -> None:
+    request = _request((4, 4, 4, 4), seed=303)
+    swapped = _request((4, 4, 4, 4), seed=303)
+    rows = swapped["league_standings"]["standings"]
+    rows[0]["team_id"], rows[1]["team_id"] = rows[1]["team_id"], rows[0]["team_id"]
+
+    first = generate_tournament_plan(request)
+    second = generate_tournament_plan(swapped)
+
+    assert first.upper.matches == second.upper.matches
+    assert first.lower.matches == second.lower.matches
+    assert [draw.decided_rank_refs for draw in first.seed_draws] == [
+        draw.decided_rank_refs for draw in second.seed_draws
+    ]
+
+
+def test_seed_rejects_partial_concrete_team_binding() -> None:
+    with pytest.raises(ValidationError, match="同時に指定"):
+        TournamentSeed.model_validate(
+            {
+                "seed_no": 1,
+                "team_id": "T1",
+                "block_id": "A",
+                "block_rank": 1,
+                "entry": {"type": "league_rank", "block_id": "A", "rank": 1},
+            }
+        )
+
+
+def test_explicit_resolution_rejects_incomplete_rank_draw_audit() -> None:
+    result = generate_tournament_plan(_request((4, 4, 4, 4), seed=404))
+    document = result.model_dump(mode="json")
+    document["seed_draws"][0]["candidate_rank_refs"] = []
+
+    with pytest.raises(ValidationError, match="順位枠候補"):
+        TournamentPlan.model_validate(document)
+
+
 def test_rejects_missing_or_inconsistent_final_standings() -> None:
     request = _request((4, 4))
     request["league_standings"]["standings"].pop()
@@ -192,7 +290,7 @@ def test_rejects_missing_or_inconsistent_final_standings() -> None:
 
 
 def test_generated_json_round_trip_is_stable() -> None:
-    result = generate_tournament_plan(_request((3, 4, 5), policy="alternate"))
+    result = generate_tournament_plan(_request((3, 4, 5), policy="alternate", with_standings=False))
 
     restored = TournamentPlan.model_validate_json(result.model_dump_json())
 

@@ -43,6 +43,7 @@ from football_scheduler.tournament import (
     ConcreteTeamRef,
     LeagueRankRef,
     LoserOfRef,
+    ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
     WinnerOfRef,
@@ -88,11 +89,16 @@ class Day2ScheduleRequest(ContractModel):
         }
         if planned_team_ids != set(team_ids):
             raise ValueError("リーグ計画と登録チームが一致しません")
-        seed_team_ids = {
+        if self.tournament_plan.participant_resolution is not ParticipantResolution.RESOLVED:
+            raise ValueError("仮トーナメントから2日目日程は作成できません")
+        seed_values = [
             seed.team_id
             for pool in (self.tournament_plan.upper, self.tournament_plan.lower)
             for seed in pool.seeds
-        }
+        ]
+        if any(team_id is None for team_id in seed_values):
+            raise ValueError("トーナメントの参加チームが確定していません")
+        seed_team_ids = {team_id for team_id in seed_values if team_id is not None}
         if seed_team_ids != set(team_ids):
             raise ValueError("トーナメントの参加チームと登録チームが一致しません")
         return self
@@ -434,6 +440,11 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
     known_teams: set[str] = set()
     for pool in (plan.upper, plan.lower):
         for seed in pool.seeds:
+            if seed.team_id is None:
+                raise Day2ScheduleError(
+                    "TOURNAMENT_SOURCE_INVALID",
+                    "2日目日程を作成する前にリーグ順位を確定してください。",
+                )
             key = (seed.block_id, seed.block_rank)
             if key in rank_teams and rank_teams[key] != seed.team_id:
                 raise Day2ScheduleError(
