@@ -8,6 +8,7 @@ import {
   ScheduleApiError,
 } from "./api";
 import {
+  buildDay1ScheduleRequest,
   issuesFromApiDetails,
   isDay1LeagueInput,
   normalizeDocument,
@@ -2039,7 +2040,7 @@ generateButton.addEventListener("click", () => {
   generateButton.disabled = true;
   generationStatusOwner = "generation";
   generationStatus.textContent = "1日目の日程を生成しています。画面を閉じずにお待ちください…";
-  void generateSchedule(documentState.tournament.input, turnstileToken)
+  void generateSchedule(buildDay1ScheduleRequest(documentState.tournament.input), turnstileToken)
     .then((result) => {
       documentState = {
         ...documentState,

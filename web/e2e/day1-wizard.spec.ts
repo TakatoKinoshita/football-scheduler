@@ -58,6 +58,7 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
     teams: [{ seed: 1 }, { seed: 2 }, { seed: 3 }, { seed: 4 }],
     courts: [{ name: "Aコート" }, { name: "Bコート" }],
   });
+  expect(requests[0]).not.toHaveProperty("day2");
 });
 
 test("生成直前の無効入力ではAPIを呼ばず安全確認を維持する", async ({ page }) => {

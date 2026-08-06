@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDay1ScheduleRequest,
   issuesFromApiDetails,
   normalizeDocument,
   validateDay1LeagueDocument,
@@ -8,6 +9,26 @@ import {
 import { createTournamentDocument } from "./types";
 
 describe("1日目リーグ入力", () => {
+  it("大会文書の2日目設定を1日目API要求へ含めない", () => {
+    const document = createTournamentDocument();
+
+    const request = buildDay1ScheduleRequest(document.tournament.input);
+
+    expect(request).toEqual({
+      schema_version: "0.1.0",
+      request_kind: "day1_league",
+      teams: document.tournament.input.teams,
+      courts: document.tournament.input.courts,
+      league: document.tournament.input.league,
+      day: document.tournament.input.day,
+      referees: document.tournament.input.referees,
+      random_seed: 20260803,
+      solver: { max_time_seconds: 30 },
+    });
+    expect(request).not.toHaveProperty("day2");
+    expect(document.tournament.input).toHaveProperty("day2");
+  });
+
   it("旧画面の未完成draftをチームとコートを保って移行する", () => {
     const document = createTournamentDocument(new Date("2026-08-06T00:00:00Z"));
     document.tournament.input = {

@@ -38,6 +38,20 @@ export function isDay1LeagueInput(input: JsonObject): boolean {
   return input.request_kind === "day1_league";
 }
 
+export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
+  return {
+    schema_version: input.schema_version,
+    request_kind: input.request_kind,
+    teams: input.teams,
+    courts: input.courts,
+    league: input.league,
+    day: input.day,
+    referees: input.referees,
+    random_seed: input.random_seed,
+    solver: input.solver,
+  };
+}
+
 export function normalizeDocument(document: TournamentDocument): DocumentMode {
   const input = document.tournament.input;
   if (isDay1LeagueInput(input)) {
