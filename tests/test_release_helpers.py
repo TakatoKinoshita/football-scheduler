@@ -1,9 +1,12 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from football_scheduler.api_handler import lambda_handler
 from scripts.find_cloudflare_production_deployment import find_deployment_id
 from scripts.write_cloudflare_release_headers import write_release_id
+from scripts.write_lambda_smoke_event import build_smoke_event
 
 
 def test_write_release_id_replaces_exact_placeholder(tmp_path: Path) -> None:
@@ -44,3 +47,17 @@ def test_find_latest_successful_production_deployment() -> None:
     }
 
     assert find_deployment_id(document) == "latest"
+
+
+def test_lambda_smoke_event_includes_matching_turnstile_action() -> None:
+    event = build_smoke_event()
+    headers = event["headers"]
+
+    assert isinstance(headers, dict)
+    assert headers["x-turnstile-action"] == "generate_schedule"
+
+    response = lambda_handler(event, None)
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert body["status"] in {"OPTIMAL", "FEASIBLE"}
+    assert body["validation"]["valid"] is True
