@@ -228,6 +228,7 @@ def test_workflow_separates_plan_and_apply_and_requires_plan_id() -> None:
     assert '"refs/heads/main"' in workflow
     assert "environment: production" in workflow
     assert "64文字のPlan ID" in workflow
+    assert "::notice title=本番release切替Plan ID::" in workflow
     assert '/deployments?env=production"' in workflow
     assert "per_page=100" not in workflow
     inspect_position = workflow.index("- name: Inspect current and target releases")
@@ -250,7 +251,11 @@ def test_workflow_blocks_incompatible_release_pairs_and_compensates_failure() ->
     assert "current_solver_version" in compensation
     assert "current_pages_id" in compensation
     assert "detect-stack-drift" in workflow
+    assert "--logical-resource-ids SolverFunctionAliaslive" in workflow
     assert "IN_SYNC" in workflow
+    assert workflow.index("Verify CloudFormation drift after restore") < workflow.index(
+        "Compensate failed release switch"
+    )
 
 
 def test_plan_path_does_not_reach_mutating_steps() -> None:

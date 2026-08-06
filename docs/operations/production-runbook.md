@@ -331,8 +331,9 @@ workflowは配信前のproduction deployment IDとLambda alias versionを記録�
 Pagesとsolver aliasだけを切り替えると構成が混在するため、このworkflowでは拒否する。その場合は
 対象templateを使う通常のPlan／Applyと影響確認を行う。
 
-Applyは切替前に対象solver versionを直接smoke testする。切替途中または切替後のsmoke testに失敗した
-場合は、Planで記録した元のPages deploymentとsolver versionへ補償復帰する。`restore`成功後は
+Applyは切替前に対象solver versionを直接smoke testする。切替途中、切替後のsmoke test、または
+`restore`後のdrift確認に失敗した場合は、Planで記録した元のPages deploymentとsolver versionへ
+補償復帰する。`restore`成功後は、release切替で変更する`SolverFunctionAliaslive`を対象に
 CloudFormation driftが`IN_SYNC`であることも確認する。
 
 ### 7.2 緊急時の手動操作
