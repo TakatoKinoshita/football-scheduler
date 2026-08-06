@@ -228,6 +228,8 @@ def test_workflow_separates_plan_and_apply_and_requires_plan_id() -> None:
     assert '"refs/heads/main"' in workflow
     assert "environment: production" in workflow
     assert "64文字のPlan ID" in workflow
+    assert '/deployments?env=production"' in workflow
+    assert "per_page=100" not in workflow
     inspect_position = workflow.index("- name: Inspect current and target releases")
     apply_check = workflow.index('"$plan_id" != "$REQUESTED_PLAN_ID"')
     alias_update = workflow.index("aws lambda update-alias")

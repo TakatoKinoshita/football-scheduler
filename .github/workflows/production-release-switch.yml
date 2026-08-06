@@ -181,7 +181,7 @@ jobs:
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/release-switch-project.json
           curl --fail --silent --show-error \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments?env=production&per_page=100" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments?env=production" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --output /tmp/release-switch-deployments.json
           curl --fail --silent --show-error --head --max-time 20 \
