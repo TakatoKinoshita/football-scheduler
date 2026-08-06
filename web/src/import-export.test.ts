@@ -41,6 +41,15 @@ function rankedDocument() {
   document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
   document.tournament.result = {
     status: "OPTIMAL",
+    metrics: {
+      league_team_referee_counts: [
+        { team_id: "team-01", count: 0 },
+        { team_id: "team-02", count: 0 },
+      ],
+      league_team_referee_count_min: 0,
+      league_team_referee_count_max: 0,
+      league_team_referee_count_difference: 0,
+    },
     league_plan: {
       schema_version: "0.1.0",
       assignment_mode: "random",

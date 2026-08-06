@@ -20,6 +20,7 @@ def valid_document() -> dict[str, object]:
     return {
         "schema_version": "0.1.0",
         "config": {
+            "teams": [{"id": team_id} for team_id in ("A", "B", "C", "D", "E")],
             "courts": [
                 {"id": "court-a", "name": "Aコート"},
                 {"id": "court-b", "name": "Bコート"},
@@ -75,6 +76,16 @@ def test_valid_schedule_passes_independent_validation(valid_document: dict[str, 
             "checked_match_count": 3,
             "checked_slot_count": 3,
             "error_count": 0,
+            "league_team_referee_counts": [
+                {"team_id": "A", "count": 0},
+                {"team_id": "B", "count": 0},
+                {"team_id": "C", "count": 0},
+                {"team_id": "D", "count": 0},
+                {"team_id": "E", "count": 1},
+            ],
+            "league_team_referee_count_min": 0,
+            "league_team_referee_count_max": 1,
+            "league_team_referee_count_difference": 1,
         },
     }
 
@@ -86,6 +97,21 @@ def test_accepts_an_object_with_model_dump(valid_document: dict[str, object]) ->
             return valid_document
 
     assert validate_schedule(ModelLike())["valid"] is True
+
+
+def test_referee_summary_excludes_tournament_matches(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    matches[2]["phase"] = "upper_tournament"
+
+    summary = validate_schedule(document)["summary"]
+
+    assert summary["league_team_referee_counts"] == [
+        {"team_id": team_id, "count": 0} for team_id in ("A", "B", "C", "D", "E")
+    ]
+    assert summary["league_team_referee_count_difference"] == 0
 
 
 def test_detects_missing_and_duplicate_match_assignments(

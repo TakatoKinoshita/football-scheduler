@@ -120,6 +120,13 @@ def test_day1_league_request_generates_match_and_passes_independent_validation()
     assert len(result["league_plan"]["logical_rounds"]) == 1
     assert len(result["league_plan"]["matches"]) == 1
     assert result["slots"][0]["match_id"] == result["league_plan"]["matches"][0]["id"]
+    metrics = result["metrics"]
+    validation_summary = result["validation"]["summary"]
+    assert metrics["league_team_referee_counts"] == validation_summary["league_team_referee_counts"]
+    assert (
+        metrics["league_team_referee_count_difference"]
+        == validation_summary["league_team_referee_count_difference"]
+    )
 
 
 def test_day1_league_request_adds_block_ids_before_solving(

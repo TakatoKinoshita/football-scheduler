@@ -77,6 +77,45 @@ def test_completed_league_standings_return_http_200(
     assert response["statusCode"] == 200
 
 
+def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
+    payload = {
+        "schema_version": "0.1.0",
+        "request_kind": "day1_league",
+        "teams": [{"id": f"team-{index}", "name": f"チーム{index}"} for index in range(1, 5)],
+        "courts": [
+            {"id": "court-a", "name": "Aコート"},
+            {"id": "court-b", "name": "Bコート"},
+        ],
+        "league": {"block_count": 1, "assignment_mode": "random"},
+        "day": {
+            "id": "day1",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 5,
+            "max_sections": 12,
+        },
+        "referees": {
+            "organizer_capacity": 2,
+            "team_referees_required_after_first": True,
+        },
+        "random_seed": 20260803,
+        "solver": {"max_time_seconds": 10},
+    }
+
+    response = api_handler.lambda_handler(_event(json.dumps(payload)), object())
+    result = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert (
+        result["metrics"]["league_team_referee_counts"]
+        == result["validation"]["summary"]["league_team_referee_counts"]
+    )
+    assert (
+        result["metrics"]["league_team_referee_count_difference"]
+        == result["validation"]["summary"]["league_team_referee_count_difference"]
+    )
+
+
 def test_content_length_over_one_megabyte_is_rejected_before_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

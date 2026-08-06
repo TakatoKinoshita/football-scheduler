@@ -125,6 +125,7 @@ def validate_schedule(document: Any) -> JsonObject:
         diagnostics,
         match_count=len(matches),
         slot_count=len(normalized_slots),
+        summary_details=_league_team_referee_summary(data, matches_by_id, normalized_slots),
     )
 
 
@@ -695,6 +696,44 @@ def _config(data: Mapping[str, Any]) -> Mapping[str, Any]:
     return data
 
 
+def _league_team_referee_summary(
+    data: Mapping[str, Any],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+) -> JsonObject:
+    teams = _config(data).get("teams")
+    team_ids = {
+        str(team["id"]) for team in _as_mapping_list(teams) if team.get("id") not in (None, "")
+    }
+    league_match_ids = {
+        match_id
+        for match_id, match in matches_by_id.items()
+        if str(match.get("phase", "league")) == "league"
+    }
+    assigned_counts: Counter[str] = Counter()
+    for slot in slots:
+        if slot.get("match_id") not in league_match_ids:
+            continue
+        referee_type, team_id = _referee(slot)
+        if referee_type == "team" and team_id is not None:
+            assigned_counts[team_id] += 1
+            team_ids.add(team_id)
+
+    ordered_team_ids = sorted(team_ids)
+    ordered_counts = [
+        {"team_id": team_id, "count": assigned_counts[team_id]} for team_id in ordered_team_ids
+    ]
+    counts = [assigned_counts[team_id] for team_id in ordered_team_ids]
+    minimum = min(counts, default=0)
+    maximum = max(counts, default=0)
+    return {
+        "league_team_referee_counts": ordered_counts,
+        "league_team_referee_count_min": minimum,
+        "league_team_referee_count_max": maximum,
+        "league_team_referee_count_difference": maximum - minimum,
+    }
+
+
 def _string_set(value: Any) -> set[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return set()
@@ -712,7 +751,13 @@ def _diagnostic(code: str, message: str, **details: Any) -> JsonObject:
     return diagnostic
 
 
-def _report(diagnostics: list[JsonObject], *, match_count: int, slot_count: int) -> JsonObject:
+def _report(
+    diagnostics: list[JsonObject],
+    *,
+    match_count: int,
+    slot_count: int,
+    summary_details: Mapping[str, Any] | None = None,
+) -> JsonObject:
     return {
         "valid": not diagnostics,
         "diagnostics": diagnostics,
@@ -720,5 +765,6 @@ def _report(diagnostics: list[JsonObject], *, match_count: int, slot_count: int)
             "checked_match_count": match_count,
             "checked_slot_count": slot_count,
             "error_count": len(diagnostics),
+            **({} if summary_details is None else dict(summary_details)),
         },
     }

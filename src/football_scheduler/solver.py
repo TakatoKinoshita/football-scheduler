@@ -19,6 +19,7 @@ from football_scheduler.models import (
     Slot,
     SolverMetrics,
     SolverStatus,
+    TeamRefereeCount,
 )
 
 _STATUS_MAP = {
@@ -28,6 +29,11 @@ _STATUS_MAP = {
     cp_model.UNKNOWN: SolverStatus.UNKNOWN,
 }
 _ORTOOLS_VERSION = version("ortools")
+_MAX_SOLVER_TIME_RESERVE_SECONDS = 4.5
+_FULL_API_TIME_BUDGET_SECONDS = 30.0
+_MIN_FAIRNESS_TIME_SECONDS = 2.0
+_LARGE_LEAGUE_FAIRNESS_TIME_SECONDS = 8.0
+_MINIMUM_HORIZON_TIME_SHARE = 0.85
 
 
 def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResult:
@@ -42,6 +48,13 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
 
     started_at = perf_counter()
     horizon = request.day.max_sections or max(1, len(request.matches) * 2)
+    # モデル構築、JSON変換、独立検証も含めてAPIの時間上限内へ収める。
+    solver_time_reserve = (
+        _MAX_SOLVER_TIME_RESERVE_SECONDS
+        if request.solver.max_time_seconds >= _FULL_API_TIME_BUDGET_SECONDS
+        else 0.0
+    )
+    solver_time_budget = max(0.000001, request.solver.max_time_seconds - solver_time_reserve)
 
     preflight_diagnostics = _preflight(request, horizon)
     if preflight_diagnostics:
@@ -51,6 +64,42 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
             perf_counter() - started_at,
             preflight_diagnostics,
         )
+
+    minimum_horizon = (len(request.matches) + len(request.courts) - 1) // len(request.courts)
+    if minimum_horizon < horizon:
+        # 容量上の理論最小値で実行可能なら、第1目的の最適性は探索せずとも
+        # 証明できる。広い未使用区間を持つモデルよりも安定して同じ解を得やすい。
+        minimum_result = _solve_schedule_at_horizon(
+            request,
+            minimum_horizon,
+            solver_time_budget * _MINIMUM_HORIZON_TIME_SHARE,
+        )
+        if minimum_result.slots:
+            return minimum_result
+
+        remaining_time = solver_time_budget - (perf_counter() - started_at)
+        if remaining_time <= 0.001:
+            return _result_without_schedule(
+                request,
+                SolverStatus.UNKNOWN,
+                perf_counter() - started_at,
+                (_failure_diagnostic(SolverStatus.UNKNOWN, request, horizon),),
+            )
+        fallback_result = _solve_schedule_at_horizon(request, horizon, remaining_time)
+        return _with_total_solver_wall_time(
+            fallback_result,
+            minimum_result.metrics.wall_time_seconds,
+        )
+
+    return _solve_schedule_at_horizon(request, horizon, solver_time_budget)
+
+
+def _solve_schedule_at_horizon(
+    request: ScheduleRequest,
+    horizon: int,
+    solver_time_budget: float,
+) -> ScheduleResult:
+    """指定した探索区間で日程を生成する。"""
 
     model = cp_model.CpModel()
     match_count = len(request.matches)
@@ -187,23 +236,115 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
             prerequisite_index = match_index_by_id[prerequisite_id]
             model.add(section_number[match_index] >= section_number[prerequisite_index] + 2)
 
+    league_match_indexes = frozenset(
+        index for index, match in enumerate(request.matches) if match.phase == "league"
+    )
+    league_match_count = len(league_match_indexes)
     used_sections_expression = sum(active_sections)
+    primary_objective_weight = league_match_count + 1
     model.minimize(used_sections_expression)
+    primary_solver = _configured_solver(solver_time_budget, request.random_seed)
+    primary_status = _STATUS_MAP.get(primary_solver.solve(model), SolverStatus.UNKNOWN)
+    wall_time = primary_solver.wall_time
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = request.solver.max_time_seconds
-    solver.parameters.random_seed = request.random_seed
-    solver.parameters.num_search_workers = 1
-    solver.parameters.randomize_search = False
-    status_code = solver.solve(model)
-    status = _STATUS_MAP.get(status_code, SolverStatus.UNKNOWN)
-    wall_time = solver.wall_time
+    if primary_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        diagnostic = _failure_diagnostic(primary_status, request, horizon)
+        return _result_without_schedule(request, primary_status, wall_time, (diagnostic,))
 
-    if status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
-        diagnostic = _failure_diagnostic(status, request, horizon)
-        return _result_without_schedule(request, status, wall_time, (diagnostic,))
+    solver = primary_solver
+    status = SolverStatus.FEASIBLE
+    best_primary_bound = primary_solver.best_objective_bound
+    primary_used_sections = sum(
+        primary_solver.boolean_value(section) for section in active_sections
+    )
+    remaining_time = solver_time_budget - wall_time
+    fairness_time_threshold = (
+        _LARGE_LEAGUE_FAIRNESS_TIME_SECONDS
+        if league_match_count > 24
+        else _MIN_FAIRNESS_TIME_SECONDS
+    )
+    if primary_status is SolverStatus.OPTIMAL and remaining_time >= fairness_time_threshold:
+        league_referee_count: dict[str, cp_model.IntVar] = {}
+        for team_id in team_ids:
+            count = model.new_int_var(0, league_match_count, f"league_referee_count_{team_id}")
+            assignments = [
+                variable
+                for (
+                    match_index,
+                    _section_index,
+                    referee_team_id,
+                ), variable in team_referee.items()
+                if match_index in league_match_indexes and referee_team_id == team_id
+            ]
+            model.add(count == sum(assignments))
+            league_referee_count[team_id] = count
 
-    used_sections = round(solver.objective_value)
+        minimum_league_referee_count = model.new_int_var(
+            0, league_match_count, "minimum_league_referee_count"
+        )
+        maximum_league_referee_count = model.new_int_var(
+            0, league_match_count, "maximum_league_referee_count"
+        )
+        league_referee_count_difference = model.new_int_var(
+            0, league_match_count, "league_referee_count_difference"
+        )
+        model.add_min_equality(minimum_league_referee_count, list(league_referee_count.values()))
+        model.add_max_equality(maximum_league_referee_count, list(league_referee_count.values()))
+        model.add(
+            league_referee_count_difference
+            == maximum_league_referee_count - minimum_league_referee_count
+        )
+        model.add(used_sections_expression == primary_used_sections)
+        model.minimize(
+            used_sections_expression * primary_objective_weight + league_referee_count_difference
+        )
+        hint_variables = [
+            *placement.values(),
+            *match_in_section.values(),
+            *active_sections,
+            *organizer_referee.values(),
+            *team_referee.values(),
+            *section_number.values(),
+        ]
+        for variable in hint_variables:
+            model.add_hint(variable, primary_solver.value(variable))
+
+        difference_lower_bound = 0
+        all_active_slots_are_filled = match_count == primary_used_sections * len(request.courts)
+        all_matches_require_league_team_referees_after_first = (
+            request.referees.team_referees_required_after_first
+            and league_match_count == match_count
+            and all(not match.organizer_referee_required for match in request.matches)
+        )
+        if all_active_slots_are_filled and all_matches_require_league_team_referees_after_first:
+            fixed_team_referee_count = league_match_count - len(request.courts)
+            if fixed_team_referee_count % len(team_ids) != 0:
+                difference_lower_bound = 1
+
+        for allowed_difference in range(difference_lower_bound, league_match_count + 1):
+            remaining_time = solver_time_budget - wall_time
+            if remaining_time <= 0.001:
+                break
+            candidate_model = model.clone()
+            candidate_model.minimize(0)
+            candidate_difference = candidate_model.get_int_var_from_proto_index(
+                league_referee_count_difference.index
+            )
+            candidate_model.add(candidate_difference <= allowed_difference)
+            fairness_solver = _configured_solver(remaining_time, request.random_seed)
+            fairness_status = _STATUS_MAP.get(
+                fairness_solver.solve(candidate_model), SolverStatus.UNKNOWN
+            )
+            wall_time += fairness_solver.wall_time
+            if fairness_status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+                solver = fairness_solver
+                status = SolverStatus.OPTIMAL
+                best_primary_bound = primary_used_sections
+                break
+            if fairness_status is not SolverStatus.INFEASIBLE:
+                break
+
+    used_sections = sum(solver.boolean_value(section) for section in active_sections)
     slots: list[Slot] = []
     for section_index in range(used_sections):
         for court_index, court in enumerate(request.courts):
@@ -244,6 +385,19 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
                 )
             )
 
+    league_referee_counts = {team_id: 0 for team_id in team_ids}
+    match_by_id = {match.id: match for match in request.matches}
+    for slot in slots:
+        if slot.match_id is None or match_by_id[slot.match_id].phase != "league":
+            continue
+        assignment = slot.referee_assignment
+        if assignment is not None and assignment.kind is RefereeKind.TEAM:
+            assert assignment.team_id is not None
+            league_referee_counts[assignment.team_id] += 1
+    league_referee_count_values = list(league_referee_counts.values())
+    minimum_league_referee_count_value = min(league_referee_count_values, default=0)
+    maximum_league_referee_count_value = max(league_referee_count_values, default=0)
+
     diagnostics: tuple[Diagnostic, ...] = ()
     if status is SolverStatus.FEASIBLE:
         diagnostics = (
@@ -262,12 +416,48 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
             ortools_version=_ORTOOLS_VERSION,
             wall_time_seconds=wall_time,
             used_sections=used_sections,
-            objective_value=solver.objective_value,
-            best_objective_bound=solver.best_objective_bound,
+            objective_value=float(used_sections),
+            best_objective_bound=float(best_primary_bound),
+            league_team_referee_counts=tuple(
+                TeamRefereeCount(
+                    team_id=team_id,
+                    count=league_referee_counts[team_id],
+                )
+                for team_id in sorted(team_ids)
+            ),
+            league_team_referee_count_min=minimum_league_referee_count_value,
+            league_team_referee_count_max=maximum_league_referee_count_value,
+            league_team_referee_count_difference=(
+                maximum_league_referee_count_value - minimum_league_referee_count_value
+            ),
             optimality_proven=status is SolverStatus.OPTIMAL,
         ),
         diagnostics=diagnostics,
     )
+
+
+def _with_total_solver_wall_time(
+    result: ScheduleResult,
+    prior_wall_time_seconds: float,
+) -> ScheduleResult:
+    """段階探索で消費したCP-SAT時間を監査値へ合算する。"""
+
+    metrics = result.metrics.model_copy(
+        update={
+            "wall_time_seconds": prior_wall_time_seconds + result.metrics.wall_time_seconds,
+        }
+    )
+    return result.model_copy(update={"metrics": metrics})
+
+
+def _configured_solver(max_time_seconds: float, random_seed: int) -> cp_model.CpSolver:
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = max_time_seconds
+    solver.parameters.random_seed = random_seed
+    solver.parameters.num_search_workers = 1
+    solver.parameters.randomize_search = False
+    solver.parameters.ignore_names = True
+    return solver
 
 
 def _extract_referee(

@@ -172,6 +172,13 @@ class Diagnostic(ContractModel):
     details: dict[str, int | float | str | bool | list[str]] = Field(default_factory=dict)
 
 
+class TeamRefereeCount(ContractModel):
+    """リーグ戦でチームが担当した審判回数。"""
+
+    team_id: Identifier
+    count: Annotated[int, Field(ge=0)]
+
+
 class SolverMetrics(ContractModel):
     random_seed: int
     num_search_workers: Literal[1] = 1
@@ -181,6 +188,10 @@ class SolverMetrics(ContractModel):
     used_sections: Annotated[int, Field(ge=1)] | None = None
     objective_value: float | None = None
     best_objective_bound: float | None = None
+    league_team_referee_counts: tuple[TeamRefereeCount, ...] = ()
+    league_team_referee_count_min: Annotated[int, Field(ge=0)] | None = None
+    league_team_referee_count_max: Annotated[int, Field(ge=0)] | None = None
+    league_team_referee_count_difference: Annotated[int, Field(ge=0)] | None = None
     optimality_proven: bool
 
 
