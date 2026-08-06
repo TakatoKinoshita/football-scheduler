@@ -113,8 +113,10 @@ def test_bootstrap_allows_controlled_release_switch_checks() -> None:
     )[1].split("              - Sid: AccountPrerequisiteChecks\n", maxsplit=1)[0]
 
     assert "- cloudformation:DetectStackDrift" in deployment_statement
+    assert "- cloudformation:DetectStackResourceDrift" in deployment_statement
     assert "stack/${ProductionStackName}/*" in deployment_statement
-    assert "Action: cloudformation:DescribeStackDriftDetectionStatus" in drift_status_statement
+    assert "- cloudformation:BatchDescribeTypeConfigurations" in drift_status_statement
+    assert "- cloudformation:DescribeStackDriftDetectionStatus" in drift_status_statement
     assert 'Resource: "*"' in drift_status_statement
     assert "- lambda:ListVersionsByFunction" in lambda_statement
     assert "Action: cloudwatch:DescribeAlarms" in alarm_statement

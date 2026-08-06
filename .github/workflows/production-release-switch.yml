@@ -204,6 +204,7 @@ jobs:
             --summary-output /tmp/release-switch-summary.md \
             --github-output "$GITHUB_OUTPUT")"
           cat /tmp/release-switch-summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=本番release切替Plan ID::$plan_id"
           if [[ "${{ inputs.operation }}" == "apply" && "$plan_id" != "$REQUESTED_PLAN_ID" ]]; then
             echo "現在状態がplan作成時から変化したため、releaseを切り替えません。" >&2
             exit 1
@@ -286,6 +287,38 @@ jobs:
             exit 1
           fi
 
+      - name: Verify CloudFormation drift after restore
+        if: ${{ inputs.operation == 'apply' && inputs.direction == 'restore' }}
+        shell: bash
+        run: |
+          detection_id="$(aws cloudformation detect-stack-drift \
+            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+            --logical-resource-ids SolverFunctionAliaslive \
+            --query StackDriftDetectionId --output text --no-cli-pager)"
+          detection_status=""
+          stack_drift_status=""
+          for attempt in {1..12}; do
+            detection_status="$(aws cloudformation describe-stack-drift-detection-status \
+              --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
+              --query DetectionStatus --output text --no-cli-pager)"
+            if [[ "$detection_status" == "DETECTION_COMPLETE" ]]; then
+              stack_drift_status="$(aws cloudformation describe-stack-drift-detection-status \
+                --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
+                --query StackDriftStatus --output text --no-cli-pager)"
+              break
+            fi
+            if [[ "$detection_status" == "DETECTION_FAILED" ]]; then
+              break
+            fi
+            if [[ "$attempt" -lt 12 ]]; then
+              sleep 5
+            fi
+          done
+          if [[ "$detection_status" != "DETECTION_COMPLETE" || "$stack_drift_status" != "IN_SYNC" ]]; then
+            echo "restore後のCloudFormation driftを解消できていません。" >&2
+            exit 1
+          fi
+
       - name: Compensate failed release switch
         if: ${{ failure() && inputs.operation == 'apply' && steps.alias_switch.outcome == 'success' }}
         env:
@@ -317,37 +350,6 @@ jobs:
               || compensation_status=1
           fi
           exit "$compensation_status"
-
-      - name: Verify CloudFormation drift after restore
-        if: ${{ inputs.operation == 'apply' && inputs.direction == 'restore' }}
-        shell: bash
-        run: |
-          detection_id="$(aws cloudformation detect-stack-drift \
-            --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-            --query StackDriftDetectionId --output text --no-cli-pager)"
-          detection_status=""
-          stack_drift_status=""
-          for attempt in {1..12}; do
-            detection_status="$(aws cloudformation describe-stack-drift-detection-status \
-              --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
-              --query DetectionStatus --output text --no-cli-pager)"
-            if [[ "$detection_status" == "DETECTION_COMPLETE" ]]; then
-              stack_drift_status="$(aws cloudformation describe-stack-drift-detection-status \
-                --stack-drift-detection-id "$detection_id" --region "$AWS_REGION" \
-                --query StackDriftStatus --output text --no-cli-pager)"
-              break
-            fi
-            if [[ "$detection_status" == "DETECTION_FAILED" ]]; then
-              break
-            fi
-            if [[ "$attempt" -lt 12 ]]; then
-              sleep 5
-            fi
-          done
-          if [[ "$detection_status" != "DETECTION_COMPLETE" || "$stack_drift_status" != "IN_SYNC" ]]; then
-            echo "restore後のCloudFormation driftを解消できていません。" >&2
-            exit 1
-          fi
 
       - name: Record successful release switch
         if: ${{ inputs.operation == 'apply' && success() }}
