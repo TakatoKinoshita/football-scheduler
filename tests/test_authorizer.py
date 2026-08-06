@@ -60,6 +60,35 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
     assert result["context"] == {"authorizationCode": "AUTHORIZED"}
 
 
+@pytest.mark.parametrize("action", ["calculate_standings", "generate_tournament"])
+def test_result_workflow_turnstile_actions_are_allowed(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
+    monkeypatch.setattr(
+        authorizer,
+        "_verify_turnstile",
+        lambda *_: {
+            "success": True,
+            "hostname": "schedule.example.jp",
+            "action": action,
+        },
+    )
+
+    result = authorizer.lambda_handler(
+        _event(
+            **{
+                "X-Origin-Verify": "origin-secret",
+                "Origin": "https://schedule.example.jp",
+                "X-Turnstile-Token": "single-use-token",
+            }
+        ),
+        object(),
+    )
+
+    assert _effect(result) == "Allow"
+
+
 def test_missing_proxy_header_is_denied_before_turnstile(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

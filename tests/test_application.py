@@ -184,6 +184,86 @@ def test_league_standings_request_reports_missing_results() -> None:
     assert result["diagnostics"][0]["code"] == "LEAGUE_RESULTS_INCOMPLETE"
 
 
+def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=4, block_count=1))
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": generated["league_plan"],
+            "results": [
+                {"match_id": match["id"], "home_score": 0, "away_score": 0}
+                for match in generated["league_plan"]["matches"]
+            ],
+            "random_seed": 20260803,
+        }
+    )
+
+    result = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": generated["league_plan"],
+            "league_standings": standings,
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+
+    assert result["status"] == "COMPLETE"
+    assert result["upper"]["participant_count"] == 2
+    assert result["lower"]["participant_count"] == 2
+    assert len(result["upper"]["matches"]) == 1
+    assert len(result["lower"]["matches"]) == 1
+
+
+def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": generated["league_plan"],
+            "results": [
+                {
+                    "match_id": generated["league_plan"]["matches"][0]["id"],
+                    "home_score": 1,
+                    "away_score": 0,
+                }
+            ],
+        }
+    )
+    standings["standings"].pop()
+
+    result = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": generated["league_plan"],
+            "league_standings": standings,
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "TOURNAMENT_SOURCE_INVALID"
+    assert "順位を再確定" in result["diagnostics"][0]["message"]
+
+
+def test_tournament_plan_request_rejects_team_limit() -> None:
+    result = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": {
+                "blocks": [
+                    {"id": f"B{index}", "team_ids": [f"T{index}"]}
+                    for index in range(application.MAX_TEAMS + 1)
+                ],
+                "matches": [],
+            },
+            "league_standings": {"standings": []},
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "TEAM_LIMIT_EXCEEDED"
+
+
 def test_league_standings_request_rejects_result_limit() -> None:
     result = application.handle_request(
         {

@@ -77,6 +77,20 @@ def test_completed_league_standings_return_http_200(
     assert response["statusCode"] == 200
 
 
+def test_completed_tournament_plan_returns_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: {"status": "COMPLETE", "upper": {}, "lower": {}},
+    )
+
+    response = api_handler.lambda_handler(_event("{}"), object())
+
+    assert response["statusCode"] == 200
+
+
 def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
     payload = {
         "schema_version": "0.1.0",
@@ -155,6 +169,7 @@ def test_technical_fixture_is_not_exposed_by_public_api(
     [
         ("INPUT_SCHEMA_INVALID", 400),
         ("INVALID_BLOCK_COUNT", 400),
+        ("TOURNAMENT_SOURCE_INVALID", 400),
         ("TEAM_LIMIT_EXCEEDED", 413),
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),

@@ -147,6 +147,16 @@ export function validateDay1LeagueDocument(
       message: "チームの分け方を選択してください。",
     });
   }
+  if (
+    league?.odd_split_policy !== undefined &&
+    !new Set(["upper", "lower", "alternate"]).has(String(league.odd_split_policy))
+  ) {
+    issues.push({
+      field: "odd-split-policy",
+      step: 2,
+      message: "奇数人数ブロックの上下振り分けを選択してください。",
+    });
+  }
   if (throughStep === 2) return issues;
 
   const day = objectValue(input.day);
@@ -209,6 +219,7 @@ const API_FIELD_MAP: Array<readonly [string, string, Exclude<WizardStep, 4>, str
   ["courts", "courts", 2, "使用コート"],
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
+  ["league.odd_split_policy", "odd-split-policy", 2, "奇数人数の上下振り分け"],
   ["day.start_time", "start-time", 3, "開始時刻"],
   ["day.game_duration_minutes", "game-duration", 3, "試合時間"],
   ["day.margin_minutes", "margin-minutes", 3, "試合間隔"],

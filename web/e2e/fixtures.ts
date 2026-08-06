@@ -86,6 +86,61 @@ export const standingsResult = {
   draws: [],
 };
 
+const emptyTournamentEvaluation = {
+  first_match_same_block_count: 0,
+  possible_same_block_match_count: 0,
+  earliest_possible_same_block_round: null,
+};
+
+export const tournamentPlanResult = {
+  schema_version: "0.1.0",
+  status: "COMPLETE",
+  odd_split_policy: "upper",
+  random_seed: 20260803,
+  upper: {
+    pool: "upper",
+    participant_count: 1,
+    seeds: [
+      {
+        seed_no: 1,
+        team_id: "team-01",
+        block_id: "A",
+        block_rank: 1,
+        entry: { type: "league_rank", block_id: "A", rank: 1 },
+        team: { type: "concrete_team", team_id: "team-01" },
+      },
+    ],
+    matches: [],
+    byes: [],
+    placements: [
+      { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 1 } },
+    ],
+    evaluation: emptyTournamentEvaluation,
+  },
+  lower: {
+    pool: "lower",
+    participant_count: 1,
+    seeds: [
+      {
+        seed_no: 1,
+        team_id: "team-02",
+        block_id: "A",
+        block_rank: 2,
+        entry: { type: "league_rank", block_id: "A", rank: 2 },
+        team: { type: "concrete_team", team_id: "team-02" },
+      },
+    ],
+    matches: [],
+    byes: [],
+    placements: [
+      { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 2 } },
+    ],
+    evaluation: emptyTournamentEvaluation,
+  },
+  seed_draws: [],
+  warnings: [],
+};
+
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",
@@ -101,7 +156,7 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
           { id: "team-02", name: "みどりSC" },
         ],
         courts: [{ id: "court-a", name: "Aコート" }],
-        league: { block_count: 1, assignment_mode: "random" },
+        league: { block_count: 1, assignment_mode: "random", odd_split_policy: "upper" },
         day: {
           id: "day1",
           start_time: "09:30",

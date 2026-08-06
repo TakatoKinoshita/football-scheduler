@@ -82,6 +82,62 @@ function rankedDocument() {
   return document;
 }
 
+function completedTournamentPlan() {
+  const evaluation = {
+    first_match_same_block_count: 0,
+    possible_same_block_match_count: 0,
+    earliest_possible_same_block_round: null,
+  };
+  return {
+    schema_version: "0.1.0",
+    status: "COMPLETE",
+    odd_split_policy: "upper",
+    random_seed: 20260803,
+    upper: {
+      pool: "upper",
+      participant_count: 1,
+      seeds: [
+        {
+          seed_no: 1,
+          team_id: "team-01",
+          block_id: "A",
+          block_rank: 1,
+          entry: { type: "league_rank", block_id: "A", rank: 1 },
+          team: { type: "concrete_team", team_id: "team-01" },
+        },
+      ],
+      matches: [],
+      byes: [],
+      placements: [
+        { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 1 } },
+      ],
+      evaluation,
+    },
+    lower: {
+      pool: "lower",
+      participant_count: 1,
+      seeds: [
+        {
+          seed_no: 1,
+          team_id: "team-02",
+          block_id: "A",
+          block_rank: 2,
+          entry: { type: "league_rank", block_id: "A", rank: 2 },
+          team: { type: "concrete_team", team_id: "team-02" },
+        },
+      ],
+      matches: [],
+      byes: [],
+      placements: [
+        { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 2 } },
+      ],
+      evaluation,
+    },
+    seed_draws: [],
+    warnings: [],
+  };
+}
+
 describe("大会JSONの入出力", () => {
   it("書き出した文書を同じ内容で読み込む", () => {
     const document = validDocument();
@@ -188,6 +244,33 @@ describe("大会JSONの入出力", () => {
     ];
 
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/抽選記録/);
+  });
+
+  it("確定した2日目トーナメントを同じ内容で復元する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.tournament_plan = completedTournamentPlan();
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("存在しないリーグ順位を参照するトーナメントを拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = completedTournamentPlan();
+    plan.upper.placements[0]!.entry.rank = 99;
+    result.tournament_plan = plan;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/存在しないリーグ順位/);
+  });
+
+  it("確定順位がないトーナメントを拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    delete result.league_standings;
+    result.tournament_plan = completedTournamentPlan();
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/確定順位がない/);
   });
 
   it("ファイル名に使えない文字を置き換える", () => {

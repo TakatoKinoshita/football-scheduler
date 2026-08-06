@@ -29,6 +29,7 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
         league: {
           block_count: null,
           assignment_mode: "random",
+          odd_split_policy: "upper",
         },
         day: {
           id: "day1",

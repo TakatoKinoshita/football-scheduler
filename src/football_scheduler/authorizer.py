@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 _SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-_EXPECTED_ACTION = "generate_schedule"
+_EXPECTED_ACTIONS = frozenset({"generate_schedule", "calculate_standings", "generate_tournament"})
 _MAX_TOKEN_LENGTH = 2_048
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.setLevel(logging.INFO)
@@ -111,7 +111,7 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
         result.get("success") is not True
         or not isinstance(hostname, str)
         or hostname.casefold() != expected_hostname
-        or action != _EXPECTED_ACTION
+        or action not in _EXPECTED_ACTIONS
     ):
         return _policy("anonymous", "Deny", method_arn, "BOT_CHECK_REJECTED")
     return _policy("turnstile-user", "Allow", method_arn, "AUTHORIZED")

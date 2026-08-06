@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { scheduleResult, standingsResult, tournamentFixture } from "./fixtures";
+import {
+  scheduleResult,
+  standingsResult,
+  tournamentFixture,
+  tournamentPlanResult,
+} from "./fixtures";
 import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
 
 async function openGeneratedLeague(page: import("@playwright/test").Page): Promise<void> {
@@ -77,6 +82,53 @@ test("順位API失敗時も得点を保持して結果画面内に説明する",
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toHaveValue("2");
 });
 
+test("確定順位から2日目トーナメントを作成し、得点変更時は一緒に失効する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const base = tournamentFixture({ withResult: true });
+  await importDocument(page, {
+    ...base,
+    tournament: {
+      ...base.tournament,
+      result: {
+        ...scheduleResult,
+        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
+        league_standings: standingsResult,
+      },
+    },
+  });
+  await page.unroute(GENERATE_API);
+  const requests: unknown[] = [];
+  await page.route(GENERATE_API, async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(tournamentPlanResult),
+    });
+  });
+
+  await expect(page.locator("#tournament-confirmation")).toBeVisible();
+  await expect(page.getByRole("button", { name: "2日目トーナメントを作成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "2日目トーナメントを作成する" }).click();
+
+  await expect(page.locator("#tournament-plan-view")).toContainText("上位トーナメント");
+  await expect(page.locator("#tournament-plan-view")).toContainText("青空FC");
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    request_kind: "tournament_plan",
+    odd_split_policy: "upper",
+    league_standings: { status: "COMPLETE" },
+  });
+
+  await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
+  await expect(page.locator("#league-standings-view")).toHaveCount(0);
+  await expect(page.locator("#tournament-plan-view")).toHaveCount(0);
+  await expect(page.locator("#tournament-confirmation")).toBeHidden();
+});
+
 test("確定順位はモバイルと印刷表示で確認できる", async ({ page }) => {
   await mockExternalServices(page);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -90,14 +142,17 @@ test("確定順位はモバイルと印刷表示で確認できる", async ({ pa
         ...scheduleResult,
         league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
         league_standings: standingsResult,
+        tournament_plan: tournamentPlanResult,
       },
     },
   };
   await importDocument(page, document);
 
   await expect(page.locator("#league-standings-view")).toBeVisible();
+  await expect(page.locator("#tournament-plan-view")).toBeVisible();
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toBeVisible();
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#standings-confirmation")).toBeHidden();
   await expect(page.locator("#league-standings-view")).toBeVisible();
+  await expect(page.locator("#tournament-plan-view")).toBeVisible();
 });

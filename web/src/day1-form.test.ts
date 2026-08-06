@@ -81,6 +81,27 @@ describe("1日目リーグ入力", () => {
     expect(validateDay1LeagueDocument(document)).toEqual([]);
   });
 
+  it("奇数人数の上下振り分けに未対応値を許可しない", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+    ];
+    document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
+    document.tournament.input.league = {
+      block_count: 1,
+      assignment_mode: "random",
+      odd_split_policy: "unknown",
+    };
+
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
+      field: "odd-split-policy",
+      step: 2,
+      message: "奇数人数ブロックの上下振り分けを選択してください。",
+    });
+  });
+
   it("APIのfield詳細を日本語項目へ対応付ける", () => {
     expect(
       issuesFromApiDetails({

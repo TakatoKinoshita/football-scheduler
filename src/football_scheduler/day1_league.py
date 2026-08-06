@@ -35,6 +35,7 @@ class Day1LeagueSettings(ContractModel):
         AssignmentMode.RANDOM,
         AssignmentMode.SEEDED_SNAKE,
     ] = AssignmentMode.RANDOM
+    odd_split_policy: Literal["upper", "lower", "alternate"] = "upper"
 
 
 class Day1LeagueScheduleRequest(ContractModel):

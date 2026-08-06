@@ -28,6 +28,11 @@ from football_scheduler.league_results import (
     calculate_league_standings,
 )
 from football_scheduler.solver import solve_schedule
+from football_scheduler.tournament import (
+    TournamentGenerationError,
+    TournamentPlanRequest,
+    generate_tournament_plan,
+)
 from football_scheduler.validator import validate_schedule
 
 SCHEMA_VERSION = "0.1.0"
@@ -70,6 +75,11 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             return _to_json_object(
                 calculate_league_standings(LeagueStandingsRequest.model_validate(payload))
             )
+        if payload.get("request_kind") == "tournament_plan":
+            _validate_tournament_plan_limits(payload)
+            return _to_json_object(
+                generate_tournament_plan(TournamentPlanRequest.model_validate(payload))
+            )
 
         request_data, response_metadata, fallback_request_data = _resolve_request(payload)
         _validate_limits(request_data)
@@ -93,6 +103,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except LeagueGenerationError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except LeagueResultsError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except TournamentGenerationError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         return _error_response(
@@ -276,6 +288,39 @@ def _validate_league_standings_limits(request: Mapping[str, Any]) -> None:
     if isinstance(league_plan, Mapping):
         _validate_sequence_limit(
             league_plan, "matches", MAX_MATCHES, "リーグ試合数", "MATCH_LIMIT_EXCEEDED"
+        )
+
+
+def _validate_tournament_plan_limits(request: Mapping[str, Any]) -> None:
+    league_plan = request.get("league_plan")
+    if isinstance(league_plan, Mapping):
+        _validate_sequence_limit(
+            league_plan, "matches", MAX_MATCHES, "リーグ試合数", "MATCH_LIMIT_EXCEEDED"
+        )
+        blocks = league_plan.get("blocks")
+        if isinstance(blocks, Sequence) and not isinstance(blocks, (str, bytes, bytearray)):
+            team_count = sum(
+                len(team_ids)
+                for block in blocks
+                if isinstance(block, Mapping)
+                and isinstance(team_ids := block.get("team_ids"), Sequence)
+                and not isinstance(team_ids, (str, bytes, bytearray))
+            )
+            if team_count > MAX_TEAMS:
+                raise _RequestError(
+                    "TEAM_LIMIT_EXCEEDED",
+                    f"チーム数が上限の{MAX_TEAMS}を超えています。",
+                    actual=team_count,
+                    maximum=MAX_TEAMS,
+                )
+    league_standings = request.get("league_standings")
+    if isinstance(league_standings, Mapping):
+        _validate_sequence_limit(
+            league_standings,
+            "standings",
+            MAX_TEAMS,
+            "リーグ順位数",
+            "TEAM_LIMIT_EXCEEDED",
         )
 
 

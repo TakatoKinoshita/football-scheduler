@@ -117,6 +117,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .team-card h4 { margin: 0 0 .4rem; }
 .team-card ul { margin: 0; padding-left: 1.3rem; }
 .team-card .muted { margin: 0; color: var(--muted); }
+.tournament-pool { margin-top: 1rem; padding: 1rem; background: white; border: 1px solid var(--border); border-radius: .5rem; break-inside: avoid; }
+.tournament-pool h4 { margin: 0 0 .6rem; color: var(--green); }
+.tournament-pool h5 { margin: 1rem 0 .4rem; }
+.seed-list { columns: 2; padding-left: 1.5rem; }
 footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: center; }
 
 @media (max-width: 760px) {
@@ -126,6 +130,7 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid { grid-template-columns: 1fr; }
   .field-wide { grid-column: auto; }
   .button-row > * { width: 100%; }
+  .seed-list { columns: 1; }
   .wizard-actions { flex-direction: column-reverse; }
   .wizard-actions > button { width: 100%; }
 }
@@ -141,5 +146,7 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   table { min-width: 0; font-size: 9pt; }
   .team-schedule-grid { grid-template-columns: repeat(2, 1fr); }
   .block-grid { grid-template-columns: repeat(3, 1fr); }
+  .tournament-pool { break-inside: auto; }
+  .tournament-pool h4, .tournament-pool h5 { break-after: avoid; }
   .score-input { min-height: 0; padding: .1rem; border: 0; background: white; }
 }

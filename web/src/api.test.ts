@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { API_PATH, generateSchedule, ScheduleApiError } from "./api";
+import {
+  API_PATH,
+  generateSchedule,
+  generateTournamentPlan,
+  ScheduleApiError,
+} from "./api";
 
 describe("日程生成API", () => {
   it("同一originへno-storeで送信する", async () => {
@@ -72,5 +77,19 @@ describe("日程生成API", () => {
       code: "INPUT_SCHEMA_INVALID",
       details,
     });
+  });
+
+  it("トーナメント要求も同じ保護されたAPIへ送る", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ status: "COMPLETE", upper: {}, lower: {} }), {
+        status: 200,
+      }),
+    );
+    const input = { request_kind: "tournament_plan" };
+
+    await expect(generateTournamentPlan(input, "token", fetchMock)).resolves.toMatchObject({
+      status: "COMPLETE",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
   });
 });
