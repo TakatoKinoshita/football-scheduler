@@ -22,6 +22,11 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
+import {
+  bindDay2ScheduleParticipants,
+  day2ParticipantResolution,
+  unbindDay2ScheduleParticipants,
+} from "./day2-resolution";
 import { setupPwaUpdates } from "./pwa-update";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
@@ -68,7 +73,7 @@ root.innerHTML = `
   </header>
   <main>
     <div class="scope-notice no-print" role="note">
-      <strong>1日目の日程から仮トーナメントを作り、順位確定後は2日目の日程と審判まで作成できます。</strong>
+      <strong>1日目の日程から、順位確定前でも2日目の仮トーナメント・仮日程・審判まで作成できます。</strong>
       2日目の試合結果と最終順位の入力は、今後追加します。
     </div>
     <div id="legacy-banner" class="notice no-print" role="note" hidden>
@@ -582,7 +587,10 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return false;
   const hadStandings = asObject(result.league_standings) !== undefined;
-  const hadDay2 = asObject(result.day2_schedule) !== undefined;
+  const existingStandings = asObject(result.league_standings);
+  const existingDay2 = asObject(result.day2_schedule);
+  const hadResolvedDay2 =
+    existingDay2 !== undefined && day2ParticipantResolution(existingDay2) === "resolved";
   const existingPlan = asObject(result.tournament_plan);
   const hadResolvedTournament =
     existingPlan !== undefined && tournamentParticipantResolution(existingPlan) === "resolved";
@@ -595,14 +603,21 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
           ? unbindTournamentParticipants(existingPlan)
           : existingPlan;
     }
+    if (existingDay2 !== undefined) {
+      nextResult.day2_schedule =
+        day2ParticipantResolution(existingDay2) === "resolved"
+          ? unbindDay2ScheduleParticipants(existingDay2, existingStandings)
+          : existingDay2;
+    }
   } else {
     nextResult.league_standings = standings;
     if (existingPlan !== undefined) {
       nextResult.tournament_plan = bindTournamentParticipants(existingPlan, standings);
     }
+    if (existingDay2 !== undefined) {
+      nextResult.day2_schedule = bindDay2ScheduleParticipants(existingDay2, standings);
+    }
   }
-  delete nextResult.day2_schedule;
-  delete nextResult.integrated_validation;
   documentState = {
     ...documentState,
     updatedAt: new Date().toISOString(),
@@ -623,7 +638,7 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
         "試合結果を保存できませんでした。端末の空き容量を確認してください。";
     },
   );
-  return hadStandings || hadResolvedTournament || hadDay2;
+  return hadStandings || hadResolvedTournament || hadResolvedDay2;
 }
 
 function saveTournamentPlan(plan: JsonObject): void {
@@ -811,17 +826,18 @@ function refreshTournamentEnabled(): void {
 function refreshDay2Enabled(): void {
   const result = asObject(documentState.tournament.result);
   const tournamentPlan = asObject(result?.tournament_plan);
-  const hasResolvedTournament =
-    tournamentPlan !== undefined && tournamentParticipantResolution(tournamentPlan) === "resolved";
+  const hasTournament = tournamentPlan !== undefined;
+  const provisional =
+    tournamentPlan !== undefined && tournamentParticipantResolution(tournamentPlan) === "provisional";
   const settings = currentDay2Settings();
   day2Review.textContent =
-    !hasResolvedTournament
-      ? "仮トーナメントの日程作成は次の対応で追加します。リーグ順位を確定してください。"
+    !hasTournament
+      ? "先に2日目トーナメントを作成してください。"
       : settings === undefined
       ? "2日目設定に入力誤りがあります。休憩は「4:60」の形式で入力してください。"
-      : `${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
+      : `${provisional ? "仮日程／" : ""}${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
   day2Button.disabled =
-    !hasResolvedTournament ||
+    !hasTournament ||
     settings === undefined ||
     !navigator.onLine ||
     day2TurnstileToken.length === 0;
@@ -1102,7 +1118,7 @@ function renderResult(): void {
           standingsStatus.textContent =
             "得点を変更したため、確定順位を取り消しました。2日目は順位枠の仮トーナメントへ戻しました。";
           day2Summary.textContent =
-            "得点が変更されました。仮トーナメントを保持し、確定チーム名だけを外しました。";
+            "得点が変更されました。仮トーナメントと仮日程を保持し、確定チーム名だけを外しました。";
         }
       };
       homeScore.addEventListener("input", save);
@@ -1433,13 +1449,26 @@ function renderDay2Schedule(
   content: HTMLElement,
   schedule: JsonObject,
   _plan: JsonObject,
-  standings: JsonObject,
+  standings: JsonObject | undefined,
   teamNames: Map<string, string>,
   courtNames: Map<string, string>,
 ): void {
+  const provisional = day2ParticipantResolution(schedule) === "provisional";
   const section = window.document.createElement("section");
   section.id = "day2-schedule-view";
-  appendTextElement(section, "h3", "2日目の日程・審判");
+  appendTextElement(
+    section,
+    "h3",
+    provisional ? "【仮】2日目の日程・審判" : "2日目の日程・審判",
+  );
+  if (provisional) {
+    appendTextElement(
+      section,
+      "p",
+      "この日程はリーグ順位枠で作成した仮日程です。順位確定後も時刻・コート・試合番号・審判供給元は変わりません。",
+      "notice",
+    );
+  }
   const validation = asObject(schedule.integrated_validation);
   if (validation?.valid === true) {
     appendTextElement(
@@ -1485,7 +1514,7 @@ function renderDay2Schedule(
     "muted",
   );
   const rankedTeams = new Map(
-    asObjectArray(standings.standings)
+    asObjectArray(standings?.standings)
       .filter(
         (row) =>
           typeof row.block_id === "string" &&
@@ -1560,15 +1589,29 @@ function renderDay2Schedule(
   appendTextElement(section, "h4", "チーム別の可能な経路");
   const routeGrid = window.document.createElement("div");
   routeGrid.className = "team-schedule-grid";
-  const routesByTeam = new Map<string, JsonObject[]>();
+  const routesByTeam = new Map<string, { label: string; routes: JsonObject[] }>();
   for (const route of asObjectArray(schedule.team_schedules)) {
-    if (typeof route.team_id !== "string") continue;
-    routesByTeam.set(route.team_id, [...(routesByTeam.get(route.team_id) ?? []), route]);
+    const rankRef = asObject(route.rank_ref);
+    const rankLabel =
+      rankRef?.type === "league_rank" &&
+      typeof rankRef.block_id === "string" &&
+      typeof rankRef.rank === "number"
+        ? `${rankRef.block_id}ブロック ${String(rankRef.rank)}位`
+        : undefined;
+    const teamId = typeof route.team_id === "string" ? route.team_id : undefined;
+    const key = teamId ?? rankLabel;
+    if (key === undefined) continue;
+    const label = teamId === undefined
+      ? rankLabel!
+      : `${teamNames.get(teamId) ?? teamId}${rankLabel === undefined ? "" : `（${rankLabel}）`}`;
+    const group = routesByTeam.get(key) ?? { label, routes: [] };
+    group.routes.push(route);
+    routesByTeam.set(key, group);
   }
-  for (const [teamId, routes] of routesByTeam) {
+  for (const { label, routes } of routesByTeam.values()) {
     const card = window.document.createElement("section");
     card.className = "team-card";
-    appendTextElement(card, "h5", teamNames.get(teamId) ?? teamId);
+    appendTextElement(card, "h5", label);
     const list = window.document.createElement("ul");
     for (const route of routes) {
       appendTextElement(
@@ -1704,11 +1747,6 @@ function requestDay2Schedule(): void {
     day2Status.textContent = "2日目日程の作成に必要な設定またはトーナメント表がありません。";
     return;
   }
-  if (tournamentParticipantResolution(tournamentPlan) !== "resolved") {
-    day2Status.textContent =
-      "仮トーナメントの日程作成は次の対応で追加します。先にリーグ順位を確定してください。";
-    return;
-  }
   if (day2TurnstileToken.length === 0) {
     day2Status.textContent = "2日目日程作成の安全確認を完了してください。";
     return;
@@ -1716,7 +1754,10 @@ function requestDay2Schedule(): void {
   saveDay2Settings();
   day2Button.disabled = true;
   day2StatusOwner = "generation";
-  day2Status.textContent = "2日目の時刻・コート・審判を配置しています…";
+  const provisional = tournamentParticipantResolution(tournamentPlan) === "provisional";
+  day2Status.textContent = provisional
+    ? "仮の2日目時刻・コート・審判を配置しています…"
+    : "2日目の時刻・コート・審判を配置しています…";
   const referees = asObject(documentState.tournament.input.referees) ?? {};
   void generateDay2Schedule(
     {
@@ -1739,7 +1780,9 @@ function requestDay2Schedule(): void {
   )
     .then((schedule) => {
       saveDay2Schedule(schedule);
-      day2Status.textContent = "2日目日程を作成し、この端末へ保存しました。";
+      day2Status.textContent = provisional
+        ? "仮の2日目日程を作成し、この端末へ保存しました。"
+        : "2日目日程を作成し、この端末へ保存しました。";
       renderResult();
     })
     .catch((error: unknown) => {
@@ -2003,28 +2046,22 @@ function renderDay2Preparation(
   day2PrintButton.disabled = tournamentPlan === undefined;
   if (tournamentPlan === undefined) return;
   renderTournamentPlan(day2Content, tournamentPlan, standings, teamNames);
-  if (tournamentParticipantResolution(tournamentPlan) === "resolved") {
-    day2Confirmation.hidden = false;
-    setupDay2Turnstile();
-    refreshDay2Enabled();
-    const day2Schedule = asObject(result.day2_schedule);
-    if (day2Schedule !== undefined && standings !== undefined) {
-      day2Summary.textContent = "2日目のトーナメントと日程を作成済みです。";
-      renderDay2Schedule(
-        day2Content,
-        day2Schedule,
-        tournamentPlan,
-        standings,
-        teamNames,
-        courtNames,
-      );
-    }
-  } else {
-    appendTextElement(
+  day2Confirmation.hidden = false;
+  setupDay2Turnstile();
+  refreshDay2Enabled();
+  const day2Schedule = asObject(result.day2_schedule);
+  if (day2Schedule !== undefined) {
+    day2Summary.textContent =
+      day2ParticipantResolution(day2Schedule) === "provisional"
+        ? "2日目の仮トーナメントと仮日程を作成済みです。"
+        : "2日目のトーナメントと日程を作成済みです。";
+    renderDay2Schedule(
       day2Content,
-      "p",
-      "2日目の日程は、現在はリーグ順位を確定してから作成できます。",
-      "notice no-print",
+      day2Schedule,
+      tournamentPlan,
+      standings,
+      teamNames,
+      courtNames,
     );
   }
 }

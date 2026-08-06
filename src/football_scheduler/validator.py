@@ -23,9 +23,9 @@
         "results": [{"match_id": "LG-A-01", ...}],
     }
 
-未確定参照を含む試合では、参照または試合に ``possible_team_ids`` を
-持たせることで、起こり得る全チームを考慮した衝突検査を行える。
-``winner_of`` / ``loser_of`` は参照元試合の候補集合からも推論する。
+2日目トーナメントは ``LeagueRankRef`` を参加者の正本として扱い、
+順位確定前後で同じ勝敗経路を再構築する。確定後のチームIDは順位枠への
+注記として独立に照合する。
 """
 
 from __future__ import annotations
@@ -35,6 +35,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 JsonObject = dict[str, Any]
+_RankKey = tuple[str, int]
+_TournamentPaths = dict[str, dict[_RankKey, frozenset[frozenset[str]]]]
 
 
 def validate_schedule(document: Any) -> JsonObject:
@@ -177,7 +179,9 @@ def validate_day2_schedule(document: Any) -> JsonObject:
     _validate_slot_uniqueness(normalized_slots, diagnostics)
 
     try:
-        paths = _independent_tournament_paths(data, matches_by_id)
+        paths, rank_teams, resolution, explicit_resolution = _independent_tournament_paths(
+            data, matches_by_id
+        )
     except ValueError as exc:
         diagnostics.append(
             _diagnostic(
@@ -187,7 +191,20 @@ def validate_day2_schedule(document: Any) -> JsonObject:
             )
         )
         paths = {}
+        rank_teams = {}
+        resolution = "resolved"
+        explicit_resolution = False
     if paths:
+        _validate_day2_participant_annotations(
+            data,
+            matches_by_id,
+            normalized_slots,
+            paths,
+            rank_teams,
+            resolution,
+            explicit_resolution,
+            diagnostics,
+        )
         _validate_path_aware_match_conflicts(normalized_slots, matches_by_id, paths, diagnostics)
         _validate_day2_dependencies(normalized_slots, matches_by_id, diagnostics)
         _validate_day2_referees(data, normalized_slots, matches_by_id, paths, diagnostics)
@@ -317,13 +334,34 @@ def _clock_minutes(value: Any) -> int | None:
 
 def _independent_tournament_paths(
     data: Mapping[str, Any], matches_by_id: Mapping[str, Mapping[str, Any]]
-) -> dict[str, dict[str, frozenset[frozenset[str]]]]:
+) -> tuple[_TournamentPaths, dict[_RankKey, str], str, bool]:
     plan = data.get("tournament_plan")
     if not isinstance(plan, Mapping):
         config = _config(data)
         plan = config.get("tournament_plan")
-    ranks: dict[tuple[str, int], str] = {}
+    known_ranks: set[_RankKey] = set()
+    rank_teams: dict[_RankKey, str] = {}
+    team_ranks: dict[str, _RankKey] = {}
     known_teams: set[str] = set()
+    explicit_resolution = "participant_resolution" in data
+    raw_resolution = data.get("participant_resolution")
+    if raw_resolution is None and isinstance(data.get("schedule"), Mapping):
+        schedule = data["schedule"]
+        explicit_resolution = "participant_resolution" in schedule
+        raw_resolution = schedule.get("participant_resolution")
+    if raw_resolution is None and isinstance(plan, Mapping):
+        explicit_resolution = "participant_resolution" in plan
+        raw_resolution = plan.get("participant_resolution")
+    resolution = str(raw_resolution or "resolved")
+    if resolution not in {"provisional", "resolved"}:
+        raise ValueError("参加者の解決状態が不正です")
+    if isinstance(plan, Mapping) and plan.get("participant_resolution") not in (None, resolution):
+        raise ValueError("トーナメント表と日程の参加者解決状態が一致しません")
+    registered_teams = {
+        str(team["id"])
+        for team in _as_mapping_list(_config(data).get("teams"))
+        if team.get("id") not in (None, "")
+    }
     if isinstance(plan, Mapping):
         for pool_name in ("upper", "lower"):
             pool = plan.get(pool_name)
@@ -335,39 +373,62 @@ def _independent_tournament_paths(
                     seed.get("block_rank"),
                     seed.get("team_id"),
                 )
-                if (
-                    block_id not in (None, "")
-                    and isinstance(rank, int)
-                    and team_id
-                    not in (
-                        None,
-                        "",
-                    )
-                ):
-                    ranks[str(block_id), rank] = str(team_id)
-                    known_teams.add(str(team_id))
-    for team in _as_mapping_list(_config(data).get("teams")):
-        if team.get("id") not in (None, ""):
-            known_teams.add(str(team["id"]))
+                if block_id in (None, "") or not isinstance(rank, int) or isinstance(rank, bool):
+                    raise ValueError("トーナメントシードの順位枠が不正です")
+                rank_key = (str(block_id), rank)
+                if rank_key in known_ranks:
+                    raise ValueError("トーナメントの順位枠が重複しています")
+                known_ranks.add(rank_key)
+                if team_id not in (None, ""):
+                    normalized_team_id = str(team_id)
+                    if registered_teams and normalized_team_id not in registered_teams:
+                        raise ValueError("トーナメントに未登録のチーム注記があります")
+                    if normalized_team_id in team_ranks:
+                        raise ValueError("トーナメントのチーム注記が重複しています")
+                    rank_teams[rank_key] = normalized_team_id
+                    team_ranks[normalized_team_id] = rank_key
+                    known_teams.add(normalized_team_id)
+    known_teams.update(registered_teams)
 
-    cache: dict[str, dict[str, frozenset[frozenset[str]]]] = {}
+    league_plan = data.get("league_plan")
+    if isinstance(league_plan, Mapping):
+        expected_ranks = {
+            (str(block["id"]), rank)
+            for block in _as_mapping_list(league_plan.get("blocks"))
+            if block.get("id") not in (None, "")
+            for rank in range(1, len(_string_set(block.get("team_ids"))) + 1)
+        }
+        if expected_ranks and known_ranks != expected_ranks:
+            raise ValueError("トーナメントの順位枠とリーグ計画が一致しません")
+
+    if explicit_resolution and resolution == "provisional" and rank_teams:
+        raise ValueError("仮トーナメントにチームIDが混在しています")
+    if explicit_resolution and resolution == "resolved" and len(rank_teams) != len(known_ranks):
+        raise ValueError("確定済みトーナメントのチーム注記が不足しています")
+
+    cache: _TournamentPaths = {}
     visiting: set[str] = set()
 
-    def entry_paths(entry: Any) -> dict[str, frozenset[frozenset[str]]]:
+    def entry_paths(entry: Any) -> dict[_RankKey, frozenset[frozenset[str]]]:
         if not isinstance(entry, Mapping):
             raise ValueError("entryがオブジェクトではありません")
         kind = str(entry.get("type", "")).lower().replace("-", "_")
         if kind in {"concrete_team", "concrete", "team"}:
             team_id = entry.get("team_id", entry.get("id"))
-            if team_id in (None, "") or str(team_id) not in known_teams:
+            rank_key = team_ranks.get(str(team_id)) if team_id not in (None, "") else None
+            if rank_key is None or str(team_id) not in known_teams:
                 raise ValueError("未登録チーム参照があります")
-            return {str(team_id): frozenset({frozenset()})}
+            return {rank_key: frozenset({frozenset()})}
         if kind == "league_rank":
             block_id, rank = entry.get("block_id"), entry.get("rank")
-            team_id = ranks.get((str(block_id), rank)) if isinstance(rank, int) else None
-            if team_id is None:
+            rank_key = (
+                (str(block_id), rank)
+                if isinstance(rank, int) and not isinstance(rank, bool)
+                else None
+            )
+            if rank_key is None or rank_key not in known_ranks:
                 raise ValueError("存在しないリーグ順位参照があります")
-            return {team_id: frozenset({frozenset()})}
+            return {rank_key: frozenset({frozenset()})}
         if kind in {"winner_of", "loser_of"}:
             source_id = entry.get("match_id", entry.get("source_match_id"))
             if source_id in (None, ""):
@@ -375,14 +436,14 @@ def _independent_tournament_paths(
             outcome = "W" if kind == "winner_of" else "L"
             source = match_paths(str(source_id))
             return {
-                team_id: frozenset(
+                rank_key: frozenset(
                     condition | {f"{outcome}:{source_id}"} for condition in conditions
                 )
-                for team_id, conditions in source.items()
+                for rank_key, conditions in source.items()
             }
         raise ValueError("未対応のentry種別です")
 
-    def match_paths(match_id: str) -> dict[str, frozenset[frozenset[str]]]:
+    def match_paths(match_id: str) -> dict[_RankKey, frozenset[frozenset[str]]]:
         if match_id in cache:
             return cache[match_id]
         if match_id in visiting:
@@ -392,16 +453,16 @@ def _independent_tournament_paths(
             raise ValueError("未定義の試合参照があります")
         visiting.add(match_id)
         home, away = entry_paths(match.get("home")), entry_paths(match.get("away"))
-        for team_id in set(home) & set(away):
+        for rank_key in set(home) & set(away):
             if any(
                 _independent_conditions_compatible(left, right)
-                for left in home[team_id]
-                for right in away[team_id]
+                for left in home[rank_key]
+                for right in away[rank_key]
             ):
-                raise ValueError("同じチームが対戦の両側へ入る経路があります")
+                raise ValueError("同じ順位枠が対戦の両側へ入る経路があります")
         merged = {
-            team_id: frozenset((*home.get(team_id, ()), *away.get(team_id, ())))
-            for team_id in set(home) | set(away)
+            rank_key: frozenset((*home.get(rank_key, ()), *away.get(rank_key, ())))
+            for rank_key in set(home) | set(away)
         }
         visiting.remove(match_id)
         cache[match_id] = merged
@@ -409,13 +470,215 @@ def _independent_tournament_paths(
 
     for match_id in matches_by_id:
         match_paths(match_id)
-    return cache
+    return cache, rank_teams, resolution, explicit_resolution
+
+
+def _validate_day2_participant_annotations(
+    data: Mapping[str, Any],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+    paths: Mapping[str, Mapping[_RankKey, frozenset[frozenset[str]]]],
+    rank_teams: Mapping[_RankKey, str],
+    resolution: str,
+    explicit_resolution: bool,
+    diagnostics: list[JsonObject],
+) -> None:
+    """順位枠を正本として、結果側の任意チーム注記を照合する。"""
+
+    for match_id, match in matches_by_id.items():
+        expected_ranks = set(paths[match_id])
+        raw_rank_refs = match.get("possible_rank_refs")
+        actual_ranks = _rank_ref_sequence(raw_rank_refs)
+        if (explicit_resolution or raw_rank_refs is not None) and (
+            actual_ranks is None
+            or len(actual_ranks) != len(set(actual_ranks))
+            or set(actual_ranks) != expected_ranks
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "TOURNAMENT_RANK_ANNOTATION_MISMATCH",
+                    "試合の順位枠注記が独立再構築した勝敗経路と一致しません。",
+                    match_id=match_id,
+                    expected_rank_refs=_rank_refs_json(expected_ranks),
+                )
+            )
+
+        raw_team_ids = match.get("possible_team_ids")
+        actual_team_ids = _sequence_strings(raw_team_ids)
+        if (explicit_resolution or raw_team_ids is not None) and actual_team_ids is None:
+            diagnostics.append(
+                _diagnostic(
+                    "TOURNAMENT_TEAM_ANNOTATION_MISMATCH",
+                    "試合のチーム注記を読み取れません。",
+                    match_id=match_id,
+                )
+            )
+        elif resolution == "provisional" and actual_team_ids:
+            diagnostics.append(
+                _diagnostic(
+                    "TOURNAMENT_TEAM_ANNOTATION_MISMATCH",
+                    "仮の2日目日程に具体的なチームを注記できません。",
+                    match_id=match_id,
+                )
+            )
+        elif (
+            resolution == "resolved"
+            and (explicit_resolution or raw_team_ids is not None)
+            and actual_team_ids is not None
+        ):
+            expected_team_ids = [rank_teams.get(rank) for rank in (actual_ranks or [])]
+            if any(team_id is None for team_id in expected_team_ids) or actual_team_ids != [
+                str(team_id) for team_id in expected_team_ids if team_id is not None
+            ]:
+                diagnostics.append(
+                    _diagnostic(
+                        "TOURNAMENT_TEAM_ANNOTATION_MISMATCH",
+                        "試合のチーム注記が順位枠の確定内容と一致しません。",
+                        match_id=match_id,
+                    )
+                )
+
+    raw_routes = data.get("team_schedules")
+    if raw_routes is None and isinstance(data.get("schedule"), Mapping):
+        raw_routes = data["schedule"].get("team_schedules")
+    # 従来の独立検証文書にはチーム別経路がないため、存在する場合だけ照合する。
+    # 新規API応答はapplication境界が必ずこの項目を渡す。
+    if raw_routes is None:
+        return
+    routes = _as_mapping_list(raw_routes)
+    actual_routes: Counter[tuple[_RankKey, str | None, str, str, int, str, tuple[str, ...]]] = (
+        Counter()
+    )
+    malformed = False
+    for route in routes:
+        rank_key = _rank_ref_key(route.get("rank_ref"))
+        team_id = None if route.get("team_id") in (None, "") else str(route["team_id"])
+        role = route.get("role")
+        route_match_id = route.get("match_id")
+        section_no = route.get("section_no")
+        court_id = route.get("court_id")
+        conditions = _sequence_strings(route.get("conditions", ()))
+        if (
+            rank_key is None
+            or (rank_key not in rank_teams and resolution == "resolved")
+            or role not in {"match", "referee"}
+            or route_match_id in (None, "")
+            or not isinstance(section_no, int)
+            or isinstance(section_no, bool)
+            or court_id in (None, "")
+            or conditions is None
+            or (resolution == "provisional" and team_id is not None)
+            or (resolution == "resolved" and team_id != rank_teams.get(rank_key))
+        ):
+            malformed = True
+            continue
+        actual_routes[
+            (
+                rank_key,
+                team_id,
+                str(role),
+                str(route_match_id),
+                section_no,
+                str(court_id),
+                tuple(sorted(conditions)),
+            )
+        ] += 1
+
+    expected_routes = _expected_day2_routes(slots, paths, rank_teams, resolution)
+    if malformed or actual_routes != expected_routes:
+        diagnostics.append(
+            _diagnostic(
+                "TOURNAMENT_ROUTE_ANNOTATION_MISMATCH",
+                "チーム別経路が順位枠から独立再構築した予定と一致しません。",
+                expected_route_count=sum(expected_routes.values()),
+                actual_route_count=len(routes),
+            )
+        )
+
+
+def _expected_day2_routes(
+    slots: Sequence[Mapping[str, Any]],
+    paths: Mapping[str, Mapping[_RankKey, frozenset[frozenset[str]]]],
+    rank_teams: Mapping[_RankKey, str],
+    resolution: str,
+) -> Counter[tuple[_RankKey, str | None, str, str, int, str, tuple[str, ...]]]:
+    expected: Counter[tuple[_RankKey, str | None, str, str, int, str, tuple[str, ...]]] = Counter()
+    for slot in slots:
+        match_id = slot.get("match_id")
+        if match_id not in paths:
+            continue
+        normalized_match_id = str(match_id)
+        section_no = int(slot["section_no"])
+        court_id = str(slot["court_id"])
+        for rank_key, conditions in paths[normalized_match_id].items():
+            for condition in conditions:
+                expected[
+                    (
+                        rank_key,
+                        rank_teams.get(rank_key) if resolution == "resolved" else None,
+                        "match",
+                        normalized_match_id,
+                        section_no,
+                        court_id,
+                        tuple(sorted(condition)),
+                    )
+                ] += 1
+        kind, source_id, _reason, _reasons = _referee_with_source(slot)
+        if kind != "team" or source_id is None or source_id not in paths:
+            continue
+        for rank_key, conditions in _independent_add_outcome(
+            paths[source_id], source_id, "W"
+        ).items():
+            for condition in conditions:
+                expected[
+                    (
+                        rank_key,
+                        rank_teams.get(rank_key) if resolution == "resolved" else None,
+                        "referee",
+                        normalized_match_id,
+                        section_no,
+                        court_id,
+                        tuple(sorted(condition)),
+                    )
+                ] += 1
+    return expected
+
+
+def _rank_ref_key(value: Any) -> _RankKey | None:
+    if not isinstance(value, Mapping):
+        return None
+    block_id, rank = value.get("block_id"), value.get("rank")
+    if block_id in (None, "") or not isinstance(rank, int) or isinstance(rank, bool) or rank < 1:
+        return None
+    return str(block_id), rank
+
+
+def _rank_ref_sequence(value: Any) -> list[_RankKey] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    result = [_rank_ref_key(item) for item in value]
+    return None if any(item is None for item in result) else [item for item in result if item]
+
+
+def _rank_refs_json(values: Iterable[_RankKey]) -> list[JsonObject]:
+    return [
+        {"type": "league_rank", "block_id": block_id, "rank": rank}
+        for block_id, rank in sorted(values)
+    ]
+
+
+def _sequence_strings(value: Any) -> list[str] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    if any(item in (None, "") for item in value):
+        return None
+    return [str(item) for item in value]
 
 
 def _validate_path_aware_match_conflicts(
     slots: Sequence[Mapping[str, Any]],
     matches_by_id: Mapping[str, Mapping[str, Any]],
-    paths: Mapping[str, Mapping[str, frozenset[frozenset[str]]]],
+    paths: Mapping[str, Mapping[_RankKey, frozenset[frozenset[str]]]],
     diagnostics: list[JsonObject],
 ) -> None:
     by_section: defaultdict[tuple[str, int], list[Mapping[str, Any]]] = defaultdict(list)
@@ -433,7 +696,7 @@ def _validate_path_aware_match_conflicts(
                             "TEAM_SAME_SECTION_CONFLICT",
                             f"{day_id}の第{section}セクションで、同じチームが複数試合へ進む勝敗経路があります。",
                             match_ids=[left_id, right_id],
-                            possible_team_ids=sorted(conflict),
+                            possible_rank_refs=_rank_refs_json(conflict),
                         )
                     )
     for (day_id, section), earlier_slots in sorted(by_section.items()):
@@ -448,7 +711,7 @@ def _validate_path_aware_match_conflicts(
                             f"{day_id}の連続セクションで同じチームが試合をする勝敗経路があります。",
                             section_nos=[section, section + 1],
                             match_ids=[earlier_id, later_id],
-                            possible_team_ids=sorted(conflict),
+                            possible_rank_refs=_rank_refs_json(conflict),
                         )
                     )
 
@@ -503,7 +766,7 @@ def _validate_day2_referees(
     data: Mapping[str, Any],
     slots: Sequence[Mapping[str, Any]],
     matches_by_id: Mapping[str, Mapping[str, Any]],
-    paths: Mapping[str, Mapping[str, frozenset[frozenset[str]]]],
+    paths: Mapping[str, Mapping[_RankKey, frozenset[frozenset[str]]]],
     diagnostics: list[JsonObject],
 ) -> None:
     occupied = [slot for slot in slots if slot.get("match_id") in matches_by_id]
@@ -532,9 +795,9 @@ def _validate_day2_referees(
             )
 
     source_use: Counter[tuple[int, str]] = Counter()
-    referee_paths_by_section: defaultdict[int, list[Mapping[str, frozenset[frozenset[str]]]]] = (
-        defaultdict(list)
-    )
+    referee_paths_by_section: defaultdict[
+        int, list[Mapping[_RankKey, frozenset[frozenset[str]]]]
+    ] = defaultdict(list)
     for slot in sorted(occupied, key=lambda item: (int(item["section_no"]), str(item["court_id"]))):
         match_id = str(slot["match_id"])
         match = matches_by_id[match_id]
@@ -671,16 +934,20 @@ def _day2_summary(
             for dependency in dependencies
         )
 
-    routes: defaultdict[str, list[tuple[str, int, str, str, frozenset[str]]]] = defaultdict(list)
+    routes: defaultdict[_RankKey, list[tuple[str, int, str, str, frozenset[str]]]] = defaultdict(
+        list
+    )
     try:
-        paths = _independent_tournament_paths(data, matches_by_id)
+        paths, _rank_teams, _resolution, _explicit = _independent_tournament_paths(
+            data, matches_by_id
+        )
     except ValueError:
         paths = {}
     for slot in occupied:
         match_id = str(slot["match_id"])
-        for team_id, conditions in paths.get(match_id, {}).items():
+        for rank_key, conditions in paths.get(match_id, {}).items():
             for condition in conditions:
-                routes[team_id].append(
+                routes[rank_key].append(
                     (
                         "match",
                         int(slot["section_no"]),
@@ -692,11 +959,11 @@ def _day2_summary(
         kind, source_id, _reason, _reasons = _referee_with_source(slot)
         if kind != "team" or source_id is None or source_id not in paths:
             continue
-        for team_id, conditions in _independent_add_outcome(
+        for rank_key, conditions in _independent_add_outcome(
             paths[source_id], source_id, "W"
         ).items():
             for condition in conditions:
-                routes[team_id].append(
+                routes[rank_key].append(
                     (
                         "referee",
                         int(slot["section_no"]),
@@ -705,9 +972,9 @@ def _day2_summary(
                         condition,
                     )
                 )
-    referee_then_match: set[tuple[str, str, str]] = set()
-    adjacent_moves: set[tuple[str, str, str]] = set()
-    for team_id, entries in routes.items():
+    referee_then_match: set[tuple[_RankKey, str, str]] = set()
+    adjacent_moves: set[tuple[_RankKey, str, str]] = set()
+    for rank_key, entries in routes.items():
         for left in entries:
             for right in entries:
                 if right[1] != left[1] + 1:
@@ -715,9 +982,9 @@ def _day2_summary(
                 if not _independent_conditions_compatible(left[4], right[4]):
                     continue
                 if left[0] == "referee" and right[0] == "match":
-                    referee_then_match.add((team_id, left[3], right[3]))
+                    referee_then_match.add((rank_key, left[3], right[3]))
                 if left[2] != right[2]:
-                    adjacent_moves.add((team_id, left[3], right[3]))
+                    adjacent_moves.add((rank_key, left[3], right[3]))
     return {
         **_day1_fixed_objective_summary(data),
         "used_sections": used_sections,
@@ -839,9 +1106,9 @@ def _validate_day2_metrics(
 
 
 def _independent_paths_overlap(
-    left: Mapping[str, Iterable[frozenset[str]]],
-    right: Mapping[str, Iterable[frozenset[str]]],
-) -> set[str]:
+    left: Mapping[_RankKey, Iterable[frozenset[str]]],
+    right: Mapping[_RankKey, Iterable[frozenset[str]]],
+) -> set[_RankKey]:
     return {
         team_id
         for team_id in set(left) & set(right)
@@ -867,8 +1134,8 @@ def _independent_conditions_compatible(left: frozenset[str], right: frozenset[st
 
 
 def _independent_add_outcome(
-    paths: Mapping[str, frozenset[frozenset[str]]], match_id: str, outcome: str
-) -> dict[str, frozenset[frozenset[str]]]:
+    paths: Mapping[_RankKey, frozenset[frozenset[str]]], match_id: str, outcome: str
+) -> dict[_RankKey, frozenset[frozenset[str]]]:
     return {
         team_id: frozenset(condition | {f"{outcome}:{match_id}"} for condition in conditions)
         for team_id, conditions in paths.items()

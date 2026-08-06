@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 
-from football_scheduler.validator import validate_schedule
+from football_scheduler.validator import validate_day2_schedule, validate_schedule
 
 
 def team(team_id: str) -> dict[str, str]:
@@ -235,3 +235,132 @@ def test_detects_result_match_id_inconsistency(
     document["results"] = results
 
     assert expected_code in codes(document)
+
+
+def _provisional_day2_document() -> dict[str, object]:
+    rank_1 = {"type": "league_rank", "block_id": "A", "rank": 1}
+    rank_2 = {"type": "league_rank", "block_id": "A", "rank": 2}
+    match = {
+        "id": "UT-FINAL",
+        "phase": "upper_tournament",
+        "round": "final",
+        "round_no": 1,
+        "home": rank_1,
+        "away": rank_2,
+        "rank_range": [1, 2],
+        "possible_rank_refs": [rank_1, rank_2],
+        "possible_team_ids": [],
+        "prerequisite_match_ids": [],
+        "preliminary": False,
+        "final": True,
+    }
+    slot = {
+        "day_id": "day2",
+        "section_no": 1,
+        "court_id": "court-a",
+        "match_id": "UT-FINAL",
+        "referee_assignment": {"kind": "organizer", "organizer_reason": "first_section"},
+    }
+    routes = [
+        {
+            "rank_ref": rank_ref,
+            "team_id": None,
+            "role": "match",
+            "match_id": "UT-FINAL",
+            "section_no": 1,
+            "court_id": "court-a",
+            "conditions": [],
+        }
+        for rank_ref in (rank_1, rank_2)
+    ]
+    return {
+        "participant_resolution": "provisional",
+        "config": {
+            "teams": [{"id": "T1"}, {"id": "T2"}],
+            "courts": [{"id": "court-a"}],
+            "days": {
+                "day2": {
+                    "start_time": "09:30",
+                    "game_duration_minutes": 35,
+                    "margin_minutes": 10,
+                }
+            },
+            "referees": {"organizer_capacity": 1, "tournament_fallback": "organizer"},
+        },
+        "league_plan": {"blocks": [{"id": "A", "team_ids": ["T1", "T2"]}]},
+        "tournament_plan": {
+            "participant_resolution": "provisional",
+            "upper": {
+                "seeds": [
+                    {"block_id": "A", "block_rank": 1, "team_id": None},
+                    {"block_id": "A", "block_rank": 2, "team_id": None},
+                ]
+            },
+            "lower": {"seeds": []},
+        },
+        "matches": [match],
+        "team_schedules": routes,
+        "schedule": {
+            "participant_resolution": "provisional",
+            "slots": [slot],
+            "section_timings": [
+                {
+                    "day_id": "day2",
+                    "section_no": 1,
+                    "start_time": "09:30",
+                    "match_end_time": "10:05",
+                    "break_after_minutes": 0,
+                }
+            ],
+            "expected_end_time": "10:05",
+        },
+    }
+
+
+def test_provisional_day2_rank_paths_pass_independent_validation() -> None:
+    report = validate_day2_schedule(_provisional_day2_document())
+
+    assert report["valid"] is True, report
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("rank_annotation", "TOURNAMENT_RANK_ANNOTATION_MISMATCH"),
+        ("team_annotation", "TOURNAMENT_ROUTE_ANNOTATION_MISMATCH"),
+    ],
+)
+def test_provisional_day2_rejects_tampered_participant_annotations(
+    mutation: str, expected_code: str
+) -> None:
+    document = _provisional_day2_document()
+    if mutation == "rank_annotation":
+        document["matches"][0]["possible_rank_refs"].pop()  # type: ignore[index, union-attr]
+    else:
+        document["team_schedules"][0]["team_id"] = "T1"  # type: ignore[index]
+
+    report = validate_day2_schedule(document)
+
+    assert report["valid"] is False
+    assert expected_code in {issue["code"] for issue in report["diagnostics"]}
+
+
+def test_resolved_day2_rejects_rank_to_team_annotation_swap() -> None:
+    document = _provisional_day2_document()
+    document["participant_resolution"] = "resolved"
+    document["schedule"]["participant_resolution"] = "resolved"  # type: ignore[index]
+    document["tournament_plan"]["participant_resolution"] = "resolved"  # type: ignore[index]
+    seeds = document["tournament_plan"]["upper"]["seeds"]  # type: ignore[index]
+    seeds[0]["team_id"] = "T1"  # type: ignore[index]
+    seeds[1]["team_id"] = "T2"  # type: ignore[index]
+    document["matches"][0]["possible_team_ids"] = ["T2", "T1"]  # type: ignore[index]
+    routes = document["team_schedules"]  # type: ignore[assignment]
+    routes[0]["team_id"] = "T1"  # type: ignore[index]
+    routes[1]["team_id"] = "T2"  # type: ignore[index]
+
+    report = validate_day2_schedule(document)
+
+    assert report["valid"] is False
+    assert "TOURNAMENT_TEAM_ANNOTATION_MISMATCH" in {
+        issue["code"] for issue in report["diagnostics"]
+    }

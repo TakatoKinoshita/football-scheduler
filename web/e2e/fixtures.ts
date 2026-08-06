@@ -166,6 +166,7 @@ export const provisionalTournamentPlanResult = {
 export const day2ScheduleResult = {
   schema_version: "0.1.0",
   schedule_scope: "day2_tournament",
+  participant_resolution: "resolved",
   status: "OPTIMAL",
   tournament_matches: [],
   slots: [],
@@ -189,6 +190,11 @@ export const day2ScheduleResult = {
   diagnostics: [],
   validation: { valid: true, issues: [], summary: {} },
   integrated_validation: { valid: true, issues: [], summary: {} },
+};
+
+export const provisionalDay2ScheduleResult = {
+  ...day2ScheduleResult,
+  participant_resolution: "provisional",
 };
 
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {

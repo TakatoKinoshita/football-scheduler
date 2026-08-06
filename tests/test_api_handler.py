@@ -101,7 +101,11 @@ def test_day2_schedule_success_returns_http_200(
     monkeypatch.setattr(
         api_handler.application,
         "handle_request",
-        lambda _: {"status": "OPTIMAL", "schedule_scope": "day2_tournament"},
+        lambda _: {
+            "status": "OPTIMAL",
+            "schedule_scope": "day2_tournament",
+            "participant_resolution": "provisional",
+        },
     )
 
     response = api_handler.lambda_handler(
@@ -113,6 +117,7 @@ def test_day2_schedule_success_returns_http_200(
     )
 
     assert response["statusCode"] == 200
+    assert json.loads(response["body"])["participant_resolution"] == "provisional"
 
 
 def test_day1_schedule_response_includes_referee_audit_metrics() -> None:

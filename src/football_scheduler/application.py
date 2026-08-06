@@ -477,6 +477,12 @@ def _build_day2_validation_document(
     matches = deepcopy(list(result.get("tournament_matches", [])))
     return {
         "schema_version": request.get("schema_version", SCHEMA_VERSION),
+        "participant_resolution": result.get(
+            "participant_resolution",
+            request.get("tournament_plan", {}).get("participant_resolution", "resolved")
+            if isinstance(request.get("tournament_plan"), Mapping)
+            else "resolved",
+        ),
         "config": {
             "teams": deepcopy(list(request.get("teams", []))),
             "courts": deepcopy(list(request.get("courts", []))),
@@ -488,10 +494,13 @@ def _build_day2_validation_document(
         "day1_schedule": deepcopy(dict(request.get("day1_schedule", {}))),
         "tournament_plan": deepcopy(dict(request.get("tournament_plan", {}))),
         "matches": matches,
+        "team_schedules": deepcopy(list(result.get("team_schedules", []))),
         "schedule": {
             "slots": slots,
             "section_timings": deepcopy(list(result.get("section_timings", []))),
             "expected_end_time": result.get("expected_end_time"),
+            "participant_resolution": result.get("participant_resolution", "resolved"),
+            "team_schedules": deepcopy(list(result.get("team_schedules", []))),
             "metrics": deepcopy(dict(result.get("metrics", {}))),
         },
         "metrics": deepcopy(dict(result.get("metrics", {}))),

@@ -191,6 +191,7 @@ function validateDay2ScheduleResult(
   input: JsonObject,
   teams: JsonObject[],
   tournamentPlan: JsonObject,
+  standings: JsonObject[] | undefined,
 ): void {
   if (result.day2_schedule === undefined) {
     if (result.integrated_validation !== undefined) {
@@ -209,18 +210,41 @@ function validateDay2ScheduleResult(
     );
   }
   const schedule = objectValue(result.day2_schedule, "2日目日程を読み取れませんでした。");
+  const legacySchedule = schedule.participant_resolution === undefined;
+  const scheduleResolution = legacySchedule ? "resolved" : schedule.participant_resolution;
+  const planResolution = tournamentPlan.participant_resolution === undefined
+    ? "resolved"
+    : tournamentPlan.participant_resolution;
   if (
     schedule.schema_version !== SCHEMA_VERSION ||
     schedule.schedule_scope !== "day2_tournament" ||
-    !new Set(["OPTIMAL", "FEASIBLE"]).has(String(schedule.status))
+    !new Set(["OPTIMAL", "FEASIBLE"]).has(String(schedule.status)) ||
+    (scheduleResolution !== "provisional" && scheduleResolution !== "resolved") ||
+    scheduleResolution !== planResolution ||
+    (scheduleResolution === "resolved") !== (standings !== undefined)
   ) {
-    throw new ImportValidationError("INVALID_DOCUMENT", "2日目日程の状態が不正です。");
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "2日目日程の仮・確定状態がトーナメント表やリーグ順位と一致しません。",
+    );
   }
   const planMatches = [
     ...arrayValue(objectValue(tournamentPlan.upper, "上位トーナメントが不正です。").matches, "上位試合", LIMITS.matches),
     ...arrayValue(objectValue(tournamentPlan.lower, "下位トーナメントが不正です。").matches, "下位試合", LIMITS.matches),
   ];
   const expectedMatchIds = new Set(planMatches.map((match) => String(match.id)));
+  const validRankKeys = new Set(
+    [
+      ...arrayValue(objectValue(tournamentPlan.upper, "上位トーナメントが不正です。").seeds, "上位シード", LIMITS.teams),
+      ...arrayValue(objectValue(tournamentPlan.lower, "下位トーナメントが不正です。").seeds, "下位シード", LIMITS.teams),
+    ].map((seed) => `${String(seed.block_id)}:${String(seed.block_rank)}`),
+  );
+  const teamByRank = new Map(
+    (standings ?? []).map((row) => [
+      `${String(row.block_id)}:${String(row.rank)}`,
+      String(row.team_id),
+    ]),
+  );
   const scheduledMatches = arrayValue(
     schedule.tournament_matches,
     "2日目トーナメント試合",
@@ -235,6 +259,41 @@ function validateDay2ScheduleResult(
       "INVALID_REFERENCE",
       "2日目日程の試合とトーナメント表が一致しません。",
     );
+  }
+  const rankKeysByMatch = new Map<string, string[]>();
+  for (const match of scheduledMatches) {
+    const rankRefs = match.possible_rank_refs === undefined
+      ? []
+      : arrayValue(match.possible_rank_refs, `試合「${String(match.id)}」の順位枠`, LIMITS.teams);
+    const rankKeys = rankRefs.map((ref) => {
+      if (
+        ref.type !== "league_rank" ||
+        typeof ref.block_id !== "string" ||
+        !Number.isInteger(ref.rank)
+      ) {
+        throw new ImportValidationError("INVALID_REFERENCE", "2日目日程の順位枠が不正です。");
+      }
+      return `${ref.block_id}:${String(ref.rank)}`;
+    });
+    const possibleTeamIds = stringArray(match.possible_team_ids ?? [], "2日目試合の参加候補");
+    if (
+      (!legacySchedule && rankKeys.length === 0) ||
+      new Set(rankKeys).size !== rankKeys.length ||
+      rankKeys.some((rank) => !validRankKeys.has(rank)) ||
+      new Set(possibleTeamIds).size !== possibleTeamIds.length ||
+      (scheduleResolution === "provisional" && possibleTeamIds.length > 0) ||
+      (scheduleResolution === "resolved" &&
+        ((!legacySchedule && possibleTeamIds.length !== rankKeys.length) ||
+          possibleTeamIds.some((teamId) => !teams.some((team) => team.id === teamId)) ||
+          (!legacySchedule &&
+            possibleTeamIds.some((teamId, index) => teamByRank.get(rankKeys[index]!) !== teamId))))
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        `試合「${String(match.id)}」の順位枠またはチーム注記が不正です。`,
+      );
+    }
+    rankKeysByMatch.set(String(match.id), rankKeys);
   }
   const courtIds = new Set(
     arrayValue(input.courts, "コート", LIMITS.courts).map((court) => String(court.id)),
@@ -372,14 +431,32 @@ function validateDay2ScheduleResult(
     throw new ImportValidationError("INVALID_REFERENCE", "2日目日程が設定した上限を超えています。");
   }
   const teamIds = new Set(teams.map((team) => String(team.id)));
-  for (const route of arrayValue(
+  const teamRoutes = arrayValue(
     schedule.team_schedules,
     "2日目チーム経路",
     LIMITS.matches * LIMITS.teams,
-  )) {
+  );
+  const coveredMatchRanks = new Set<string>();
+  for (const route of teamRoutes) {
+    const rankRef = route.rank_ref === undefined || route.rank_ref === null
+      ? undefined
+      : objectValue(route.rank_ref, "2日目のチーム経路にある順位枠が不正です。");
+    const rankKey = rankRef === undefined
+      ? undefined
+      : `${String(rankRef.block_id)}:${String(rankRef.rank)}`;
+    const teamId = typeof route.team_id === "string" ? route.team_id : undefined;
     if (
-      typeof route.team_id !== "string" ||
-      !teamIds.has(route.team_id) ||
+      (!legacySchedule &&
+        (rankRef?.type !== "league_rank" ||
+          typeof rankRef.block_id !== "string" ||
+          !Number.isInteger(rankRef.rank) ||
+          rankKey === undefined ||
+          !validRankKeys.has(rankKey))) ||
+      (scheduleResolution === "provisional" && teamId !== undefined) ||
+      (scheduleResolution === "resolved" &&
+        (teamId === undefined ||
+          !teamIds.has(teamId) ||
+          (!legacySchedule && teamByRank.get(rankKey!) !== teamId))) ||
       typeof route.match_id !== "string" ||
       !expectedMatchIds.has(route.match_id) ||
       !courtIds.has(String(route.court_id)) ||
@@ -388,6 +465,25 @@ function validateDay2ScheduleResult(
       route.conditions.some((condition) => typeof condition !== "string")
     ) {
       throw new ImportValidationError("INVALID_REFERENCE", "2日目のチーム経路が不正です。");
+    }
+    if (route.role === "match" && rankKey !== undefined) {
+      coveredMatchRanks.add(`${route.match_id}|${rankKey}`);
+    }
+  }
+  if (!legacySchedule) {
+    const expectedMatchRanks = new Set(
+      [...rankKeysByMatch].flatMap(([matchId, rankKeys]) =>
+        rankKeys.map((rankKey) => `${matchId}|${rankKey}`)
+      ),
+    );
+    if (
+      coveredMatchRanks.size !== expectedMatchRanks.size ||
+      [...coveredMatchRanks].some((entry) => !expectedMatchRanks.has(entry))
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "2日目のチーム別経路に必要な順位枠注記が不足または矛盾しています。",
+      );
     }
   }
   const metrics = objectValue(schedule.metrics, "2日目の監査値を読み取れませんでした。");
@@ -560,22 +656,26 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
 
   if (result.league_standings === undefined) {
-    if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
-      throw new ImportValidationError(
-        "INVALID_REFERENCE",
-        "確定順位がないため、2日目日程を復元できませんでした。",
-      );
-    }
     if (result.tournament_plan !== undefined) {
       const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
       const oddSplitPolicy = validateOddSplitPolicy(leagueSettings.odd_split_policy);
       const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
+      const tournamentPlan = objectValue(
+        result.tournament_plan,
+        "2日目トーナメントを読み取れませんでした。",
+      );
       validateTournamentPlan(
-        objectValue(result.tournament_plan, "2日目トーナメントを読み取れませんでした。"),
+        tournamentPlan,
         undefined,
         teamIds,
         oddSplitPolicy,
         rankSets,
+      );
+      validateDay2ScheduleResult(result, input, teams, tournamentPlan, undefined);
+    } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "トーナメント表がないため、2日目日程を復元できませんでした。",
       );
     }
     return;
@@ -650,7 +750,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       oddSplitPolicy,
       rankSets,
     );
-    validateDay2ScheduleResult(result, input, teams, tournamentPlan);
+    validateDay2ScheduleResult(result, input, teams, tournamentPlan, rows);
   } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
     throw new ImportValidationError(
       "INVALID_REFERENCE",

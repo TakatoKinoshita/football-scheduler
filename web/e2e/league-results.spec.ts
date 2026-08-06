@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   day2ScheduleResult,
+  provisionalDay2ScheduleResult,
   provisionalTournamentPlanResult,
   scheduleResult,
   standingsResult,
@@ -48,7 +49,7 @@ test("順位未確定でも順位枠の仮トーナメントを作成・印刷�
   expect(requests[0]).not.toHaveProperty("league_standings");
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
-  await expect(page.locator("#day2-confirmation")).toBeHidden();
+  await expect(page.locator("#day2-confirmation")).toBeVisible();
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#tournament-plan-view")).toBeVisible();
@@ -93,7 +94,7 @@ test("最終試合の入力直後に順位を確定し、変更時は確定順�
   await expect(page.getByLabel("青空FC 対 みどりSC・みどりSCの得点")).toHaveValue("1");
 });
 
-test("順位確定時に仮トーナメントの構造を保ったままチーム名を反映する", async ({ page }) => {
+test("順位確定時に仮トーナメントと仮日程の構造を保ったままチーム名を反映する", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
   const base = tournamentFixture({ withResult: true });
@@ -101,9 +102,23 @@ test("順位確定時に仮トーナメントの構造を保ったままチー�
     ...base,
     tournament: {
       ...base.tournament,
+      input: {
+        ...base.tournament.input,
+        day2: {
+          id: "day2",
+          start_time: "09:30",
+          game_duration_minutes: 35,
+          margin_minutes: 10,
+          max_sections: null,
+          end_time: null,
+          breaks: [],
+        },
+      },
       result: {
         ...scheduleResult,
         tournament_plan: provisionalTournamentPlanResult,
+        day2_schedule: provisionalDay2ScheduleResult,
+        integrated_validation: provisionalDay2ScheduleResult.integrated_validation,
       },
     },
   });
@@ -119,6 +134,7 @@ test("順位確定時に仮トーナメントの構造を保ったままチー�
   await page.locator('.step[data-step="5"]').click();
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
   await expect(page.locator("#tournament-plan-view")).not.toContainText("青空FC");
+  await expect(page.locator("#day2-schedule-view")).toContainText("【仮】");
   await page.locator('.step[data-step="4"]').click();
   await enterOnlyResult(page);
   await page.getByRole("button", { name: "順位を確定する" }).click();
@@ -126,7 +142,15 @@ test("順位確定時に仮トーナメントの構造を保ったままチー�
 
   await expect(page.locator("#tournament-plan-view")).not.toContainText("【仮】");
   await expect(page.locator("#tournament-plan-view")).toContainText("青空FC（Aブロック 1位）");
+  await expect(page.locator("#day2-schedule-view")).not.toContainText("【仮】");
   await expect(page.locator("#day2-confirmation")).toBeVisible();
+
+  await page.locator('.step[data-step="4"]').click();
+  await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
+  await page.locator('.step[data-step="5"]').click();
+  await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
+  await expect(page.locator("#day2-schedule-view")).toContainText("【仮】2日目の日程・審判");
+  await expect(page.locator("#day2-result-summary")).toContainText("仮トーナメントと仮日程を保持");
 });
 
 test("順位API失敗時も得点を保持して結果画面内に説明する", async ({ page }) => {
@@ -207,7 +231,52 @@ test("確定順位から2日目トーナメントを作成し、得点変更時�
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
   await expect(page.locator("#tournament-confirmation")).toBeVisible();
-  await expect(page.locator("#day2-confirmation")).toBeHidden();
+  await expect(page.locator("#day2-confirmation")).toBeVisible();
+});
+
+test("仮トーナメントから仮の2日目日程を作成・印刷・オフライン復元する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const base = tournamentFixture({ withResult: true });
+  await importDocument(page, {
+    ...base,
+    tournament: {
+      ...base.tournament,
+      result: {
+        ...scheduleResult,
+        tournament_plan: provisionalTournamentPlanResult,
+      },
+    },
+  });
+  await page.unroute(GENERATE_API);
+  const requests: unknown[] = [];
+  await page.route(GENERATE_API, async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(provisionalDay2ScheduleResult),
+    });
+  });
+
+  await expect(page.getByRole("button", { name: "2日目の日程を作成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "2日目の日程を作成する" }).click();
+
+  expect(requests[0]).toMatchObject({
+    request_kind: "day2_schedule",
+    tournament_plan: { participant_resolution: "provisional" },
+  });
+  await expect(page.locator("#day2-schedule-view")).toContainText("【仮】2日目の日程・審判");
+  await expect(page.locator("#day2-schedule-view")).toContainText("時刻・コート・試合番号");
+  await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
+  await page.emulateMedia({ media: "screen" });
+  await page.context().setOffline(true);
+  await page.reload();
+  await expect(page.locator("#day2-schedule-view")).toContainText("【仮】");
 });
 
 test("1日目と2日目をモバイルで分け、日別に印刷表示できる", async ({ page }) => {

@@ -586,6 +586,56 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
     assert "1日目日程" in invalid_day1["diagnostics"][0]["message"]
 
 
+def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
+    tournament = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": day1["league_plan"],
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+    assert tournament["participant_resolution"] == "provisional"
+
+    result = application.handle_request(
+        {
+            "request_kind": "day2_schedule",
+            "teams": day1_request["teams"],
+            "courts": day1_request["courts"],
+            "league_plan": day1["league_plan"],
+            "day1_schedule": {"day": day1_request["day"], "slots": day1["slots"]},
+            "tournament_plan": tournament,
+            "day": {
+                "id": "day2",
+                "start_time": "09:30",
+                "game_duration_minutes": 35,
+                "margin_minutes": 10,
+            },
+            "referees": {
+                "organizer_capacity": 2,
+                "tournament_fallback": "organizer",
+            },
+            "random_seed": 20260803,
+            "solver": {"max_time_seconds": 5},
+        }
+    )
+
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    assert result["participant_resolution"] == "provisional"
+    assert result["validation"]["valid"] is True, result["validation"]
+    assert result["integrated_validation"]["valid"] is True
+    assert all(match["possible_rank_refs"] for match in result["tournament_matches"])
+    assert all(not match["possible_team_ids"] for match in result["tournament_matches"])
+    assert result["team_schedules"]
+    assert all(
+        route["rank_ref"] is not None and route["team_id"] is None
+        for route in result["team_schedules"]
+    )
+
+
 def test_day2_schedule_rejects_section_limit_before_solver() -> None:
     result = application.handle_request(
         {

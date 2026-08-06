@@ -5,8 +5,10 @@ import json
 from time import monotonic
 
 import pytest
+from pydantic import ValidationError
 
 from football_scheduler.day2_schedule import (
+    Day2Schedule,
     Day2ScheduleRequest,
     generate_day2_schedule,
 )
@@ -25,9 +27,12 @@ from football_scheduler.validator import validate_day2_schedule
 
 def _source(
     block_sizes: tuple[int, ...],
+    *,
+    team_prefix: str = "T",
 ) -> tuple[list[dict[str, object]], LeaguePlan, LeagueStandings]:
     teams = [
-        {"id": f"T{index}", "name": f"チーム{index}"} for index in range(1, sum(block_sizes) + 1)
+        {"id": f"{team_prefix}{index}", "name": f"チーム{index}"}
+        for index in range(1, sum(block_sizes) + 1)
     ]
     blocks: list[dict[str, object]] = []
     offset = 0
@@ -78,13 +83,15 @@ def _request(
     courts: int = 2,
     fallback: str = "organizer",
     max_sections: int | None = 40,
+    resolved: bool = True,
+    team_prefix: str = "T",
 ) -> tuple[Day2ScheduleRequest, TournamentPlan]:
-    teams, league_plan, standings = _source(block_sizes)
+    teams, league_plan, standings = _source(block_sizes, team_prefix=team_prefix)
     tournament = generate_tournament_plan(
         {
             "request_kind": "tournament_plan",
             "league_plan": league_plan.model_dump(mode="json"),
-            "league_standings": standings.model_dump(mode="json"),
+            **({"league_standings": standings.model_dump(mode="json")} if resolved else {}),
             "odd_split_policy": "upper",
             "random_seed": 17,
         }
@@ -137,8 +144,10 @@ def _validation_document(request: Day2ScheduleRequest, result: object) -> dict[s
         "league_plan": request.league_plan.model_dump(mode="json"),
         "day1_schedule": request.day1_schedule.model_dump(mode="json"),
         "tournament_plan": request.tournament_plan.model_dump(mode="json"),
+        "participant_resolution": dumped["participant_resolution"],
         "matches": dumped["tournament_matches"],
         "schedule": {
+            "participant_resolution": dumped["participant_resolution"],
             "slots": dumped["slots"],
             "section_timings": dumped["section_timings"],
             "expected_end_time": dumped["expected_end_time"],
@@ -149,11 +158,12 @@ def _validation_document(request: Day2ScheduleRequest, result: object) -> dict[s
 
 
 def test_two_team_event_has_no_real_day2_matches() -> None:
-    request, _tournament = _request((2,))
+    request, _tournament = _request((2,), resolved=False)
 
     result = generate_day2_schedule(request)
 
     assert result.status is SolverStatus.OPTIMAL
+    assert result.participant_resolution == "provisional"
     assert result.slots == ()
     assert result.metrics.used_sections == 0
 
@@ -219,7 +229,7 @@ def test_day2_schedule_assigns_every_tournament_match_once_and_validates() -> No
 
 
 def test_first_section_and_both_finals_use_organizer_referees() -> None:
-    request, _tournament = _request((8,), courts=2)
+    request, _tournament = _request((8,), courts=2, resolved=False)
 
     result = generate_day2_schedule(request)
 
@@ -251,19 +261,25 @@ def test_breaks_are_reflected_in_section_times() -> None:
     assert result.section_timings[2].start_time.isoformat(timespec="minutes") == "11:30"
 
 
-@pytest.mark.parametrize("participant_count", [3, 5, 6, 7, 8, 9, 10])
+@pytest.mark.parametrize("participant_count", [2, 3, 5, 6, 7, 8, 9, 10])
 def test_arbitrary_participant_counts_schedule_without_bye_slots(participant_count: int) -> None:
-    request, tournament = _request((participant_count * 2,), courts=3)
+    request, tournament = _request((participant_count * 2,), courts=3, resolved=False)
 
     result = generate_day2_schedule(request)
 
     expected = len(tournament.upper.matches) + len(tournament.lower.matches)
     assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.participant_resolution == "provisional"
     assert len([slot for slot in result.slots if slot.match_id is not None]) == expected
+    assert all(match.possible_rank_refs for match in result.tournament_matches)
+    assert all(not match.possible_team_ids for match in result.tournament_matches)
+    assert all(
+        route.rank_ref is not None and route.team_id is None for route in result.team_schedules
+    )
 
 
 def test_representative_two_tournaments_finish_within_thirty_seconds() -> None:
-    request, tournament = _request((4, 4, 4, 4), courts=3)
+    request, tournament = _request((4, 4, 4, 4), courts=3, resolved=False)
     started = monotonic()
 
     result = generate_day2_schedule(request)
@@ -274,8 +290,128 @@ def test_representative_two_tournaments_finish_within_thirty_seconds() -> None:
     assert validate_day2_schedule(_validation_document(request, result))["valid"] is True
 
 
+def test_resolving_rank_slots_only_adds_team_annotations() -> None:
+    provisional_request, _ = _request((4, 4, 4, 4), courts=3, resolved=False)
+    resolved_request, _ = _request((4, 4, 4, 4), courts=3, resolved=True)
+
+    provisional = generate_day2_schedule(provisional_request)
+    resolved = generate_day2_schedule(resolved_request)
+
+    assert resolved.slots == provisional.slots
+    assert resolved.section_timings == provisional.section_timings
+    assert resolved.expected_end_time == provisional.expected_end_time
+    assert [
+        (match.id, match.home, match.away, match.possible_rank_refs)
+        for match in resolved.tournament_matches
+    ] == [
+        (match.id, match.home, match.away, match.possible_rank_refs)
+        for match in provisional.tournament_matches
+    ]
+    assert all(match.possible_team_ids for match in resolved.tournament_matches)
+    assert all(
+        route.rank_ref is not None and route.team_id is not None
+        for route in resolved.team_schedules
+    )
+    assert [
+        (
+            route.rank_ref,
+            route.role,
+            route.match_id,
+            route.section_no,
+            route.court_id,
+            route.conditions,
+        )
+        for route in resolved.team_schedules
+    ] == [
+        (
+            route.rank_ref,
+            route.role,
+            route.match_id,
+            route.section_no,
+            route.court_id,
+            route.conditions,
+        )
+        for route in provisional.team_schedules
+    ]
+
+
+def test_provisional_placement_does_not_depend_on_team_ids() -> None:
+    first_request, _ = _request((4, 4, 4, 4), courts=3, resolved=False, team_prefix="T")
+    second_request, _ = _request((4, 4, 4, 4), courts=3, resolved=False, team_prefix="X")
+
+    first = generate_day2_schedule(first_request)
+    second = generate_day2_schedule(second_request)
+
+    assert second.slots == first.slots
+    assert second.section_timings == first.section_timings
+    assert [(match.id, match.possible_rank_refs) for match in second.tournament_matches] == [
+        (match.id, match.possible_rank_refs) for match in first.tournament_matches
+    ]
+    assert second.team_schedules == first.team_schedules
+
+
+def test_schedule_resolution_rejects_mixed_or_incomplete_annotations() -> None:
+    provisional_request, _ = _request((8,), resolved=False)
+    provisional = generate_day2_schedule(provisional_request).model_dump(mode="json")
+    provisional["tournament_matches"][0]["possible_team_ids"] = ["T1"]
+    with pytest.raises(ValidationError, match="チーム注記"):
+        Day2Schedule.model_validate(provisional)
+
+    provisional = generate_day2_schedule(provisional_request).model_dump(mode="json")
+    rank_refs = provisional["tournament_matches"][0]["possible_rank_refs"]
+    rank_refs.append(rank_refs[0])
+    with pytest.raises(ValidationError, match="重複した順位枠"):
+        Day2Schedule.model_validate(provisional)
+
+    provisional = generate_day2_schedule(provisional_request).model_dump(mode="json")
+    provisional["team_schedules"] = []
+    with pytest.raises(ValidationError, match="チーム別経路の順位枠注記"):
+        Day2Schedule.model_validate(provisional)
+
+    resolved_request, _ = _request((8,), resolved=True)
+    resolved = generate_day2_schedule(resolved_request).model_dump(mode="json")
+    resolved["tournament_matches"][0]["possible_rank_refs"] = []
+    with pytest.raises(ValidationError, match="確定済みの2日目日程"):
+        Day2Schedule.model_validate(resolved)
+
+    resolved = generate_day2_schedule(resolved_request).model_dump(mode="json")
+    resolved["tournament_matches"][0]["possible_team_ids"] = ["T1"]
+    with pytest.raises(ValidationError, match="件数が一致しません"):
+        Day2Schedule.model_validate(resolved)
+
+    resolved = generate_day2_schedule(resolved_request).model_dump(mode="json")
+    resolved["team_schedules"][0]["team_id"] = "T999"
+    with pytest.raises(ValidationError, match="チーム別経路"):
+        Day2Schedule.model_validate(resolved)
+
+    resolved = generate_day2_schedule(resolved_request).model_dump(mode="json")
+    resolved["team_schedules"][0]["match_id"] = "UT-UNKNOWN"
+    with pytest.raises(ValidationError, match="未定義の試合参照"):
+        Day2Schedule.model_validate(resolved)
+
+
+def test_legacy_resolved_schedule_without_rank_audit_fields_remains_readable() -> None:
+    request, _ = _request((8,), resolved=True)
+    legacy = generate_day2_schedule(request).model_dump(mode="json")
+    legacy.pop("participant_resolution")
+    for match in legacy["tournament_matches"]:
+        match.pop("possible_rank_refs")
+    for route in legacy["team_schedules"]:
+        route.pop("rank_ref")
+
+    restored = Day2Schedule.model_validate(legacy)
+    round_tripped = restored.model_dump(mode="json")
+
+    assert restored.participant_resolution == "resolved"
+    assert all(route.team_id is not None for route in restored.team_schedules)
+    assert "participant_resolution" not in round_tripped
+    assert all("possible_rank_refs" not in match for match in round_tripped["tournament_matches"])
+    assert all("rank_ref" not in route for route in round_tripped["team_schedules"])
+    assert Day2Schedule.model_validate(round_tripped) == restored
+
+
 def test_strict_mode_reschedules_to_keep_previous_winner_referees() -> None:
-    request, _tournament = _request((8,), courts=2, fallback="strict")
+    request, _tournament = _request((8,), courts=2, fallback="strict", resolved=False)
 
     result = generate_day2_schedule(request)
 
@@ -284,8 +420,26 @@ def test_strict_mode_reschedules_to_keep_previous_winner_referees() -> None:
     assert validate_day2_schedule(_validation_document(request, result))["valid"] is True
 
 
+def test_provisional_schedule_records_organizer_fallback_after_unused_court() -> None:
+    request, _tournament = _request((6,), courts=2, resolved=False)
+
+    result = generate_day2_schedule(request)
+
+    fallback_slots = [
+        slot
+        for slot in result.slots
+        if slot.referee_assignment is not None
+        and slot.referee_assignment.organizer_reason == "fallback"
+    ]
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.metrics.tournament_referee_fallback_count == len(fallback_slots) == 1
+    assert fallback_slots[0].referee_assignment is not None
+    assert fallback_slots[0].referee_assignment.fallback_reasons == ("no_previous_match",)
+    assert validate_day2_schedule(_validation_document(request, result))["valid"] is True
+
+
 def test_strict_mode_reports_when_no_legal_winner_referee_layout_exists() -> None:
-    request, _tournament = _request((6,), courts=2, fallback="strict")
+    request, _tournament = _request((6,), courts=2, fallback="strict", resolved=False)
     request = request.model_copy(
         update={"solver": request.solver.model_copy(update={"max_time_seconds": 3})}
     )
@@ -293,8 +447,29 @@ def test_strict_mode_reports_when_no_legal_winner_referee_layout_exists() -> Non
     result = generate_day2_schedule(request)
 
     assert result.status is SolverStatus.INFEASIBLE
+    assert result.participant_resolution == "provisional"
+    assert all(match.possible_rank_refs for match in result.tournament_matches)
+    assert all(not match.possible_team_ids for match in result.tournament_matches)
     assert result.diagnostics[0].code == "TOURNAMENT_REFEREE_UNAVAILABLE"
     assert "厳格な審判条件" in result.diagnostics[0].message
+
+
+def test_provisional_schedule_rejects_zero_organizer_capacity() -> None:
+    request, _tournament = _request((8,), courts=2, resolved=False)
+    request = request.model_copy(
+        update={
+            "referees": request.referees.model_copy(update={"organizer_capacity": 0}),
+            "solver": request.solver.model_copy(update={"max_time_seconds": 3}),
+        }
+    )
+
+    result = generate_day2_schedule(request)
+
+    assert result.status is SolverStatus.INFEASIBLE
+    assert result.participant_resolution == "provisional"
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "TOURNAMENT_SCHEDULE_INFEASIBLE"
+    assert "作成できません" in result.diagnostics[0].message
 
 
 def test_same_seed_reproduces_slots_referees_and_audit_values() -> None:
@@ -375,7 +550,7 @@ def test_independent_validator_detects_changed_fixed_day1_audit() -> None:
 
 
 def test_maximum_event_is_reproducible_valid_and_under_production_limits() -> None:
-    request, _tournament = _request((4, 4, 4, 4, 4, 4, 4, 4), courts=4)
+    request, _tournament = _request((4, 4, 4, 4, 4, 4, 4, 4), courts=4, resolved=False)
     request = request.model_copy(
         update={"solver": request.solver.model_copy(update={"max_time_seconds": 30})}
     )

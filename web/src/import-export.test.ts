@@ -159,6 +159,31 @@ function day2Document() {
   result.day2_schedule = {
     schema_version: "0.1.0",
     schedule_scope: "day2_tournament",
+    participant_resolution: "resolved",
+    status: "OPTIMAL",
+    tournament_matches: [],
+    slots: [],
+    section_timings: [],
+    expected_end_time: null,
+    team_schedules: [],
+    metrics: { used_sections: 0 },
+    diagnostics: [],
+    integrated_validation: integratedValidation,
+  };
+  result.integrated_validation = integratedValidation;
+  return document;
+}
+
+function provisionalDay2Document() {
+  const document = rankedDocument();
+  const result = document.tournament.result as Record<string, unknown>;
+  delete result.league_standings;
+  result.tournament_plan = provisionalTournamentPlan();
+  const integratedValidation = { valid: true, issues: [], summary: {} };
+  result.day2_schedule = {
+    schema_version: "0.1.0",
+    schedule_scope: "day2_tournament",
+    participant_resolution: "provisional",
     status: "OPTIMAL",
     tournament_matches: [],
     slots: [],
@@ -330,6 +355,48 @@ describe("大会JSONの入出力", () => {
 
   it("2日目設定・日程・統合検証を同じ内容で復元する", () => {
     const document = day2Document();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("確定順位がなくても順位枠だけの仮2日目日程を復元する", () => {
+    const document = provisionalDay2Document();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("仮日程に混在した具体チーム注記を拒否する", () => {
+    const document = provisionalDay2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    schedule.team_schedules = [
+      {
+        rank_ref: { type: "league_rank", block_id: "A", rank: 1 },
+        team_id: "team-01",
+        role: "match",
+        match_id: "UT-UNKNOWN",
+        section_no: 1,
+        court_id: "court-a",
+        conditions: [],
+      },
+    ];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/チーム経路/);
+  });
+
+  it("2日目日程とトーナメントの解決状態の矛盾を拒否する", () => {
+    const document = provisionalDay2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    schedule.participant_resolution = "resolved";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/仮・確定状態/);
+  });
+
+  it("解決状態がない従来の2日目日程を復元する", () => {
+    const document = day2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    delete schedule.participant_resolution;
+
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 

@@ -1,4 +1,4 @@
-"""完全順位決定トーナメントを2日目のコート・セクションへ配置する。"""
+"""順位枠で構成した完全順位決定トーナメントを2日目へ配置する。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal, Self
 
 from ortools.sat.python import cp_model
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_serializer, model_validator
 
 from football_scheduler.league import LeaguePlan, LeagueTeam
 from football_scheduler.models import (
@@ -53,6 +53,8 @@ _ORTOOLS_VERSION = version("ortools")
 _MAX_SECTIONS = 128
 _MIN_SOLVER_SECONDS = 0.001
 
+_RankKey = tuple[str, int]
+
 
 class Day1ScheduleSource(ContractModel):
     """変更しない1日目日程の統合検証用入力。"""
@@ -89,18 +91,33 @@ class Day2ScheduleRequest(ContractModel):
         }
         if planned_team_ids != set(team_ids):
             raise ValueError("リーグ計画と登録チームが一致しません")
-        if self.tournament_plan.participant_resolution is not ParticipantResolution.RESOLVED:
-            raise ValueError("仮トーナメントから2日目日程は作成できません")
+        expected_rank_refs = {
+            (block.id, rank)
+            for block in self.league_plan.blocks
+            for rank in range(1, len(block.team_ids) + 1)
+        }
+        seed_rank_refs = [
+            (seed.block_id, seed.block_rank)
+            for pool in (self.tournament_plan.upper, self.tournament_plan.lower)
+            for seed in pool.seeds
+        ]
+        if len(seed_rank_refs) != len(set(seed_rank_refs)):
+            raise ValueError("トーナメントの順位枠が重複しています")
+        if set(seed_rank_refs) != expected_rank_refs:
+            raise ValueError("トーナメントの順位枠とリーグ計画が一致しません")
         seed_values = [
             seed.team_id
             for pool in (self.tournament_plan.upper, self.tournament_plan.lower)
             for seed in pool.seeds
         ]
-        if any(team_id is None for team_id in seed_values):
-            raise ValueError("トーナメントの参加チームが確定していません")
-        seed_team_ids = {team_id for team_id in seed_values if team_id is not None}
-        if seed_team_ids != set(team_ids):
-            raise ValueError("トーナメントの参加チームと登録チームが一致しません")
+        if self.tournament_plan.participant_resolution is ParticipantResolution.RESOLVED:
+            if any(team_id is None for team_id in seed_values):
+                raise ValueError("トーナメントの参加チームが確定していません")
+            seed_team_ids = {team_id for team_id in seed_values if team_id is not None}
+            if seed_team_ids != set(team_ids):
+                raise ValueError("トーナメントの参加チームと登録チームが一致しません")
+        elif any(team_id is not None for team_id in seed_values):
+            raise ValueError("仮トーナメントにチームIDを混在させることはできません")
         return self
 
 
@@ -114,24 +131,48 @@ class ScheduledTournamentMatch(ContractModel):
     home: TournamentEntry
     away: TournamentEntry
     rank_range: tuple[int, int]
-    possible_team_ids: tuple[Identifier, ...]
+    possible_rank_refs: tuple[LeagueRankRef, ...] = ()
+    possible_team_ids: tuple[Identifier, ...] = ()
     prerequisite_match_ids: tuple[Identifier, ...]
     preliminary: bool = False
     final: bool = False
 
+    @model_validator(mode="after")
+    def validate_participants(self) -> Self:
+        rank_keys = [(ref.block_id, ref.rank) for ref in self.possible_rank_refs]
+        if len(rank_keys) != len(set(rank_keys)):
+            raise ValueError("試合の参加候補に重複した順位枠があります")
+        if len(self.possible_team_ids) != len(set(self.possible_team_ids)):
+            raise ValueError("試合の参加候補に重複したチームIDがあります")
+        if (
+            self.possible_rank_refs
+            and self.possible_team_ids
+            and (len(self.possible_rank_refs) != len(self.possible_team_ids))
+        ):
+            raise ValueError("試合の順位枠とチーム注記の件数が一致しません")
+        return self
+
 
 class TeamRouteEntry(ContractModel):
-    team_id: Identifier
+    rank_ref: LeagueRankRef | None = None
+    team_id: Identifier | None = None
     role: Literal["match", "referee"]
     match_id: Identifier
     section_no: Annotated[int, Field(gt=0)]
     court_id: Identifier
     conditions: tuple[str, ...] = ()
 
+    @model_validator(mode="after")
+    def validate_participant(self) -> Self:
+        if self.rank_ref is None and self.team_id is None:
+            raise ValueError("チーム別経路に順位枠またはチームIDが必要です")
+        return self
+
 
 class Day2Schedule(ContractModel):
     schema_version: Literal["0.1.0"] = "0.1.0"
     schedule_scope: Literal["day2_tournament"] = "day2_tournament"
+    participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     status: SolverStatus
     tournament_matches: tuple[ScheduledTournamentMatch, ...]
     slots: tuple[Slot, ...] = ()
@@ -140,6 +181,79 @@ class Day2Schedule(ContractModel):
     team_schedules: tuple[TeamRouteEntry, ...] = ()
     metrics: SolverMetrics
     diagnostics: tuple[Diagnostic, ...] = ()
+    _legacy_resolution: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> Self:
+        explicit_resolution = "participant_resolution" in self.model_fields_set
+        if not explicit_resolution:
+            return self
+        if self.participant_resolution is ParticipantResolution.PROVISIONAL:
+            if any(match.possible_team_ids for match in self.tournament_matches) or any(
+                route.team_id is not None for route in self.team_schedules
+            ):
+                raise ValueError("仮の2日目日程にチームIDを含めることはできません")
+            if any(not match.possible_rank_refs for match in self.tournament_matches) or any(
+                route.rank_ref is None for route in self.team_schedules
+            ):
+                raise ValueError("仮の2日目日程に必要な順位枠が不足しています")
+        elif self.tournament_matches and (
+            any(not match.possible_rank_refs for match in self.tournament_matches)
+            or any(not match.possible_team_ids for match in self.tournament_matches)
+            or any(route.rank_ref is None or route.team_id is None for route in self.team_schedules)
+        ):
+            raise ValueError("確定済みの2日目日程に順位枠またはチーム注記が不足しています")
+        if self.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+            match_ids = {match.id for match in self.tournament_matches}
+            if any(route.match_id not in match_ids for route in self.team_schedules):
+                raise ValueError("チーム別経路に未定義の試合参照があります")
+            expected_match_routes = {
+                (match.id, rank_ref.block_id, rank_ref.rank)
+                for match in self.tournament_matches
+                for rank_ref in match.possible_rank_refs
+            }
+            actual_match_routes = {
+                (route.match_id, route.rank_ref.block_id, route.rank_ref.rank)
+                for route in self.team_schedules
+                if route.role == "match" and route.rank_ref is not None
+            }
+            if actual_match_routes != expected_match_routes:
+                raise ValueError("チーム別経路の順位枠注記が不足または矛盾しています")
+        if self.participant_resolution is ParticipantResolution.RESOLVED:
+            team_by_rank: dict[tuple[str, int], str] = {}
+            rank_by_team: dict[str, tuple[str, int]] = {}
+            for match in self.tournament_matches:
+                for rank_ref, team_id in zip(
+                    match.possible_rank_refs, match.possible_team_ids, strict=True
+                ):
+                    rank_key = (rank_ref.block_id, rank_ref.rank)
+                    previous_team = team_by_rank.setdefault(rank_key, team_id)
+                    previous_rank = rank_by_team.setdefault(team_id, rank_key)
+                    if previous_team != team_id or previous_rank != rank_key:
+                        raise ValueError("順位枠とチーム注記の対応が一意ではありません")
+            for route in self.team_schedules:
+                assert route.rank_ref is not None and route.team_id is not None
+                rank_key = (route.rank_ref.block_id, route.rank_ref.rank)
+                if team_by_rank.get(rank_key) != route.team_id:
+                    raise ValueError("チーム別経路の順位枠とチーム注記が一致しません")
+        return self
+
+    def model_post_init(self, __context: Any) -> None:
+        self._legacy_resolution = "participant_resolution" not in self.model_fields_set
+
+    @model_serializer(mode="wrap")
+    def serialize_with_legacy_compatibility(self, handler: Any) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if not self._legacy_resolution:
+            return data
+        data.pop("participant_resolution", None)
+        for match in data.get("tournament_matches", ()):
+            if isinstance(match, dict) and not match.get("possible_rank_refs"):
+                match.pop("possible_rank_refs", None)
+        for route in data.get("team_schedules", ()):
+            if isinstance(route, dict) and route.get("rank_ref") is None:
+                route.pop("rank_ref", None)
+        return data
 
 
 class Day2ScheduleError(ValueError):
@@ -153,9 +267,10 @@ class Day2ScheduleError(ValueError):
 @dataclass(frozen=True, slots=True)
 class _PathModel:
     matches: tuple[ScheduledTournamentMatch, ...]
-    paths_by_match: Mapping[str, Mapping[str, frozenset[frozenset[str]]]]
+    paths_by_match: Mapping[str, Mapping[_RankKey, frozenset[frozenset[str]]]]
     dependencies: Mapping[str, frozenset[str]]
     conflict_pairs: frozenset[tuple[int, int]]
+    team_by_rank: Mapping[_RankKey, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +298,7 @@ class _SolvedLayout:
 def generate_day2_schedule(
     request: Day2ScheduleRequest | Mapping[str, object],
 ) -> Day2Schedule:
-    """確定済みトーナメント表から、1日目を変更せず2日目日程を返す。"""
+    """仮または確定済みトーナメントから、1日目を変更せず日程を返す。"""
 
     data = (
         request
@@ -194,6 +309,7 @@ def generate_day2_schedule(
     if not path_model.matches:
         metrics = _empty_metrics(data)
         return Day2Schedule(
+            participant_resolution=data.tournament_plan.participant_resolution,
             status=SolverStatus.OPTIMAL,
             tournament_matches=(),
             metrics=metrics,
@@ -298,6 +414,7 @@ def generate_day2_schedule(
             ),
         )
     return Day2Schedule(
+        participant_resolution=data.tournament_plan.participant_resolution,
         status=result_status,
         tournament_matches=path_model.matches,
         slots=slots,
@@ -436,51 +553,55 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
             "TOURNAMENT_MATCH_DUPLICATED",
             "2日目トーナメントに重複した試合IDがあります。トーナメント表を再作成してください。",
         )
-    rank_teams: dict[tuple[str, int], str] = {}
-    known_teams: set[str] = set()
+    rank_teams: dict[_RankKey, str] = {}
+    team_ranks: dict[str, _RankKey] = {}
+    known_ranks: set[_RankKey] = set()
     for pool in (plan.upper, plan.lower):
         for seed in pool.seeds:
-            if seed.team_id is None:
-                raise Day2ScheduleError(
-                    "TOURNAMENT_SOURCE_INVALID",
-                    "2日目日程を作成する前にリーグ順位を確定してください。",
-                )
             key = (seed.block_id, seed.block_rank)
-            if key in rank_teams and rank_teams[key] != seed.team_id:
+            if key in known_ranks:
                 raise Day2ScheduleError(
                     "TOURNAMENT_SOURCE_INVALID",
-                    "トーナメントのシード参照が重複しています。順位を再確定してください。",
+                    "トーナメントの順位枠が重複しています。トーナメント表を再作成してください。",
                 )
-            rank_teams[key] = seed.team_id
-            known_teams.add(seed.team_id)
+            known_ranks.add(key)
+            if seed.team_id is not None:
+                if seed.team_id in team_ranks:
+                    raise Day2ScheduleError(
+                        "TOURNAMENT_SOURCE_INVALID",
+                        "トーナメントのチーム注記が重複しています。順位を再確定してください。",
+                    )
+                rank_teams[key] = seed.team_id
+                team_ranks[seed.team_id] = key
 
-    paths_by_match: dict[str, Mapping[str, frozenset[frozenset[str]]]] = {}
+    paths_by_match: dict[str, Mapping[_RankKey, frozenset[frozenset[str]]]] = {}
     visiting: set[str] = set()
 
-    def entry_paths(entry: TournamentEntry) -> dict[str, frozenset[frozenset[str]]]:
+    def entry_paths(entry: TournamentEntry) -> dict[_RankKey, frozenset[frozenset[str]]]:
         if isinstance(entry, ConcreteTeamRef):
-            if entry.team_id not in known_teams:
+            rank_key = team_ranks.get(entry.team_id)
+            if rank_key is None:
                 raise _invalid_reference("unknown_team", team_id=entry.team_id)
-            return {entry.team_id: frozenset({frozenset()})}
+            return {rank_key: frozenset({frozenset()})}
         if isinstance(entry, LeagueRankRef):
-            team_id = rank_teams.get((entry.block_id, entry.rank))
-            if team_id is None:
+            rank_key = (entry.block_id, entry.rank)
+            if rank_key not in known_ranks:
                 raise _invalid_reference(
                     "unknown_league_rank", block_id=entry.block_id, rank=entry.rank
                 )
-            return {team_id: frozenset({frozenset()})}
+            return {rank_key: frozenset({frozenset()})}
         if isinstance(entry, (WinnerOfRef, LoserOfRef)):
             source = match_paths(entry.match_id)
             outcome = "W" if isinstance(entry, WinnerOfRef) else "L"
             return {
-                team_id: frozenset(
+                rank_key: frozenset(
                     condition | {f"{outcome}:{entry.match_id}"} for condition in conditions
                 )
-                for team_id, conditions in source.items()
+                for rank_key, conditions in source.items()
             }
         raise _invalid_reference("unsupported_reference")
 
-    def match_paths(match_id: str) -> Mapping[str, frozenset[frozenset[str]]]:
+    def match_paths(match_id: str) -> Mapping[_RankKey, frozenset[frozenset[str]]]:
         cached = paths_by_match.get(match_id)
         if cached is not None:
             return cached
@@ -492,18 +613,21 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         visiting.add(match_id)
         home = entry_paths(match.home)
         away = entry_paths(match.away)
-        for team_id in set(home) & set(away):
+        for rank_key in set(home) & set(away):
             if any(
                 _conditions_compatible(left, right)
-                for left in home[team_id]
-                for right in away[team_id]
+                for left in home[rank_key]
+                for right in away[rank_key]
             ):
                 raise _invalid_reference(
-                    "team_can_fill_both_sides", match_id=match_id, team_id=team_id
+                    "rank_can_fill_both_sides",
+                    match_id=match_id,
+                    block_id=rank_key[0],
+                    rank=rank_key[1],
                 )
-        merged: dict[str, frozenset[frozenset[str]]] = {}
-        for team_id in set(home) | set(away):
-            merged[team_id] = frozenset((*home.get(team_id, ()), *away.get(team_id, ())))
+        merged: dict[_RankKey, frozenset[frozenset[str]]] = {}
+        for rank_key in set(home) | set(away):
+            merged[rank_key] = frozenset((*home.get(rank_key, ()), *away.get(rank_key, ())))
         visiting.remove(match_id)
         paths_by_match[match_id] = merged
         return merged
@@ -527,7 +651,15 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
             home=match.home,
             away=match.away,
             rank_range=match.rank_range,
-            possible_team_ids=tuple(sorted(paths_by_match[match.id])),
+            possible_rank_refs=tuple(
+                LeagueRankRef(block_id=block_id, rank=rank)
+                for block_id, rank in sorted(paths_by_match[match.id])
+            ),
+            possible_team_ids=(
+                tuple(rank_teams[rank_key] for rank_key in sorted(paths_by_match[match.id]))
+                if plan.participant_resolution is ParticipantResolution.RESOLVED
+                else ()
+            ),
             prerequisite_match_ids=tuple(sorted(dependencies[match.id])),
             preliminary="-PRELIM-" in match.id,
             final=match.rank_range == (1, 2),
@@ -548,6 +680,7 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         paths_by_match=paths_by_match,
         dependencies=dependencies,
         conflict_pairs=conflict_pairs,
+        team_by_rank=rank_teams,
     )
 
 
@@ -805,9 +938,9 @@ def _assign_referees(
     assignments: dict[str | None, RefereeAssignment] = {}
     invalid: dict[str, tuple[str, ...]] = {}
     source_uses_by_section: defaultdict[tuple[int, str], list[str]] = defaultdict(list)
-    referee_paths_by_section: defaultdict[int, list[Mapping[str, frozenset[frozenset[str]]]]] = (
-        defaultdict(list)
-    )
+    referee_paths_by_section: defaultdict[
+        int, list[Mapping[_RankKey, frozenset[frozenset[str]]]]
+    ] = defaultdict(list)
     for slot in sorted(occupied, key=lambda item: (item.section_no, item.court_id)):
         assert slot.match_id is not None
         match = match_by_id[slot.match_id]
@@ -881,11 +1014,12 @@ def _team_routes(path_model: _PathModel, slots: tuple[Slot, ...]) -> tuple[TeamR
     for slot in slots:
         if slot.match_id is None:
             continue
-        for team_id, conditions in path_model.paths_by_match[slot.match_id].items():
+        for rank_key, conditions in path_model.paths_by_match[slot.match_id].items():
             for condition in conditions:
                 routes.append(
                     TeamRouteEntry(
-                        team_id=team_id,
+                        rank_ref=LeagueRankRef(block_id=rank_key[0], rank=rank_key[1]),
+                        team_id=path_model.team_by_rank.get(rank_key),
                         role="match",
                         match_id=slot.match_id,
                         section_no=slot.section_no,
@@ -901,11 +1035,12 @@ def _team_routes(path_model: _PathModel, slots: tuple[Slot, ...]) -> tuple[TeamR
             assignment.source_match_id,
             "W",
         )
-        for team_id, conditions in referee_paths.items():
+        for rank_key, conditions in referee_paths.items():
             for condition in conditions:
                 routes.append(
                     TeamRouteEntry(
-                        team_id=team_id,
+                        rank_ref=LeagueRankRef(block_id=rank_key[0], rank=rank_key[1]),
+                        team_id=path_model.team_by_rank.get(rank_key),
                         role="referee",
                         match_id=slot.match_id,
                         section_no=slot.section_no,
@@ -917,7 +1052,8 @@ def _team_routes(path_model: _PathModel, slots: tuple[Slot, ...]) -> tuple[TeamR
         sorted(
             routes,
             key=lambda item: (
-                item.team_id,
+                item.rank_ref.block_id if item.rank_ref is not None else "",
+                item.rank_ref.rank if item.rank_ref is not None else 0,
                 item.section_no,
                 item.court_id,
                 item.role,
@@ -1028,12 +1164,14 @@ def _audit_metrics(
 def _route_transition_counts(routes: tuple[TeamRouteEntry, ...]) -> tuple[int, int]:
     """勝敗条件が両立する隣接割当ての負担を集計する。"""
 
-    by_team: defaultdict[str, list[TeamRouteEntry]] = defaultdict(list)
+    by_team: defaultdict[_RankKey, list[TeamRouteEntry]] = defaultdict(list)
     for route in routes:
-        by_team[route.team_id].append(route)
-    referee_then_match: set[tuple[str, str, str]] = set()
-    adjacent_moves: set[tuple[str, str, str]] = set()
-    for team_id, entries in by_team.items():
+        if route.rank_ref is None:
+            continue
+        by_team[route.rank_ref.block_id, route.rank_ref.rank].append(route)
+    referee_then_match: set[tuple[_RankKey, str, str]] = set()
+    adjacent_moves: set[tuple[_RankKey, str, str]] = set()
+    for rank_key, entries in by_team.items():
         for left in entries:
             for right in entries:
                 if right.section_no != left.section_no + 1:
@@ -1041,9 +1179,9 @@ def _route_transition_counts(routes: tuple[TeamRouteEntry, ...]) -> tuple[int, i
                 if not _condition_strings_compatible(left.conditions, right.conditions):
                     continue
                 if left.role == "referee" and right.role == "match":
-                    referee_then_match.add((team_id, left.match_id, right.match_id))
+                    referee_then_match.add((rank_key, left.match_id, right.match_id))
                 if left.court_id != right.court_id:
-                    adjacent_moves.add((team_id, left.match_id, right.match_id))
+                    adjacent_moves.add((rank_key, left.match_id, right.match_id))
     return len(referee_then_match), len(adjacent_moves)
 
 
@@ -1148,6 +1286,7 @@ def _failed_schedule(
         optimality_proven=status is SolverStatus.INFEASIBLE,
     )
     return Day2Schedule(
+        participant_resolution=data.tournament_plan.participant_resolution,
         status=status,
         tournament_matches=matches,
         metrics=metrics,
@@ -1171,14 +1310,14 @@ def _entry_dependency(entry: TournamentEntry) -> str | None:
 
 
 def _matches_can_share_team(
-    left: Mapping[str, Iterable[frozenset[str]]],
-    right: Mapping[str, Iterable[frozenset[str]]],
+    left: Mapping[_RankKey, Iterable[frozenset[str]]],
+    right: Mapping[_RankKey, Iterable[frozenset[str]]],
 ) -> bool:
-    for team_id in set(left) & set(right):
+    for rank_key in set(left) & set(right):
         if any(
             _conditions_compatible(left_condition, right_condition)
-            for left_condition in left[team_id]
-            for right_condition in right[team_id]
+            for left_condition in left[rank_key]
+            for right_condition in right[rank_key]
         ):
             return True
     return False
@@ -1202,11 +1341,11 @@ def _condition_strings_compatible(left: tuple[str, ...], right: tuple[str, ...])
 
 
 def _outcome_paths(
-    source: Mapping[str, frozenset[frozenset[str]]], match_id: str, outcome: str
-) -> dict[str, frozenset[frozenset[str]]]:
+    source: Mapping[_RankKey, frozenset[frozenset[str]]], match_id: str, outcome: str
+) -> dict[_RankKey, frozenset[frozenset[str]]]:
     return {
-        team_id: frozenset(condition | {f"{outcome}:{match_id}"} for condition in conditions)
-        for team_id, conditions in source.items()
+        rank_key: frozenset(condition | {f"{outcome}:{match_id}"} for condition in conditions)
+        for rank_key, conditions in source.items()
     }
 
 
