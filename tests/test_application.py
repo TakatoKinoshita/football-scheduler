@@ -63,8 +63,9 @@ def _day1_league_request(
     block_count: int = 1,
     assignment_mode: str = "random",
     court_count: int = 1,
+    manual_blocks: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    request: dict[str, Any] = {
         "schema_version": "0.1.0",
         "request_kind": "day1_league",
         "teams": [
@@ -91,6 +92,9 @@ def _day1_league_request(
         "random_seed": 20260803,
         "solver": {"max_time_seconds": 30},
     }
+    if manual_blocks is not None:
+        request["league"]["manual_blocks"] = manual_blocks
+    return request
 
 
 def test_direct_request_is_solved_and_independently_validated(
@@ -151,6 +155,169 @@ def test_day1_league_request_adds_block_ids_before_solving(
         {"id": "A", "team_ids": ["team-1", "team-4", "team-5", "team-8"]},
         {"id": "B", "team_ids": ["team-2", "team-3", "team-6", "team-7"]},
     ]
+
+
+def test_day1_league_request_preserves_manual_blocks() -> None:
+    manual_blocks: list[dict[str, object]] = [
+        {"id": "A", "team_ids": ["team-1", "team-3"]},
+        {"id": "B", "team_ids": ["team-2", "team-4"]},
+    ]
+
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=4,
+            block_count=2,
+            assignment_mode="manual",
+            court_count=2,
+            manual_blocks=manual_blocks,
+        )
+    )
+
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    assert result["league_plan"]["assignment_mode"] == "manual"
+    assert result["league_plan"]["blocks"] == manual_blocks
+    assert len(result["league_plan"]["matches"]) == 2
+
+
+def test_day1_league_request_rejects_manual_imbalance_before_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=5,
+            block_count=2,
+            assignment_mode="manual",
+            manual_blocks=[
+                {"id": "A", "team_ids": ["team-1", "team-2", "team-3", "team-4"]},
+                {"id": "B", "team_ids": ["team-5"]},
+            ],
+        )
+    )
+
+    assert result["status"] == "error"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "MANUAL_BLOCK_SIZE_IMBALANCE"
+    assert diagnostic["details"]["block_sizes"] == {"A": 4, "B": 1}
+
+
+def test_day1_league_request_rejects_unknown_manual_block_before_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=4,
+            block_count=2,
+            assignment_mode="manual",
+            manual_blocks=[
+                {"id": "A", "team_ids": ["team-1", "team-2"]},
+                {"id": "C", "team_ids": ["team-3", "team-4"]},
+            ],
+        )
+    )
+
+    assert result["status"] == "error"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "MANUAL_BLOCK_REFERENCE_INVALID"
+    assert diagnostic["details"] == {
+        "expected_block_ids": ["A", "B"],
+        "missing_block_ids": ["B"],
+        "unknown_block_ids": ["C"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("manual_blocks", "code"),
+    [
+        (None, "MANUAL_BLOCKS_REQUIRED"),
+        (
+            [{"id": "A", "team_ids": ["team-1", "team-2", "team-3", "team-4"]}],
+            "MANUAL_BLOCK_COUNT_MISMATCH",
+        ),
+        (
+            [
+                {"id": "A", "team_ids": ["team-1", "team-2"]},
+                {"id": "A", "team_ids": ["team-3", "team-4"]},
+            ],
+            "DUPLICATE_BLOCK_ID",
+        ),
+        (
+            [
+                {"id": "A", "team_ids": ["team-1", "team-99"]},
+                {"id": "B", "team_ids": ["team-3", "team-4"]},
+            ],
+            "UNKNOWN_TEAM_IN_MANUAL_BLOCKS",
+        ),
+        (
+            [
+                {"id": "A", "team_ids": ["team-1", "team-2"]},
+                {"id": "B", "team_ids": ["team-2", "team-4"]},
+            ],
+            "DUPLICATE_TEAM_IN_MANUAL_BLOCKS",
+        ),
+        (
+            [
+                {"id": "A", "team_ids": ["team-1", "team-2"]},
+                {"id": "B", "team_ids": []},
+            ],
+            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
+        ),
+    ],
+)
+def test_day1_public_manual_validation_rejects_invalid_membership_before_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    manual_blocks: list[dict[str, object]] | None,
+    code: str,
+) -> None:
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=4,
+            block_count=2,
+            assignment_mode="manual",
+            manual_blocks=manual_blocks,
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == code
+
+
+def test_day1_public_automatic_mode_rejects_manual_blocks_before_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=4,
+            block_count=2,
+            assignment_mode="random",
+            manual_blocks=[
+                {"id": "A", "team_ids": ["team-1", "team-2"]},
+                {"id": "B", "team_ids": ["team-3", "team-4"]},
+            ],
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "MANUAL_BLOCKS_NOT_ALLOWED"
 
 
 def test_league_standings_request_returns_rankings_after_all_results_are_entered() -> None:

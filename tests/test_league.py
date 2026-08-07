@@ -148,6 +148,39 @@ def test_manual_assignment_preserves_blocks_and_generates_matches() -> None:
 
 
 @pytest.mark.parametrize(
+    ("team_count", "block_count"),
+    [(2, 1), (5, 2), (16, 4), (32, 8)],
+)
+def test_manual_assignment_is_balanced_complete_and_reproducible(
+    team_count: int, block_count: int
+) -> None:
+    team_ids = [f"team-{index:02}" for index in range(1, team_count + 1)]
+    blocks = [
+        {
+            "id": chr(ord("A") + block_index),
+            "team_ids": team_ids[block_index::block_count],
+        }
+        for block_index in range(block_count)
+    ]
+    request = {
+        **_request(team_count, block_count, assignment_mode="manual"),
+        "manual_blocks": blocks,
+    }
+
+    first = generate_league_plan(request)
+    second = generate_league_plan(request)
+
+    assert first == second
+    assert [list(block.team_ids) for block in first.blocks] == [
+        block["team_ids"] for block in blocks
+    ]
+    expected_pairs = sum(
+        len(block["team_ids"]) * (len(block["team_ids"]) - 1) // 2 for block in blocks
+    )
+    assert len(first.matches) == expected_pairs
+
+
+@pytest.mark.parametrize(
     ("manual_blocks", "code"),
     [
         (

@@ -22,6 +22,52 @@ test("自動保存後の再読み込みで入力を復元する", async ({ page 
   await expect(page.locator("#courts")).toHaveValue("Aコート");
 });
 
+test("手動ブロックの入力途中を自動保存・JSON・オフラインで復元する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("手動保存大会");
+  await page.locator("#teams").fill("青\n赤\n白\n緑");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#courts").fill("Aコート");
+  await page.getByLabel("青", { exact: true }).selectOption("A");
+  await page.getByLabel("赤", { exact: true }).selectOption("B");
+  await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "ファイルへ保存" }).click();
+  const downloadPath = await (await downloadPromise).path();
+  expect(downloadPath).not.toBeNull();
+  const exported = JSON.parse(await readFile(downloadPath!, "utf8")) as {
+    tournament: { input: { league: Record<string, unknown> } };
+  };
+  expect(exported.tournament.input.league).toMatchObject({
+    assignment_mode: "manual",
+    manual_blocks: [
+      { id: "A", team_ids: ["team-01"] },
+      { id: "B", team_ids: ["team-02"] },
+    ],
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await expect(page.locator("#assignment-mode")).toHaveValue("manual");
+  await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
+
+  await importDocument(page, exported);
+  await page.locator('.step[data-step="2"]').click();
+  await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
+  await page.evaluate(async () => navigator.serviceWorker.ready);
+  await page.context().setOffline(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
+});
+
 test("直前確定状態への復元と削除取消しができる", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);

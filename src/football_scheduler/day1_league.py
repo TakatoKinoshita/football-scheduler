@@ -11,20 +11,30 @@ from pydantic import Field
 
 from football_scheduler.league import (
     AssignmentMode,
+    LeagueGenerationError,
     LeaguePlan,
     LeaguePlanRequest,
     LeagueTeam,
+    ManualBlock,
     generate_league_plan,
 )
 from football_scheduler.models import (
     ContractModel,
     Court,
     DaySettings,
+    Identifier,
     RefereeSettings,
     ScheduleRequest,
     SolverSettings,
     Team,
 )
+
+
+class Day1ManualBlock(ContractModel):
+    """通常画面の入力途中では空ブロックも保持できる手動割当て。"""
+
+    id: Identifier
+    team_ids: tuple[Identifier, ...] = ()
 
 
 class Day1LeagueSettings(ContractModel):
@@ -34,7 +44,9 @@ class Day1LeagueSettings(ContractModel):
     assignment_mode: Literal[
         AssignmentMode.RANDOM,
         AssignmentMode.SEEDED_SNAKE,
+        AssignmentMode.MANUAL,
     ] = AssignmentMode.RANDOM
+    manual_blocks: tuple[Day1ManualBlock, ...] = ()
     odd_split_policy: Literal["upper", "lower", "alternate"] = "upper"
 
 
@@ -71,11 +83,13 @@ def prepare_day1_league_schedule(
         if isinstance(request, Day1LeagueScheduleRequest)
         else Day1LeagueScheduleRequest.model_validate(request)
     )
+    manual_blocks = _validated_manual_blocks(normalized)
     league_plan = generate_league_plan(
         LeaguePlanRequest(
             teams=normalized.teams,
             block_count=normalized.league.block_count,
             assignment_mode=normalized.league.assignment_mode,
+            manual_blocks=manual_blocks,
             random_seed=normalized.random_seed,
         )
     )
@@ -110,3 +124,98 @@ def prepare_day1_league_schedule(
         league_plan=league_plan,
         fallback_request=fallback_request,
     )
+
+
+def _validated_manual_blocks(
+    request: Day1LeagueScheduleRequest,
+) -> tuple[ManualBlock, ...]:
+    blocks = request.league.manual_blocks
+    if request.league.assignment_mode != AssignmentMode.MANUAL:
+        if blocks:
+            raise LeagueGenerationError(
+                "MANUAL_BLOCKS_NOT_ALLOWED",
+                "手動以外の分け方ではmanual_blocksを指定しないでください。",
+            )
+        return ()
+    if not blocks:
+        raise LeagueGenerationError(
+            "MANUAL_BLOCKS_REQUIRED",
+            "手動で分ける場合は各ブロックのチームを指定してください。",
+        )
+    if len(blocks) != request.league.block_count:
+        raise LeagueGenerationError(
+            "MANUAL_BLOCK_COUNT_MISMATCH",
+            "手動ブロックの数を指定したブロック数と同じにしてください。",
+            block_count=request.league.block_count,
+            manual_block_count=len(blocks),
+        )
+
+    block_ids = [block.id for block in blocks]
+    duplicate_block_ids = sorted(
+        block_id for block_id in set(block_ids) if block_ids.count(block_id) > 1
+    )
+    if duplicate_block_ids:
+        raise LeagueGenerationError(
+            "DUPLICATE_BLOCK_ID",
+            "ブロックIDは大会内で重複しない値にしてください。",
+            block_ids=duplicate_block_ids,
+        )
+    expected_block_ids = [_day1_block_id(index) for index in range(request.league.block_count)]
+    missing_block_ids = sorted(set(expected_block_ids) - set(block_ids))
+    unknown_block_ids = sorted(set(block_ids) - set(expected_block_ids))
+    if missing_block_ids or unknown_block_ids:
+        raise LeagueGenerationError(
+            "MANUAL_BLOCK_REFERENCE_INVALID",
+            "手動割当てのブロックが、選択したブロック数と一致しません。",
+            expected_block_ids=expected_block_ids,
+            missing_block_ids=missing_block_ids,
+            unknown_block_ids=unknown_block_ids,
+        )
+
+    known_team_ids = {team.id for team in request.teams}
+    assigned_team_ids = [team_id for block in blocks for team_id in block.team_ids]
+    unknown_team_ids = sorted(set(assigned_team_ids) - known_team_ids)
+    if unknown_team_ids:
+        raise LeagueGenerationError(
+            "UNKNOWN_TEAM_IN_MANUAL_BLOCKS",
+            "手動ブロックに登録されていないチームIDがあります。",
+            team_ids=unknown_team_ids,
+        )
+    duplicate_team_ids = sorted(
+        team_id for team_id in set(assigned_team_ids) if assigned_team_ids.count(team_id) > 1
+    )
+    if duplicate_team_ids:
+        raise LeagueGenerationError(
+            "DUPLICATE_TEAM_IN_MANUAL_BLOCKS",
+            "同じチームを複数の手動ブロックへ割り当てることはできません。",
+            team_ids=duplicate_team_ids,
+        )
+    missing_team_ids = sorted(known_team_ids - set(assigned_team_ids))
+    if missing_team_ids:
+        raise LeagueGenerationError(
+            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
+            "どの手動ブロックにも所属していないチームがあります。",
+            team_ids=missing_team_ids,
+        )
+
+    block_sizes = {block.id: len(block.team_ids) for block in blocks}
+    minimum_size = len(request.teams) // request.league.block_count
+    maximum_size = minimum_size + (1 if len(request.teams) % request.league.block_count > 0 else 0)
+    if any(size < minimum_size or size > maximum_size for size in block_sizes.values()):
+        raise LeagueGenerationError(
+            "MANUAL_BLOCK_SIZE_IMBALANCE",
+            "ブロック間の人数差を1以内にしてください。",
+            block_sizes=block_sizes,
+            minimum_size=minimum_size,
+            maximum_size=maximum_size,
+        )
+    return tuple(ManualBlock(id=block.id, team_ids=block.team_ids) for block in blocks)
+
+
+def _day1_block_id(index: int) -> str:
+    result = ""
+    value = index + 1
+    while value > 0:
+        value, remainder = divmod(value - 1, 26)
+        result = chr(ord("A") + remainder) + result
+    return result

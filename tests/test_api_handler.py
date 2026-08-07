@@ -179,6 +179,39 @@ def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
     )
 
 
+def test_manual_block_validation_error_returns_http_400() -> None:
+    payload = {
+        "schema_version": "0.1.0",
+        "request_kind": "day1_league",
+        "teams": [{"id": f"team-{index}", "name": f"チーム{index}"} for index in range(1, 6)],
+        "courts": [{"id": "court-a", "name": "Aコート"}],
+        "league": {
+            "block_count": 2,
+            "assignment_mode": "manual",
+            "manual_blocks": [
+                {"id": "A", "team_ids": ["team-1", "team-2", "team-3", "team-4"]},
+                {"id": "B", "team_ids": ["team-5"]},
+            ],
+        },
+        "day": {
+            "id": "day1",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 5,
+        },
+        "referees": {
+            "organizer_capacity": 1,
+            "team_referees_required_after_first": True,
+        },
+    }
+
+    response = api_handler.lambda_handler(_event(json.dumps(payload)), object())
+    result = json.loads(response["body"])
+
+    assert response["statusCode"] == 400
+    assert result["diagnostics"][0]["code"] == "MANUAL_BLOCK_SIZE_IMBALANCE"
+
+
 def test_content_length_over_one_megabyte_is_rejected_before_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

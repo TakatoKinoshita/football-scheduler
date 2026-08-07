@@ -324,6 +324,64 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("入力途中の手動割当てを人数不均衡のまま復元する", () => {
+    const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    document.tournament.name = "手動割当て大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01"] },
+        { id: "B", team_ids: [] },
+      ],
+    };
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("手動割当ての未知参照と重複所属を拒否する", () => {
+    const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    document.tournament.name = "手動割当て大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01", "team-99"] },
+        { id: "B", team_ids: ["team-01"] },
+      ],
+    };
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/登録されていないチーム/);
+    (document.tournament.input.league as Record<string, unknown>).manual_blocks = [
+      { id: "A", team_ids: ["team-01"] },
+      { id: "B", team_ids: ["team-01"] },
+    ];
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/複数の手動ブロック/);
+  });
+
+  it("生成済みリーグと手動割当ての順序不一致を拒否する", () => {
+    const document = rankedDocument();
+    document.tournament.input.league = {
+      block_count: 1,
+      assignment_mode: "manual",
+      manual_blocks: [{ id: "A", team_ids: ["team-02", "team-01"] }],
+    };
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/手動割当てと一致/);
+  });
+
   it("未知のschema versionを利用者向けメッセージで拒否する", () => {
     const document = validDocument() as unknown as Record<string, unknown>;
     document.schemaVersion = "9.9.9";

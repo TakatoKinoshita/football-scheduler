@@ -4,6 +4,7 @@ import {
   type JsonObject,
   type TournamentDocument,
 } from "./types";
+import { analyzeManualBlocks, manualBlocksFromUnknown } from "./manual-blocks";
 
 export type WizardStep = 1 | 2 | 3 | 4 | 5;
 
@@ -39,12 +40,14 @@ export function isDay1LeagueInput(input: JsonObject): boolean {
 }
 
 export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
+  const league = { ...(objectValue(input.league) ?? {}) };
+  if (league.assignment_mode !== "manual") delete league.manual_blocks;
   return {
     schema_version: input.schema_version,
     request_kind: input.request_kind,
     teams: input.teams,
     courts: input.courts,
-    league: input.league,
+    league,
     day: input.day,
     referees: input.referees,
     random_seed: input.random_seed,
@@ -164,12 +167,60 @@ export function validateDay1LeagueDocument(
       message: `ブロック数は1から参加チーム数（${teamCount}）までで選択してください。`,
     });
   }
-  if (!new Set(["random", "seeded_snake"]).has(String(league?.assignment_mode))) {
+  if (!new Set(["random", "seeded_snake", "manual"]).has(String(league?.assignment_mode))) {
     issues.push({
       field: "assignment-mode",
       step: 2,
       message: "チームの分け方を選択してください。",
     });
+  }
+  if (league?.assignment_mode === "manual" && blockCount !== undefined) {
+    const teams = objectArray(input.teams);
+    const teamIds = teams.flatMap((team) => typeof team.id === "string" ? [team.id] : []);
+    const manualBlocks = manualBlocksFromUnknown(league.manual_blocks);
+    const analysis = analyzeManualBlocks(manualBlocks, teamIds, blockCount);
+    if (
+      analysis.missingBlockIds.length > 0 ||
+      analysis.unknownBlockIds.length > 0 ||
+      analysis.duplicateBlockIds.length > 0
+    ) {
+      issues.push({
+        field: "manual-blocks",
+        step: 2,
+        message: "手動割当てのブロックが現在のブロック数と一致しません。割当て先を確認してください。",
+      });
+    }
+    if (analysis.unknownTeamIds.length > 0 || analysis.duplicateTeamIds.length > 0) {
+      const affectedTeamId = analysis.duplicateTeamIds.find((teamId) => teamIds.includes(teamId));
+      issues.push({
+        field: affectedTeamId === undefined ? "manual-blocks" : `manual-block-team-${affectedTeamId}`,
+        step: 2,
+        message: analysis.duplicateTeamIds.length > 0
+          ? "同じチームを複数のブロックへ割り当てることはできません。"
+          : "登録されていないチームの割当てがあります。割当てを選び直してください。",
+      });
+    }
+    for (const teamId of analysis.unassignedTeamIds) {
+      const team = teams.find((candidate) => candidate.id === teamId);
+      issues.push({
+        field: `manual-block-team-${teamId}`,
+        step: 2,
+        message: `${typeof team?.name === "string" ? team.name : teamId}の割当て先を選択してください。`,
+      });
+    }
+    if (
+      analysis.unassignedTeamIds.length === 0 &&
+      analysis.imbalancedBlockIds.length > 0
+    ) {
+      const blockId = analysis.imbalancedBlockIds[0]!;
+      const firstTeamId = manualBlocks.find((block) => block.id === blockId)?.team_ids[0];
+      const size = analysis.blockSizes[blockId] ?? 0;
+      issues.push({
+        field: firstTeamId === undefined ? "manual-blocks" : `manual-block-team-${firstTeamId}`,
+        step: 2,
+        message: `${blockId}ブロックは${size}チームです。各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームにしてください。`,
+      });
+    }
   }
   if (
     league?.odd_split_policy !== undefined &&
@@ -245,6 +296,7 @@ const API_FIELD_MAP: Array<
   ["courts", "courts", 2, "使用コート"],
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
+  ["league.manual_blocks", "manual-blocks", 2, "手動ブロック割当て"],
   ["league.odd_split_policy", "odd-split-policy", 2, "奇数人数の上下振り分け"],
   ["day.start_time", "start-time", 3, "開始時刻"],
   ["day.game_duration_minutes", "game-duration", 3, "試合時間"],

@@ -66,6 +66,49 @@ function generatedRolePathResult(
   };
 }
 
+function manualGeneratedResult(request: {
+  teams?: Array<{ id?: unknown }>;
+  courts?: Array<{ id?: unknown }>;
+  league?: { manual_blocks?: Array<{ id?: unknown; team_ids?: unknown }> };
+}) {
+  const courtIds = (request.courts ?? []).map((court) => String(court.id));
+  const blocks = (request.league?.manual_blocks ?? []).map((block) => ({
+    id: String(block.id),
+    team_ids: Array.isArray(block.team_ids) ? block.team_ids.map(String) : [],
+  }));
+  const matches = blocks.map((block) => ({
+    id: `LG-${block.id}-M1`,
+    phase: "league",
+    round: `${block.id}ブロック 第1ラウンド`,
+    possible_home_team_ids: [block.team_ids[0]],
+    possible_away_team_ids: [block.team_ids[1]],
+    prerequisite_match_ids: [],
+    organizer_referee_required: false,
+  }));
+  return {
+    ...scheduleResult,
+    league_plan: {
+      schema_version: "0.1.0",
+      assignment_mode: "manual",
+      random_seed: 20260803,
+      blocks,
+      logical_rounds: blocks.map((block) => ({
+        block_id: block.id,
+        round_no: 1,
+        match_ids: [`LG-${block.id}-M1`],
+      })),
+      matches,
+    },
+    slots: matches.map((match, index) => ({
+      day_id: "day1",
+      section_no: 1,
+      court_id: courtIds[index] ?? courtIds[0],
+      match_id: match.id,
+      referee_assignment: { kind: "organizer" },
+    })),
+  };
+}
+
 async function fillThroughGeneration(page: import("@playwright/test").Page): Promise<void> {
   await page.locator("#tournament-name").fill("本番確認大会");
   await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
@@ -131,6 +174,122 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
     courts: [{ name: "Aコート" }, { name: "Bコート" }],
   });
   expect(requests[0]).not.toHaveProperty("day2");
+});
+
+test("手動で各チームを均衡ブロックへ割り当て、その所属のまま生成する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("手動割当て大会");
+  await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#courts").fill("Aコート\nBコート");
+
+  await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
+  const blue = page.getByLabel("青空FC");
+  await blue.focus();
+  await blue.press("ArrowDown");
+  await blue.press("Enter");
+  await page.getByLabel("みどりSC").selectOption("B");
+  await page.getByLabel("中央キッカーズ").selectOption("A");
+  await page.getByLabel("海浜ユナイテッド").selectOption("B");
+  await expect(page.locator("#manual-block-summary")).toContainText("割当てが完了");
+  await expect(page.locator("#manual-block-count-A")).toContainText("2チーム（適正）");
+  await expect(page.locator("#manual-block-count-B")).toContainText("2チーム（適正）");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+
+  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
+  await page.unroute(GENERATE_API);
+  let request: Record<string, unknown> | undefined;
+  await page.route(GENERATE_API, async (route) => {
+    request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(manualGeneratedResult(request)),
+    });
+  });
+
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+
+  expect(request).toMatchObject({
+    league: {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01", "team-03"] },
+        { id: "B", team_ids: ["team-02", "team-04"] },
+      ],
+    },
+  });
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
+  await expect(page.locator(".block-card").first()).toContainText("青空FC");
+  await expect(page.locator(".block-card").first()).toContainText("中央キッカーズ");
+
+  await page.locator('.step[data-step="2"]').click();
+  await page.getByLabel("青空FC", { exact: true }).selectOption("B");
+  await expect(page.locator("#result-summary")).toContainText("まだ生成結果はありません");
+});
+
+test("手動割当ての未選択と人数不均衡ではAPIを呼ばない", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("入力確認大会");
+  await page.locator("#teams").fill("青\n赤\n白\n緑\n黄");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#courts").fill("Aコート");
+  for (const name of ["青", "赤", "白", "緑"]) {
+    await page.getByLabel(name, { exact: true }).selectOption("A");
+  }
+
+  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await expect(page.locator("#manual-block-team-team-05-error")).toContainText("割当て先");
+  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+
+  await page.getByLabel("黄", { exact: true }).selectOption("B");
+  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await expect(page.locator("#manual-block-team-team-01-error")).toContainText("2〜3チーム");
+  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+});
+
+test("名称変更・追加・ブロック変更では有効な手動割当てだけを保持する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("割当て編集大会");
+  await page.locator("#teams").fill("青\n赤\n白\n緑");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.getByLabel("青", { exact: true }).selectOption("A");
+  await page.getByLabel("赤", { exact: true }).selectOption("B");
+  await page.getByLabel("白", { exact: true }).selectOption("A");
+  await page.getByLabel("緑", { exact: true }).selectOption("B");
+
+  await page.getByRole("button", { name: "戻る" }).click();
+  await page.locator("#teams").fill("青空\n赤\n白\n緑\n黄");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await expect(page.getByLabel("青空", { exact: true })).toHaveValue("A");
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
+  await expect(page.getByLabel("黄", { exact: true })).toHaveValue("");
+
+  await page.locator("#block-count").selectOption("3");
+  await expect(page.getByLabel("青空", { exact: true })).toHaveValue("A");
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
+  await expect(page.locator("#manual-block-count-C")).toContainText("0チーム");
+  await page.locator("#block-count").selectOption("1");
+  await expect(page.getByLabel("青空", { exact: true })).toHaveValue("A");
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("");
 });
 
 test("生成した1日目の全担当経路が隣接同一コートなら保存する", async ({ page }) => {

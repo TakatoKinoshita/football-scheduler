@@ -29,6 +29,38 @@ describe("1日目リーグ入力", () => {
     expect(document.tournament.input).toHaveProperty("day2");
   });
 
+  it("自動方式では保存中の手動下書きをAPI要求から除外する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "random",
+      manual_blocks: [{ id: "A", team_ids: ["team-01"] }],
+    };
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).league).toEqual({
+      block_count: 2,
+      assignment_mode: "random",
+    });
+  });
+
+  it("手動方式では割当てをAPI要求へ含める", () => {
+    const document = createTournamentDocument();
+    const manualBlocks = [
+      { id: "A", team_ids: ["team-01", "team-03"] },
+      { id: "B", team_ids: ["team-02", "team-04"] },
+    ];
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: manualBlocks,
+    };
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).league).toMatchObject({
+      assignment_mode: "manual",
+      manual_blocks: manualBlocks,
+    });
+  });
+
   it("旧画面の未完成draftをチームとコートを保って移行する", () => {
     const document = createTournamentDocument(new Date("2026-08-06T00:00:00Z"));
     document.tournament.input = {
@@ -100,6 +132,64 @@ describe("1日目リーグ入力", () => {
     document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
 
     expect(validateDay1LeagueDocument(document)).toEqual([]);
+  });
+
+  it("有効な手動割当てを受理する", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+    ];
+    document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01", "team-03"] },
+        { id: "B", team_ids: ["team-02", "team-04"] },
+      ],
+    };
+
+    expect(validateDay1LeagueDocument(document)).toEqual([]);
+  });
+
+  it("手動割当ての未選択と人数不均衡をチーム別エラーにする", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+      { id: "team-05", name: "黄" },
+    ];
+    document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
+    document.tournament.input.league = {
+      block_count: 2,
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01", "team-02", "team-03", "team-04"] },
+        { id: "B", team_ids: [] },
+      ],
+    };
+
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
+      field: "manual-block-team-team-05",
+      step: 2,
+      message: "黄の割当て先を選択してください。",
+    });
+    (document.tournament.input.league as Record<string, unknown>).manual_blocks = [
+      { id: "A", team_ids: ["team-01", "team-02", "team-03", "team-04"] },
+      { id: "B", team_ids: ["team-05"] },
+    ];
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
+      field: "manual-block-team-team-01",
+      step: 2,
+      message: "Aブロックは4チームです。各ブロックを2〜3チームにしてください。",
+    });
   });
 
   it("奇数人数の上下振り分けに未対応値を許可しない", () => {

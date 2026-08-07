@@ -25,6 +25,13 @@ import {
   serializeTournamentJson,
 } from "./import-export";
 import {
+  analyzeManualBlocks,
+  assignTeamToBlock,
+  assignmentByTeam,
+  reconcileManualBlocks,
+  reconcileNamedInputs,
+} from "./manual-blocks";
+import {
   bindDay2ScheduleParticipants,
   day2ParticipantResolution,
   unbindDay2ScheduleParticipants,
@@ -161,10 +168,18 @@ root.innerHTML = `
           <select id="assignment-mode">
             <option value="random">抽選で均等に分ける</option>
             <option value="seeded_snake">入力順をシード順として均等に分ける</option>
+            <option value="manual">手動で割り当てる</option>
           </select>
           <small id="assignment-help">同じ抽選番号なら、同じブロック分けを再現できます。</small>
           <span id="assignment-mode-error" class="field-error" role="alert"></span>
         </label>
+        <fieldset id="manual-blocks" class="manual-block-assignment field-wide" hidden>
+          <legend>チームごとの割当て先 <em>必須</em></legend>
+          <p id="manual-block-summary" class="manual-block-summary" role="status" aria-live="polite"></p>
+          <div id="manual-block-counts" class="manual-block-counts" aria-label="ブロック別の現在人数"></div>
+          <div id="manual-block-team-list" class="manual-block-team-list"></div>
+          <span id="manual-blocks-error" class="field-error" role="alert"></span>
+        </fieldset>
         <label class="field" for="odd-split-policy">
           <span>奇数人数ブロックの上下振り分け <em>必須</em></span>
           <select id="odd-split-policy">
@@ -605,6 +620,11 @@ const teamsInput = requiredElement<HTMLTextAreaElement>("#teams");
 const courtsInput = requiredElement<HTMLTextAreaElement>("#courts");
 const blockCountInput = requiredElement<HTMLSelectElement>("#block-count");
 const assignmentModeInput = requiredElement<HTMLSelectElement>("#assignment-mode");
+const assignmentHelp = requiredElement<HTMLElement>("#assignment-help");
+const manualBlocksField = requiredElement<HTMLFieldSetElement>("#manual-blocks");
+const manualBlockSummary = requiredElement<HTMLElement>("#manual-block-summary");
+const manualBlockCounts = requiredElement<HTMLElement>("#manual-block-counts");
+const manualBlockTeamList = requiredElement<HTMLElement>("#manual-block-team-list");
 const oddSplitPolicyInput = requiredElement<HTMLSelectElement>("#odd-split-policy");
 const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
 const gameDurationInput = requiredElement<HTMLInputElement>("#game-duration");
@@ -692,30 +712,6 @@ function idNameMap(field: "teams" | "courts"): Map<string, string> {
         typeof item.name === "string" ? item.name : "名称未設定",
       ]),
   );
-}
-
-function namedInputsWithStableIds(
-  existingValue: unknown,
-  names: readonly string[],
-  prefix: "team" | "court",
-): Array<{ id: string; name: string }> {
-  const existing = asObjectArray(existingValue);
-  const used = new Set<string>();
-  return names.map((name, index) => {
-    const existingId = existing[index]?.id;
-    let id = typeof existingId === "string" && existingId.length > 0 && !used.has(existingId)
-      ? existingId
-      : "";
-    if (id === "") {
-      let candidateNumber = index + 1;
-      do {
-        id = `${prefix}-${String(candidateNumber).padStart(2, "0")}`;
-        candidateNumber += 1;
-      } while (used.has(id));
-    }
-    used.add(id);
-    return { id, name };
-  });
 }
 
 function exactTeamId(match: JsonObject | undefined, side: "home" | "away"): string | undefined {
@@ -2690,6 +2686,89 @@ function renderBlockCountOptions(selected: unknown): void {
   blockCountInput.value = typeof selected === "number" ? String(selected) : "";
 }
 
+function renderManualBlockAssignment(): void {
+  const manual = assignmentModeInput.value === "manual";
+  manualBlocksField.hidden = !manual;
+  assignmentHelp.textContent = manual
+    ? "各チームの割当て先を選んでください。ブロック間の人数差は1以内にします。"
+    : "同じ抽選番号なら、同じブロック分けを再現できます。";
+  if (!manual) return;
+
+  const teams = asObjectArray(documentState.tournament.input.teams).filter(
+    (team): team is JsonObject & { id: string } => typeof team.id === "string",
+  );
+  const teamIds = teams.map((team) => team.id);
+  const blockCount = blockCountInput.value === "" ? 0 : Number(blockCountInput.value);
+  const league = asObject(documentState.tournament.input.league);
+  const blocks = reconcileManualBlocks(league?.manual_blocks, teamIds, blockCount);
+  const analysis = analyzeManualBlocks(blocks, teamIds, blockCount);
+  const assignments = assignmentByTeam(blocks);
+
+  manualBlockSummary.textContent = blockCount < 1
+    ? "先にブロック数を選択してください。"
+    : analysis.unassignedTeamIds.length > 0
+      ? `未割当て ${analysis.unassignedTeamIds.length}チーム。各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームにしてください。`
+      : analysis.valid
+        ? `全${teamIds.length}チームの割当てが完了しました。`
+        : `各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームに調整してください。`;
+  manualBlockSummary.dataset.state = analysis.valid ? "valid" : "invalid";
+
+  manualBlockCounts.replaceChildren();
+  for (const blockId of analysis.expectedBlockIds) {
+    const count = analysis.blockSizes[blockId] ?? 0;
+    const acceptable = count >= analysis.minimumSize && count <= analysis.maximumSize;
+    const badge = window.document.createElement("span");
+    badge.id = `manual-block-count-${blockId}`;
+    badge.className = `manual-block-count ${acceptable ? "valid" : "invalid"}`;
+    badge.textContent = `${blockId}ブロック：${count}チーム${acceptable ? "（適正）" : "（要調整）"}`;
+    manualBlockCounts.append(badge);
+  }
+
+  manualBlockTeamList.replaceChildren();
+  for (const team of teams) {
+    const row = window.document.createElement("div");
+    row.className = "manual-block-team-row";
+    const label = window.document.createElement("label");
+    const selectId = `manual-block-team-${team.id}`;
+    label.htmlFor = selectId;
+    label.textContent = typeof team.name === "string" ? team.name : team.id;
+    const select = window.document.createElement("select");
+    select.id = selectId;
+    select.dataset.teamId = team.id;
+    select.setAttribute("aria-describedby", `${selectId}-error manual-block-summary`);
+    select.disabled = legacyCompatibility || blockCount < 1;
+    const placeholder = window.document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "未割当て";
+    select.append(placeholder);
+    for (const blockId of analysis.expectedBlockIds) {
+      const option = window.document.createElement("option");
+      option.value = blockId;
+      option.textContent = `${blockId}ブロック`;
+      select.append(option);
+    }
+    select.value = assignments.get(team.id) ?? "";
+    const error = window.document.createElement("span");
+    error.id = `${selectId}-error`;
+    error.className = "field-error";
+    error.setAttribute("role", "alert");
+    select.addEventListener("change", () => {
+      const currentLeague = asObject(documentState.tournament.input.league);
+      if (currentLeague === undefined) return;
+      currentLeague.manual_blocks = assignTeamToBlock(
+        currentLeague.manual_blocks,
+        teamIds,
+        blockCount,
+        team.id,
+        select.value === "" ? undefined : select.value,
+      );
+      onConfigurationChanged();
+    });
+    row.append(label, select, error);
+    manualBlockTeamList.append(row);
+  }
+}
+
 function setLegacyControlsDisabled(disabled: boolean): void {
   for (const control of [
     teamsInput,
@@ -2708,6 +2787,7 @@ function setLegacyControlsDisabled(disabled: boolean): void {
     control.disabled = disabled;
   }
   requiredElement<HTMLElement>("#legacy-banner").hidden = !disabled;
+  manualBlocksField.disabled = disabled;
 }
 
 function updateReview(): void {
@@ -2748,7 +2828,9 @@ function render(): void {
   courtsInput.value = namesFromInput("courts").join("\n");
   renderBlockCountOptions(league?.block_count);
   assignmentModeInput.value =
-    league?.assignment_mode === "seeded_snake" ? "seeded_snake" : "random";
+    new Set(["random", "seeded_snake", "manual"]).has(String(league?.assignment_mode))
+      ? String(league?.assignment_mode)
+      : "random";
   oddSplitPolicyInput.value = new Set(["upper", "lower", "alternate"]).has(
     String(league?.odd_split_policy),
   )
@@ -2777,6 +2859,7 @@ function render(): void {
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   setLegacyControlsDisabled(legacyCompatibility);
+  renderManualBlockAssignment();
   clearFieldIssues();
   renderResult();
   renderStep();
@@ -2794,9 +2877,20 @@ function updateDraft(invalidateResult = false): void {
   } else {
     const teamNames = lines(teamsInput.value).slice(0, 32);
     const courtNames = lines(courtsInput.value).slice(0, 16);
-    const teams = namedInputsWithStableIds(previous.tournament.input.teams, teamNames, "team");
-    const courts = namedInputsWithStableIds(previous.tournament.input.courts, courtNames, "court");
+    const teams = reconcileNamedInputs(previous.tournament.input.teams, teamNames, "team");
+    const courts = reconcileNamedInputs(previous.tournament.input.courts, courtNames, "court");
     const seeded = assignmentModeInput.value === "seeded_snake";
+    const previousLeague = asObject(previous.tournament.input.league);
+    const blockCount = blockCountInput.value === "" ? 0 : Number(blockCountInput.value);
+    const keepManualDraft = assignmentModeInput.value === "manual"
+      || asObjectArray(previousLeague?.manual_blocks).length > 0;
+    const manualBlocks = keepManualDraft
+      ? reconcileManualBlocks(
+          previousLeague?.manual_blocks,
+          teams.map((team) => team.id),
+          blockCount,
+        )
+      : undefined;
     documentState = {
       ...previous,
       updatedAt: now,
@@ -2811,9 +2905,10 @@ function updateDraft(invalidateResult = false): void {
           })),
           courts,
           league: {
-            block_count: blockCountInput.value === "" ? null : Number(blockCountInput.value),
+            block_count: blockCountInput.value === "" ? null : blockCount,
             assignment_mode: assignmentModeInput.value,
             odd_split_policy: oddSplitPolicyInput.value,
+            ...(manualBlocks === undefined ? {} : { manual_blocks: manualBlocks }),
           },
           day: {
             id: "day1",
@@ -2848,6 +2943,7 @@ function updateDraft(invalidateResult = false): void {
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   updateReview();
+  renderManualBlockAssignment();
   saveState.textContent = "保存しています…";
   autosave.schedule(
     documentState,
@@ -3162,6 +3258,34 @@ function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
         field: "block-count",
         step: 2,
         message: "ブロック数を参加チーム数以下にしてください。",
+      },
+    ];
+  }
+  const manualCodes = new Set([
+    "MANUAL_BLOCKS_REQUIRED",
+    "MANUAL_BLOCK_COUNT_MISMATCH",
+    "DUPLICATE_BLOCK_ID",
+    "MANUAL_BLOCK_REFERENCE_INVALID",
+    "UNKNOWN_TEAM_IN_MANUAL_BLOCKS",
+    "DUPLICATE_TEAM_IN_MANUAL_BLOCKS",
+    "TEAM_MISSING_FROM_MANUAL_BLOCKS",
+    "MANUAL_BLOCK_SIZE_IMBALANCE",
+    "MANUAL_BLOCKS_NOT_ALLOWED",
+  ]);
+  if (manualCodes.has(error.code)) {
+    const teamIds = Array.isArray(error.details?.team_ids)
+      ? error.details.team_ids.filter((teamId): teamId is string => typeof teamId === "string")
+      : [];
+    const knownTeamIds = new Set(asObjectArray(documentState.tournament.input.teams)
+      .flatMap((team) => typeof team.id === "string" ? [team.id] : []));
+    const firstKnownTeamId = teamIds.find((teamId) => knownTeamIds.has(teamId));
+    return [
+      {
+        field: firstKnownTeamId === undefined
+          ? "manual-blocks"
+          : `manual-block-team-${firstKnownTeamId}`,
+        step: 2,
+        message: error.message,
       },
     ];
   }

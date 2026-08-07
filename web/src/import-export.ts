@@ -6,6 +6,11 @@ import {
 } from "./types";
 import { isDay1LeagueInput, normalizeDocument } from "./day1-form";
 import {
+  analyzeManualBlocks,
+  manualBlocksFromUnknown,
+  type ManualBlockInput,
+} from "./manual-blocks";
+import {
   previewTournamentStandings,
   resolveTournamentProgress,
   TournamentProgressError,
@@ -222,6 +227,79 @@ function validateDay1ScheduleSettings(input: JsonObject): JsonObject {
     sections.add(afterSection);
   }
   return day;
+}
+
+function validateManualLeagueSettings(
+  input: JsonObject,
+  teams: JsonObject[],
+  requireComplete: boolean,
+): ManualBlockInput[] | undefined {
+  if (!isDay1LeagueInput(input)) return undefined;
+  const league = objectValue(input.league, "リーグ設定を読み取れませんでした。");
+  const hasManualDraft = league.manual_blocks !== undefined;
+  if (league.assignment_mode !== "manual" && !hasManualDraft) return undefined;
+  if (
+    typeof league.block_count !== "number" ||
+    !Number.isInteger(league.block_count) ||
+    league.block_count < 1 ||
+    league.block_count > teams.length
+  ) {
+    throw new ImportValidationError(
+      "INVALID_DOCUMENT",
+      "手動割当てのブロック数が参加チーム数と一致しません。",
+    );
+  }
+  const rawBlocks = arrayValue(
+    league.manual_blocks,
+    "手動ブロック割当て",
+    LIMITS.teams,
+  );
+  for (const block of rawBlocks) {
+    if (typeof block.id !== "string" || block.id.length === 0) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "手動割当てにIDがないブロックがあります。",
+      );
+    }
+    stringArray(block.team_ids, `${block.id}ブロックの手動割当て`);
+  }
+  const blocks = manualBlocksFromUnknown(rawBlocks);
+  const teamIds = teams.flatMap((team) => typeof team.id === "string" ? [team.id] : []);
+  const analysis = analyzeManualBlocks(blocks, teamIds, league.block_count);
+  if (analysis.duplicateBlockIds.length > 0) {
+    throw new ImportValidationError(
+      "DUPLICATE_ID",
+      `手動割当てのブロックID「${analysis.duplicateBlockIds[0]}」が重複しています。`,
+    );
+  }
+  if (analysis.missingBlockIds.length > 0 || analysis.unknownBlockIds.length > 0) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "手動割当てに存在しないブロック、または不足しているブロックがあります。",
+    );
+  }
+  if (analysis.unknownTeamIds.length > 0) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      `手動割当てが登録されていないチーム「${analysis.unknownTeamIds[0]}」を参照しています。`,
+    );
+  }
+  if (analysis.duplicateTeamIds.length > 0) {
+    throw new ImportValidationError(
+      "DUPLICATE_ID",
+      `チーム「${analysis.duplicateTeamIds[0]}」が複数の手動ブロックに登録されています。`,
+    );
+  }
+  if (
+    requireComplete &&
+    (analysis.unassignedTeamIds.length > 0 || analysis.imbalancedBlockIds.length > 0)
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "生成済み日程の手動割当てに未割当てまたは人数不均衡があります。",
+    );
+  }
+  return blocks;
 }
 
 function clockMinutes(value: unknown): number | undefined {
@@ -784,6 +862,22 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
         );
       }
       teamToBlock.set(teamId, blockId);
+    }
+  }
+  const manualBlocks = validateManualLeagueSettings(input, teams, true);
+  if (
+    manualBlocks !== undefined &&
+    objectValue(input.league, "リーグ設定を読み取れませんでした。").assignment_mode === "manual"
+  ) {
+    const generatedBlocks = blocks.map((block) => ({
+      id: String(block.id),
+      team_ids: stringArray(block.team_ids, `${String(block.id)}ブロックのチーム一覧`),
+    }));
+    if (JSON.stringify(generatedBlocks) !== JSON.stringify(manualBlocks)) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "生成済みリーグの所属が保存された手動割当てと一致しません。",
+      );
     }
   }
 
@@ -1618,6 +1712,7 @@ export function parseTournamentJson(text: string): TournamentDocument {
     : arrayValue(input.matches, "試合", LIMITS.matches);
   validateReferences(input, teams, matches);
   validateDay2Settings(input);
+  validateManualLeagueSettings(input, teams, false);
   if (tournament.result !== undefined) {
     const result = objectValue(tournament.result, "生成結果を読み取れませんでした。");
     validateLeagueResult(result, teams, input);
