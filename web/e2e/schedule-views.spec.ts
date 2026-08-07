@@ -161,7 +161,20 @@ for (const viewport of [
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-    await expect(page.locator("#day2-schedule-view .court-schedule-card")).toHaveCount(2);
+    const courtCards = page.locator("#day2-schedule-view .court-schedule-card");
+    await expect(courtCards).toHaveCount(2);
+
+    const courtViewBox = await page
+      .locator('#day2-schedule-view [data-schedule-view="court"]')
+      .boundingBox();
+    const firstCourtBox = await courtCards.nth(0).boundingBox();
+    const secondCourtBox = await courtCards.nth(1).boundingBox();
+    expect(courtViewBox).not.toBeNull();
+    expect(firstCourtBox).not.toBeNull();
+    expect(secondCourtBox).not.toBeNull();
+    expect(firstCourtBox!.width).toBeCloseTo(courtViewBox!.width, 0);
+    expect(secondCourtBox!.width).toBeCloseTo(courtViewBox!.width, 0);
+    expect(secondCourtBox!.y).toBeGreaterThanOrEqual(firstCourtBox!.y + firstCourtBox!.height);
 
     for (const label of await page.locator("#day2-schedule-view-toggle label").all()) {
       const box = await label.boundingBox();

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   API_PATH,
+  calculateTournamentStandings,
   generateDay2Schedule,
   generateSchedule,
   generateTournamentPlan,
@@ -112,6 +113,21 @@ describe("日程生成API", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
       "generate_day2_schedule",
+    );
+  });
+
+  it("最終順位確定も同じ保護されたAPIへ送る", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ status: "COMPLETE", standings: [] }), { status: 200 }),
+    );
+    const input = { request_kind: "tournament_results" };
+
+    await expect(calculateTournamentStandings(input, "token", fetchMock)).resolves.toMatchObject({
+      status: "COMPLETE",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
+      "calculate_tournament_results",
     );
   });
 });

@@ -16,6 +16,7 @@ _ACTION_BY_REQUEST_KIND = {
     "day1_league": "generate_schedule",
     "league_standings": "calculate_standings",
     "tournament_plan": "generate_tournament",
+    "tournament_results": "calculate_tournament_results",
     "day2_schedule": "generate_day2_schedule",
 }
 _HEADERS = {
@@ -40,6 +41,13 @@ _CLIENT_ERROR_CODES = {
     "TOURNAMENT_SOURCE_INVALID",
     "TOURNAMENT_REFERENCE_INVALID",
     "TOURNAMENT_MATCH_DUPLICATED",
+    "DUPLICATE_TOURNAMENT_RESULT",
+    "UNKNOWN_TOURNAMENT_MATCH",
+    "TOURNAMENT_RESULTS_INCOMPLETE",
+    "TOURNAMENT_RESULTS_REQUIRE_RESOLVED_PLAN",
+    "TOURNAMENT_RESULT_PARTICIPANT_MISMATCH",
+    "TOURNAMENT_RESULT_INVALID",
+    "TOURNAMENT_RESULT_REFERENCE_INVALID",
     "DAY_END_TIME_INVALID",
     "DAY_TIME_WINDOW_TOO_SHORT",
     "DAY_SECTION_LIMIT_CONFLICT",

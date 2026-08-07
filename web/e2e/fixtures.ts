@@ -460,6 +460,86 @@ export function scheduleViewTournamentFixture() {
   };
 }
 
+export function tournamentResultsFixture() {
+  const document = structuredClone(scheduleViewTournamentFixture()) as unknown as {
+    tournament: { result: Record<string, unknown> };
+  };
+  const standings = {
+    schema_version: "0.1.0",
+    status: "COMPLETE",
+    standings: scheduleViewBlocks.flatMap((block) =>
+      block.team_ids.map((teamId, index) => ({
+        block_id: block.id,
+        rank: index + 1,
+        team_id: teamId,
+        played: 1,
+        wins: index === 0 ? 1 : 0,
+        draws: 0,
+        losses: index === 0 ? 0 : 1,
+        goals_for: index === 0 ? 1 : 0,
+        goals_against: index === 0 ? 0 : 1,
+        goal_difference: index === 0 ? 1 : -1,
+        points: index === 0 ? 3 : 0,
+        tie_break: "勝点",
+        head_to_head: null,
+      })),
+    ),
+    draws: [],
+  };
+  const result = document.tournament.result;
+  result.league_results = scheduleViewLeagueMatches.map((match) => ({
+    match_id: match.id,
+    home_score: 1,
+    away_score: 0,
+  }));
+  result.league_standings = standings;
+  const teamsByRank = new Map(
+    standings.standings.map((row) => [
+      `${row.block_id}:${String(row.rank)}`,
+      row.team_id,
+    ]),
+  );
+  const plan = structuredClone(result.tournament_plan) as Record<string, unknown>;
+  for (const poolName of ["upper", "lower"]) {
+    const pool = plan[poolName] as Record<string, unknown>;
+    for (const seed of pool.seeds as Array<Record<string, unknown>>) {
+      const teamId = teamsByRank.get(`${String(seed.block_id)}:${String(seed.block_rank)}`)!;
+      seed.team_id = teamId;
+      seed.team = { type: "concrete_team", team_id: teamId };
+    }
+  }
+  for (const draw of plan.seed_draws as Array<Record<string, unknown>>) {
+    const candidateRefs = draw.candidate_rank_refs as Array<Record<string, unknown>>;
+    const decidedRefs = draw.decided_rank_refs as Array<Record<string, unknown>>;
+    draw.candidates = candidateRefs
+      .map((entry) => teamsByRank.get(`${String(entry.block_id)}:${String(entry.rank)}`)!)
+      .sort();
+    draw.decided_order = decidedRefs.map(
+      (entry) => teamsByRank.get(`${String(entry.block_id)}:${String(entry.rank)}`)!,
+    );
+  }
+  plan.participant_resolution = "resolved";
+  result.tournament_plan = plan;
+
+  const schedule = structuredClone(result.day2_schedule) as Record<string, unknown>;
+  for (const match of schedule.tournament_matches as Array<Record<string, unknown>>) {
+    const rankRefs = match.possible_rank_refs as Array<Record<string, unknown>>;
+    match.possible_team_ids = rankRefs.map(
+      (entry) => teamsByRank.get(`${String(entry.block_id)}:${String(entry.rank)}`)!,
+    );
+  }
+  for (const route of schedule.team_schedules as Array<Record<string, unknown>>) {
+    const rankRef = route.rank_ref as Record<string, unknown>;
+    route.team_id = teamsByRank.get(
+      `${String(rankRef.block_id)}:${String(rankRef.rank)}`,
+    )!;
+  }
+  schedule.participant_resolution = "resolved";
+  result.day2_schedule = schedule;
+  result.integrated_validation = schedule.integrated_validation;
+  return document;
+}
+
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",

@@ -38,6 +38,11 @@ from football_scheduler.tournament import (
     TournamentPlanRequest,
     generate_tournament_plan,
 )
+from football_scheduler.tournament_results import (
+    TournamentResultsError,
+    TournamentResultsRequest,
+    calculate_tournament_standings,
+)
 from football_scheduler.validator import validate_day2_schedule, validate_schedule
 
 SCHEMA_VERSION = "0.1.0"
@@ -84,6 +89,11 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             _validate_tournament_plan_limits(payload)
             return _to_json_object(
                 generate_tournament_plan(TournamentPlanRequest.model_validate(payload))
+            )
+        if payload.get("request_kind") == "tournament_results":
+            _validate_tournament_results_limits(payload)
+            return _to_json_object(
+                calculate_tournament_standings(TournamentResultsRequest.model_validate(payload))
             )
         if payload.get("request_kind") == "day2_schedule":
             _validate_day2_schedule_limits(payload)
@@ -136,6 +146,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except LeagueResultsError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except TournamentGenerationError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except TournamentResultsError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except Day2ScheduleError as exc:
         return _error_response(exc.code, exc.message, exc.details)
@@ -407,6 +419,45 @@ def _validate_day2_schedule_limits(request: Mapping[str, Any]) -> None:
                 actual=maximum,
                 maximum=MAX_SECTIONS,
             )
+
+
+def _validate_tournament_results_limits(request: Mapping[str, Any]) -> None:
+    _validate_sequence_limit(
+        request,
+        "results",
+        MAX_MATCHES,
+        "トーナメント結果数",
+        "MATCH_LIMIT_EXCEEDED",
+    )
+    tournament_plan = request.get("tournament_plan")
+    if not isinstance(tournament_plan, Mapping):
+        return
+    tournament_match_count = 0
+    tournament_team_count = 0
+    for pool_name in ("upper", "lower"):
+        pool = tournament_plan.get(pool_name)
+        if not isinstance(pool, Mapping):
+            continue
+        matches = pool.get("matches")
+        if isinstance(matches, Sequence) and not isinstance(matches, (str, bytes, bytearray)):
+            tournament_match_count += len(matches)
+        seeds = pool.get("seeds")
+        if isinstance(seeds, Sequence) and not isinstance(seeds, (str, bytes, bytearray)):
+            tournament_team_count += len(seeds)
+    if tournament_match_count > MAX_MATCHES:
+        raise _RequestError(
+            "MATCH_LIMIT_EXCEEDED",
+            f"2日目試合数が上限の{MAX_MATCHES}を超えています。",
+            actual=tournament_match_count,
+            maximum=MAX_MATCHES,
+        )
+    if tournament_team_count > MAX_TEAMS:
+        raise _RequestError(
+            "TEAM_LIMIT_EXCEEDED",
+            f"チーム数が上限の{MAX_TEAMS}を超えています。",
+            actual=tournament_team_count,
+            maximum=MAX_TEAMS,
+        )
 
 
 def _validate_sequence_limit(

@@ -4,6 +4,7 @@ const TURNSTILE_ACTIONS = new Set([
   "generate_schedule",
   "calculate_standings",
   "generate_tournament",
+  "calculate_tournament_results",
   "generate_day2_schedule",
 ]);
 

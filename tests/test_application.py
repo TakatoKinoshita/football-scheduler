@@ -215,6 +215,66 @@ def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> No
     assert len(result["lower"]["matches"]) == 1
 
 
+def test_tournament_results_request_returns_overall_final_standings() -> None:
+    generated = application.handle_request(_day1_league_request(team_count=4, block_count=1))
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": generated["league_plan"],
+            "results": [
+                {"match_id": match["id"], "home_score": 0, "away_score": 0}
+                for match in generated["league_plan"]["matches"]
+            ],
+            "random_seed": 20260803,
+        }
+    )
+    tournament = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": generated["league_plan"],
+            "league_standings": standings,
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+    team_by_rank = {
+        (seed["block_id"], seed["block_rank"]): seed["team_id"]
+        for pool_name in ("upper", "lower")
+        for seed in tournament[pool_name]["seeds"]
+    }
+    results = []
+    for pool_name in ("upper", "lower"):
+        for match in tournament[pool_name]["matches"]:
+            home = match["home"]
+            away = match["away"]
+            results.append(
+                {
+                    "match_id": match["id"],
+                    "home_team_id": team_by_rank[(home["block_id"], home["rank"])],
+                    "away_team_id": team_by_rank[(away["block_id"], away["rank"])],
+                    "regular_score_home": 1,
+                    "regular_score_away": 0,
+                }
+            )
+
+    outcome = application.handle_request(
+        {
+            "request_kind": "tournament_results",
+            "tournament_plan": tournament,
+            "results": results,
+        }
+    )
+
+    assert outcome["status"] == "COMPLETE"
+    assert [row["rank"] for row in outcome["standings"]] == [1, 2, 3, 4]
+    assert [row["pool"] for row in outcome["standings"]] == [
+        "upper",
+        "upper",
+        "lower",
+        "lower",
+    ]
+
+
 def test_tournament_plan_request_returns_provisional_table_without_standings() -> None:
     generated = application.handle_request(_day1_league_request(team_count=8, block_count=2))
 

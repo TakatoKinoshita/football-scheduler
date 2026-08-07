@@ -126,4 +126,24 @@ describe("Cloudflare Pages API proxy", () => {
       diagnostics: [{ code: "BOT_CHECK_ACTION_REQUIRED" }],
     });
   });
+
+  it("最終順位確定のTurnstile actionをAWSへ転送する", async () => {
+    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
+      new Response('{"status":"COMPLETE"}', { status: 200 }),
+    );
+
+    const response = await proxyScheduleRequest(
+      request('{"request_kind":"tournament_results"}', {
+        "x-turnstile-action": "calculate_tournament_results",
+      }),
+      environment,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(200);
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(options?.headers).get("x-turnstile-action")).toBe(
+      "calculate_tournament_results",
+    );
+  });
 });

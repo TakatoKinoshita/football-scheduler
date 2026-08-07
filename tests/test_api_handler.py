@@ -120,6 +120,26 @@ def test_day2_schedule_success_returns_http_200(
     assert json.loads(response["body"])["participant_resolution"] == "provisional"
 
 
+def test_tournament_results_action_returns_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: {"status": "COMPLETE", "match_results": [], "standings": []},
+    )
+
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"tournament_results"}',
+            headers={"x-turnstile-action": "calculate_tournament_results"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 200
+
+
 def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
     payload = {
         "schema_version": "0.1.0",
@@ -219,6 +239,7 @@ def test_turnstile_action_must_match_request_kind(
         ("INPUT_SCHEMA_INVALID", 400),
         ("INVALID_BLOCK_COUNT", 400),
         ("TOURNAMENT_SOURCE_INVALID", 400),
+        ("TOURNAMENT_RESULT_INVALID", 400),
         ("DAY_END_TIME_INVALID", 400),
         ("DAY1_SCHEDULE_INVALID", 400),
         ("TEAM_LIMIT_EXCEEDED", 413),

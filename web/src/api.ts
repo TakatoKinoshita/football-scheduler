@@ -10,6 +10,8 @@ function turnstileAction(input: JsonObject): string {
       return "calculate_standings";
     case "tournament_plan":
       return "generate_tournament";
+    case "tournament_results":
+      return "calculate_tournament_results";
     case "day2_schedule":
       return "generate_day2_schedule";
     default:
@@ -117,6 +119,15 @@ export function calculateLeagueStandings(
 
 /** リーグ順位枠と任意の確定順位から、上位・下位の完全順位決定表を生成する。 */
 export function generateTournamentPlan(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}
+
+/** 入力済みの2日目試合結果を検証し、総合最終順位を確定する。 */
+export function calculateTournamentStandings(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

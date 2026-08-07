@@ -5,6 +5,11 @@ import {
   type TournamentDocument,
 } from "./types";
 import { isDay1LeagueInput, normalizeDocument } from "./day1-form";
+import {
+  previewTournamentStandings,
+  resolveTournamentProgress,
+  TournamentProgressError,
+} from "./tournament-results";
 
 export const MAX_JSON_BYTES = 1_000_000;
 export const LIMITS = {
@@ -745,7 +750,9 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       result.league_standings !== undefined ||
       result.tournament_plan !== undefined ||
       result.day2_schedule !== undefined ||
-      result.integrated_validation !== undefined
+      result.integrated_validation !== undefined ||
+      result.tournament_results !== undefined ||
+      result.final_standings !== undefined
     ) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
@@ -880,6 +887,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
         rankSets,
       );
       validateDay2ScheduleResult(result, input, teams, tournamentPlan, undefined);
+      validateTournamentResultsState(result, tournamentPlan);
     } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
@@ -959,10 +967,118 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       rankSets,
     );
     validateDay2ScheduleResult(result, input, teams, tournamentPlan, rows);
-  } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
+    validateTournamentResultsState(result, tournamentPlan);
+  } else if (
+    result.day2_schedule !== undefined ||
+    result.integrated_validation !== undefined ||
+    result.tournament_results !== undefined ||
+    result.final_standings !== undefined
+  ) {
     throw new ImportValidationError(
       "INVALID_REFERENCE",
       "トーナメント表がないため、2日目日程を復元できませんでした。",
+    );
+  }
+}
+
+function validateTournamentResultsState(result: JsonObject, plan: JsonObject): void {
+  if (result.tournament_results === undefined) {
+    if (result.final_standings !== undefined) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "2日目の試合結果がないため、総合最終順位を復元できませんでした。",
+      );
+    }
+    return;
+  }
+  const rawResults = arrayValue(
+    result.tournament_results,
+    "2日目試合結果",
+    LIMITS.matches,
+  );
+  let progress;
+  try {
+    progress = resolveTournamentProgress(plan, rawResults);
+  } catch (error) {
+    throw new ImportValidationError(
+      error instanceof TournamentProgressError ? error.code : "INVALID_REFERENCE",
+      error instanceof Error
+        ? error.message
+        : "2日目の試合結果をトーナメント表へ対応させられませんでした。",
+    );
+  }
+  if (result.final_standings === undefined) return;
+  if (!progress.complete) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "2日目の全試合結果が揃っていないため、総合最終順位を復元できませんでした。",
+    );
+  }
+  const finalStandings = objectValue(
+    result.final_standings,
+    "総合最終順位を読み取れませんでした。",
+  );
+  if (finalStandings.schema_version !== SCHEMA_VERSION || finalStandings.status !== "COMPLETE") {
+    throw new ImportValidationError(
+      "INVALID_DOCUMENT",
+      "総合最終順位の状態を読み取れませんでした。",
+    );
+  }
+  const expectedStandings = previewTournamentStandings(plan, progress);
+  const actualStandings = arrayValue(
+    finalStandings.standings,
+    "総合最終順位",
+    LIMITS.teams,
+  );
+  if (
+    actualStandings.length !== expectedStandings.length ||
+    expectedStandings.some((expected, index) => {
+      const actual = actualStandings[index];
+      return actual === undefined ||
+        actual.rank !== expected.rank ||
+        actual.pool !== expected.pool ||
+        actual.pool_rank !== expected.pool_rank ||
+        actual.team_id !== expected.team_id ||
+        JSON.stringify(actual.entry) !== JSON.stringify(expected.entry);
+    })
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "総合最終順位が2日目の試合結果と一致しません。",
+    );
+  }
+  const canonicalResults = arrayValue(
+    finalStandings.match_results,
+    "検証済み2日目試合結果",
+    LIMITS.matches,
+  );
+  const canonicalByMatch = new Map(
+    canonicalResults.map((matchResult) => [String(matchResult.match_id), matchResult]),
+  );
+  if (
+    canonicalResults.length !== progress.orderedMatches.length ||
+    canonicalByMatch.size !== progress.orderedMatches.length ||
+    progress.orderedMatches.some((match) => {
+      const canonical = canonicalByMatch.get(match.matchId);
+      const raw = match.result;
+      if (canonical === undefined || raw === undefined) return true;
+      const penaltyHome = canonical.penalty_score_home ?? undefined;
+      const penaltyAway = canonical.penalty_score_away ?? undefined;
+      return canonical.home_team_id !== raw.home_team_id ||
+        canonical.away_team_id !== raw.away_team_id ||
+        canonical.regular_score_home !== raw.regular_score_home ||
+        canonical.regular_score_away !== raw.regular_score_away ||
+        penaltyHome !== raw.penalty_score_home ||
+        penaltyAway !== raw.penalty_score_away ||
+        canonical.winner !== match.winner ||
+        canonical.winner_team_id !== match.winnerTeamId ||
+        canonical.loser_team_id !== match.loserTeamId ||
+        canonical.decision !== match.decision;
+    })
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "検証済みの2日目試合結果が入力内容と一致しません。",
     );
   }
 }

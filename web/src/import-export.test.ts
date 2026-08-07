@@ -197,6 +197,34 @@ function day2Document() {
   return document;
 }
 
+function completedTournamentResultsDocument() {
+  const document = day2Document();
+  const result = document.tournament.result as Record<string, unknown>;
+  result.tournament_results = [];
+  result.final_standings = {
+    schema_version: "0.1.0",
+    status: "COMPLETE",
+    match_results: [],
+    standings: [
+      {
+        rank: 1,
+        pool: "upper",
+        pool_rank: 1,
+        team_id: "team-01",
+        entry: { type: "league_rank", block_id: "A", rank: 1 },
+      },
+      {
+        rank: 2,
+        pool: "lower",
+        pool_rank: 1,
+        team_id: "team-02",
+        entry: { type: "league_rank", block_id: "A", rank: 2 },
+      },
+    ],
+  };
+  return document;
+}
+
 function provisionalDay2Document() {
   const document = rankedDocument();
   const result = document.tournament.result as Record<string, unknown>;
@@ -591,6 +619,29 @@ describe("大会JSONの入出力", () => {
   it("2日目設定・日程・統合検証を同じ内容で復元する", () => {
     const document = day2Document();
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("2日目試合結果と総合最終順位を同じ内容で復元する", () => {
+    const document = completedTournamentResultsDocument();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("2日目試合結果と一致しない総合最終順位を拒否する", () => {
+    const document = completedTournamentResultsDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    const finalStandings = result.final_standings as Record<string, unknown>;
+    const rows = finalStandings.standings as Array<Record<string, unknown>>;
+    rows[0]!.team_id = "team-02";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/総合最終順位/);
+  });
+
+  it("仮トーナメントへ2日目試合結果を付けた文書を拒否する", () => {
+    const document = provisionalDay2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    result.tournament_results = [];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/リーグ順位を確定/);
   });
 
   it("確定順位がなくても順位枠だけの仮2日目日程を復元する", () => {

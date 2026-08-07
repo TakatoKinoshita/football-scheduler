@@ -63,7 +63,12 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
 
 @pytest.mark.parametrize(
     "action",
-    ["calculate_standings", "generate_tournament", "generate_day2_schedule"],
+    [
+        "calculate_standings",
+        "generate_tournament",
+        "calculate_tournament_results",
+        "generate_day2_schedule",
+    ],
 )
 def test_result_workflow_turnstile_actions_are_allowed(
     monkeypatch: pytest.MonkeyPatch, action: str
