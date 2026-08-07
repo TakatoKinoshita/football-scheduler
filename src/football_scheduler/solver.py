@@ -961,10 +961,11 @@ def _optimize_lower_objectives(
         if candidate_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
             final_status = SolverStatus.FEASIBLE
             break
-        solver = candidate
         if candidate_status is not SolverStatus.OPTIMAL:
+            # 制限時間に依存する未証明解へ差し替えず、直前まで証明済みの解を維持する。
             final_status = SolverStatus.FEASIBLE
             break
+        solver = candidate
         model.add(objective == candidate.value(objective))
         optimized.append(name)
     return solver, final_status, wall_time, tuple(optimized)

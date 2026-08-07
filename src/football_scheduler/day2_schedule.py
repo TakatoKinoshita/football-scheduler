@@ -271,6 +271,8 @@ class _PathModel:
     dependencies: Mapping[str, frozenset[str]]
     conflict_pairs: frozenset[tuple[int, int]]
     team_by_rank: Mapping[_RankKey, str]
+    upper_final_index: int | None
+    lower_final_index: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +284,7 @@ class _ModelVariables:
     active_sections: tuple[cp_model.IntVar, ...]
     used_sections: cp_model.IntVar
     maximum_wait: cp_model.IntVar
+    lower_final_section_gap: cp_model.IntVar
     court_change_count: cp_model.IntVar
     court_usage_difference: cp_model.IntVar
 
@@ -363,6 +366,17 @@ def generate_day2_schedule(
             wall_time_seconds=layout.wall_time_seconds,
             required_matches=len(path_model.matches),
             available_slots=horizon * len(data.courts),
+            required_final_match_id=(
+                path_model.matches[path_model.upper_final_index].id
+                if path_model.upper_final_index is not None
+                else path_model.matches[path_model.lower_final_index].id
+                if path_model.lower_final_index is not None
+                else ""
+            ),
+            required_final_rule="last_occupied_section",
+            maximum_sections=horizon,
+            court_count=len(data.courts),
+            organizer_capacity=data.referees.organizer_capacity,
         )
 
     layout, slots, invalid_reasons, capacity_overruns = _find_referee_ready_layout(
@@ -405,13 +419,59 @@ def generate_day2_schedule(
         variables,
     )
     result_status = SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE
-    diagnostics: tuple[Diagnostic, ...] = ()
+    diagnostic_items: list[Diagnostic] = []
+    lower_final_gap = metrics.lower_tournament_final_section_gap
+    if lower_final_gap is not None and lower_final_gap > 0:
+        gap_proven = "lower_tournament_final_section_gap" in metrics.optimized_objectives
+        reason_codes: list[str] = []
+        reason_messages: list[str] = []
+        if len(data.courts) < 2:
+            reason_codes.append("court_capacity")
+            reason_messages.append(f"利用できるコート数が{len(data.courts)}面")
+        if data.referees.organizer_capacity < 2:
+            reason_codes.append("organizer_capacity")
+            reason_messages.append(
+                f"同時に担当できる主催者審判能力が{data.referees.organizer_capacity}試合"
+            )
+        if not gap_proven:
+            reason_codes.append("optimality_not_proven")
+            reason_messages.append("制限時間内に最も遅い配置であることを未証明")
+        if not reason_codes:
+            reason_codes.append("other_hard_constraints")
+            reason_messages.append("休憩・試合依存・役割衝突などのハード制約")
+        if gap_proven:
+            message = (
+                "最小セクション数と既存の必須条件を保つと、下位トーナメント決勝を"
+                "上位決勝と同じ最終セクションへ配置できませんでした。"
+            )
+            code = "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION"
+        else:
+            message = (
+                "下位トーナメント決勝は最終セクションより前です。制限時間内に、"
+                "これより遅い配置がないことまでは証明できませんでした。"
+            )
+            code = "LOWER_TOURNAMENT_FINAL_PLACEMENT_NOT_PROVEN"
+        message = f"{message}理由は{'、'.join(reason_messages)}です。"
+        diagnostic_items.append(
+            Diagnostic(
+                code=code,
+                message=message,
+                details={
+                    "upper_final_section": metrics.upper_tournament_final_section or 0,
+                    "lower_final_section": metrics.lower_tournament_final_section or 0,
+                    "section_gap": lower_final_gap,
+                    "court_count": len(data.courts),
+                    "organizer_capacity": data.referees.organizer_capacity,
+                    "reason_codes": reason_codes,
+                },
+            )
+        )
     if result_status is SolverStatus.FEASIBLE:
-        diagnostics = (
+        diagnostic_items.append(
             Diagnostic(
                 code="OPTIMALITY_NOT_PROVEN",
                 message="実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。",
-            ),
+            )
         )
     return Day2Schedule(
         participant_resolution=data.tournament_plan.participant_resolution,
@@ -422,7 +482,7 @@ def generate_day2_schedule(
         expected_end_time=expected_end_time(data.day, used_sections),
         team_schedules=routes,
         metrics=metrics,
-        diagnostics=diagnostics,
+        diagnostics=tuple(diagnostic_items),
     )
 
 
@@ -454,8 +514,6 @@ def _find_referee_ready_layout(
         ]
         | None
     ) = None
-    best_score: tuple[int, ...] | None = None
-    refinement_attempts = 0
     while True:
         slots = _extract_slots(data, path_model, variables, layout.solver)
         assignments, invalid_reasons = _assign_referees(data, path_model, slots)
@@ -481,25 +539,11 @@ def _find_referee_ready_layout(
             data.referees.tournament_fallback is TournamentFallback.STRICT
         )
         if not strict_invalid and not capacity_overruns:
-            routes = _team_routes(path_model, slots)
-            referee_then_match, adjacent_moves = _route_transition_counts(routes)
-            score = (
-                layout.solver.value(variables.used_sections),
-                layout.solver.value(variables.maximum_wait),
-                referee_then_match,
-                adjacent_moves,
-                layout.solver.value(variables.court_change_count),
-                layout.solver.value(variables.court_usage_difference),
-            )
-            if best_score is None or score < best_score:
-                best_valid = (layout, slots, invalid_reasons, capacity_overruns)
-                best_score = score
-            refinement_attempts += 1
+            best_valid = (layout, slots, invalid_reasons, capacity_overruns)
+            break
 
         remaining = data.solver.max_time_seconds - (perf_counter() - started)
-        if remaining <= _MIN_SOLVER_SECONDS or (
-            best_valid is not None and refinement_attempts >= 4
-        ):
+        if remaining <= _MIN_SOLVER_SECONDS:
             break
 
         selected_variables = [
@@ -508,15 +552,7 @@ def _find_referee_ready_layout(
             if layout.solver.boolean_value(variable)
         ]
         model.add(sum(selected_variables) <= len(path_model.matches) - 1)
-        retry_solver = (
-            _configured_solver(
-                min(remaining, 0.5),
-                data.random_seed,
-                max_deterministic_time=0.02,
-            )
-            if best_valid is not None
-            else _configured_solver(remaining, data.random_seed)
-        )
+        retry_solver = _configured_solver(remaining, data.random_seed)
         retry_status = _status(retry_solver.solve(model))
         total_wall_time += retry_solver.wall_time
         if retry_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
@@ -666,6 +702,26 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         )
         for match in raw_matches
     )
+    final_indexes_by_phase = {
+        phase: [
+            index
+            for index, match in enumerate(scheduled_matches)
+            if match.phase == phase and match.rank_range == (1, 2)
+        ]
+        for phase in ("upper_tournament", "lower_tournament")
+    }
+    expected_final_counts = {
+        "upper_tournament": int(plan.upper.participant_count >= 2),
+        "lower_tournament": int(plan.lower.participant_count >= 2),
+    }
+    for phase, indexes in final_indexes_by_phase.items():
+        if len(indexes) != expected_final_counts[phase]:
+            raise _invalid_reference(
+                "tournament_final_definition_invalid",
+                phase=phase,
+                expected=expected_final_counts[phase],
+                actual=len(indexes),
+            )
     conflict_pairs = frozenset(
         (left, right)
         for left in range(len(scheduled_matches))
@@ -681,6 +737,8 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         dependencies=dependencies,
         conflict_pairs=conflict_pairs,
         team_by_rank=rank_teams,
+        upper_final_index=next(iter(final_indexes_by_phase["upper_tournament"]), None),
+        lower_final_index=next(iter(final_indexes_by_phase["lower_tournament"]), None),
     )
 
 
@@ -747,6 +805,21 @@ def _build_cp_model(
         target = index_by_id[match_id]
         for dependency_id in dependency_ids:
             model.add(section_number[target] >= section_number[index_by_id[dependency_id]] + 2)
+
+    primary_final_index = (
+        path_model.upper_final_index
+        if path_model.upper_final_index is not None
+        else path_model.lower_final_index
+    )
+    if primary_final_index is not None:
+        model.add(section_number[primary_final_index] == used_sections)
+    lower_final_section_gap = model.new_int_var(0, horizon, "lower_final_section_gap")
+    if path_model.upper_final_index is not None and path_model.lower_final_index is not None:
+        model.add(
+            lower_final_section_gap == used_sections - section_number[path_model.lower_final_index]
+        )
+    else:
+        model.add(lower_final_section_gap == 0)
 
     preliminary = [index for index, match in enumerate(path_model.matches) if match.preliminary]
     main = [index for index, match in enumerate(path_model.matches) if not match.preliminary]
@@ -819,6 +892,7 @@ def _build_cp_model(
         active_sections=active,
         used_sections=used_sections,
         maximum_wait=maximum_wait,
+        lower_final_section_gap=lower_final_section_gap,
         court_change_count=court_change_count,
         court_usage_difference=court_usage_difference,
     )
@@ -832,11 +906,12 @@ def _solve_lexicographically(
 ) -> _SolvedLayout:
     stages: tuple[tuple[str, cp_model.IntVar], ...] = (
         ("used_sections", variables.used_sections),
+        ("lower_tournament_final_section_gap", variables.lower_final_section_gap),
         ("maximum_team_wait_sections", variables.maximum_wait),
         ("team_court_change_count", variables.court_change_count),
         ("court_usage_difference", variables.court_usage_difference),
     )
-    budget_fractions = (0.5, 0.2, 0.15, 0.15)
+    budget_fractions = (0.5, 0.1, 0.16, 0.12, 0.12)
     best_solver: cp_model.CpSolver | None = None
     optimized: list[str] = []
     primary_bound = 0.0
@@ -871,11 +946,14 @@ def _solve_lexicographically(
                     primary_bound=solver.best_objective_bound,
                 )
             break
-        best_solver = solver
         if stage_index == 0:
             primary_bound = solver.best_objective_bound
         if status is not SolverStatus.OPTIMAL:
+            if best_solver is None:
+                best_solver = solver
+            # 後段の未証明解へ差し替えず、直前まで証明済みの辞書式目的を維持する。
             break
+        best_solver = solver
         optimum = solver.value(objective)
         model.add(objective == optimum)
         optimized.append(name)
@@ -1086,12 +1164,32 @@ def _audit_metrics(
     )
     court_counts = Counter(slot.court_id for slot in occupied)
     counts = [court_counts[court.id] for court in data.courts]
+    positions = {slot.match_id: slot.section_no for slot in occupied if slot.match_id is not None}
+    upper_final_section = (
+        positions.get(path_model.matches[path_model.upper_final_index].id)
+        if path_model.upper_final_index is not None
+        else None
+    )
+    lower_final_section = (
+        positions.get(path_model.matches[path_model.lower_final_index].id)
+        if path_model.lower_final_index is not None
+        else None
+    )
+    lower_final_gap = (
+        layout.solver.value(variables.lower_final_section_gap)
+        if path_model.lower_final_index is not None
+        else None
+    )
     referee_then_match_count, adjacent_move_count = _route_transition_counts(routes)
     league_counts, league_minimum, league_maximum, league_difference, previous_same_court = (
         _day1_league_audit(data)
     )
     stage_values = (
         ("used_sections", layout.solver.value(variables.used_sections)),
+        (
+            "lower_tournament_final_section_gap",
+            layout.solver.value(variables.lower_final_section_gap),
+        ),
         ("league_team_referee_count_difference", league_difference),
         (
             "maximum_team_wait_sections",
@@ -1121,7 +1219,12 @@ def _audit_metrics(
     proven_objectives.update(
         name
         for name, value in stage_values
-        if name in {"referee_then_match_count", "adjacent_assignment_court_change_count"}
+        if name
+        in {
+            "lower_tournament_final_section_gap",
+            "referee_then_match_count",
+            "adjacent_assignment_court_change_count",
+        }
         and value == 0
     )
     optimized_objectives = tuple(name for name, _value in stage_values if name in proven_objectives)
@@ -1148,6 +1251,9 @@ def _audit_metrics(
         tournament_team_referee_count=team_referee_count,
         tournament_referee_fallback_count=fallback_count,
         unused_slot_count=len(slots) - len(occupied),
+        upper_tournament_final_section=upper_final_section,
+        lower_tournament_final_section=lower_final_section,
+        lower_tournament_final_section_gap=lower_final_gap,
         optimized_objectives=optimized_objectives,
         objective_stages=tuple(
             ObjectiveStageMetric(
@@ -1229,6 +1335,7 @@ def _empty_metrics(data: Day2ScheduleRequest) -> SolverMetrics:
     )
     stage_values = (
         ("used_sections", 0),
+        ("lower_tournament_final_section_gap", 0),
         ("league_team_referee_count_difference", league_difference),
         ("maximum_team_wait_sections", 0),
         ("referee_then_match_count", 0),

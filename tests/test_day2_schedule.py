@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from football_scheduler.day2_schedule import (
     Day2Schedule,
+    Day2ScheduleError,
     Day2ScheduleRequest,
     generate_day2_schedule,
 )
@@ -83,6 +84,8 @@ def _request(
     courts: int = 2,
     fallback: str = "organizer",
     max_sections: int | None = 40,
+    organizer_capacity: int | None = None,
+    odd_split_policy: str = "upper",
     resolved: bool = True,
     team_prefix: str = "T",
 ) -> tuple[Day2ScheduleRequest, TournamentPlan]:
@@ -92,7 +95,7 @@ def _request(
             "request_kind": "tournament_plan",
             "league_plan": league_plan.model_dump(mode="json"),
             **({"league_standings": standings.model_dump(mode="json")} if resolved else {}),
-            "odd_split_policy": "upper",
+            "odd_split_policy": odd_split_policy,
             "random_seed": 17,
         }
     )
@@ -122,7 +125,9 @@ def _request(
                 "max_sections": max_sections,
             },
             "referees": {
-                "organizer_capacity": courts,
+                "organizer_capacity": (
+                    courts if organizer_capacity is None else organizer_capacity
+                ),
                 "tournament_fallback": fallback,
             },
             "random_seed": 17,
@@ -166,6 +171,119 @@ def test_two_team_event_has_no_real_day2_matches() -> None:
     assert result.participant_resolution == "provisional"
     assert result.slots == ()
     assert result.metrics.used_sections == 0
+    assert result.metrics.upper_tournament_final_section is None
+    assert result.metrics.lower_tournament_final_section is None
+
+
+def _final_sections(result: Day2Schedule) -> tuple[int | None, int | None, int]:
+    sections = {
+        slot.match_id: slot.section_no for slot in result.slots if slot.match_id is not None
+    }
+    upper_id = next(
+        (
+            match.id
+            for match in result.tournament_matches
+            if match.phase == "upper_tournament" and match.rank_range == (1, 2)
+        ),
+        None,
+    )
+    lower_id = next(
+        (
+            match.id
+            for match in result.tournament_matches
+            if match.phase == "lower_tournament" and match.rank_range == (1, 2)
+        ),
+        None,
+    )
+    return (
+        sections.get(upper_id),
+        sections.get(lower_id),
+        max(sections.values(), default=0),
+    )
+
+
+def test_both_tournament_finals_share_last_section_when_capacity_allows() -> None:
+    request, _tournament = _request((4, 4), courts=4, organizer_capacity=4)
+
+    result = generate_day2_schedule(request)
+
+    upper, lower, last = _final_sections(result)
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert upper == lower == last
+    assert result.metrics.upper_tournament_final_section == last
+    assert result.metrics.lower_tournament_final_section == last
+    assert result.metrics.lower_tournament_final_section_gap == 0
+    assert "lower_tournament_final_section_gap" in result.metrics.optimized_objectives
+    assert not any(
+        diagnostic.code.startswith("LOWER_TOURNAMENT_FINAL_") for diagnostic in result.diagnostics
+    )
+
+
+@pytest.mark.parametrize(
+    ("courts", "organizer_capacity", "reason"),
+    [(1, 1, "court_capacity"), (2, 1, "organizer_capacity")],
+)
+def test_lower_final_is_latest_feasible_when_finals_cannot_share_last_section(
+    courts: int, organizer_capacity: int, reason: str
+) -> None:
+    request, _tournament = _request(
+        (4, 4),
+        courts=courts,
+        organizer_capacity=organizer_capacity,
+    )
+
+    result = generate_day2_schedule(request)
+
+    upper, lower, last = _final_sections(result)
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert upper == last
+    assert lower is not None and lower < last
+    assert result.metrics.lower_tournament_final_section_gap == last - lower
+    warning = next(
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.code
+        in {
+            "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION",
+            "LOWER_TOURNAMENT_FINAL_PLACEMENT_NOT_PROVEN",
+        }
+    )
+    assert reason in warning.details["reason_codes"]
+    expected_reason_text = "コート数" if reason == "court_capacity" else "主催者審判能力"
+    assert expected_reason_text in warning.message
+
+
+@pytest.mark.parametrize(
+    ("odd_split_policy", "expected_phase"),
+    [("upper", "upper_tournament"), ("lower", "lower_tournament")],
+)
+def test_only_existing_tournament_final_is_last(odd_split_policy: str, expected_phase: str) -> None:
+    request, _tournament = _request(
+        (3,),
+        courts=1,
+        odd_split_policy=odd_split_policy,
+    )
+
+    result = generate_day2_schedule(request)
+
+    upper, lower, last = _final_sections(result)
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert (upper if expected_phase == "upper_tournament" else lower) == last
+    assert (lower if expected_phase == "upper_tournament" else upper) is None
+
+
+def test_invalid_tournament_final_definition_is_rejected() -> None:
+    request, _tournament = _request((4, 4))
+    payload = request.model_dump(mode="json")
+    upper_matches = payload["tournament_plan"]["upper"]["matches"]
+    final = next(match for match in upper_matches if match["rank_range"] == [1, 2])
+    final["rank_range"] = [1, 3]
+
+    with pytest.raises(Day2ScheduleError) as captured:
+        generate_day2_schedule(payload)
+
+    assert captured.value.code == "TOURNAMENT_REFERENCE_INVALID"
+    assert captured.value.details["reason"] == "tournament_final_definition_invalid"
 
 
 def test_day2_metrics_keep_fixed_day1_league_referee_objectives() -> None:
@@ -276,6 +394,9 @@ def test_arbitrary_participant_counts_schedule_without_bye_slots(participant_cou
     assert all(
         route.rank_ref is not None and route.team_id is None for route in result.team_schedules
     )
+    upper_final, _lower_final, last_section = _final_sections(result)
+    assert upper_final == last_section
+    assert validate_day2_schedule(_validation_document(request, result))["valid"] is True
 
 
 def test_representative_two_tournaments_finish_within_thirty_seconds() -> None:
@@ -470,6 +591,10 @@ def test_provisional_schedule_rejects_zero_organizer_capacity() -> None:
     assert result.diagnostics
     assert result.diagnostics[0].code == "TOURNAMENT_SCHEDULE_INFEASIBLE"
     assert "作成できません" in result.diagnostics[0].message
+    assert result.diagnostics[0].details["required_final_match_id"]
+    assert result.diagnostics[0].details["maximum_sections"] > 0
+    assert result.diagnostics[0].details["court_count"] == 2
+    assert result.diagnostics[0].details["organizer_capacity"] == 0
 
 
 def test_same_seed_reproduces_slots_referees_and_audit_values() -> None:
@@ -509,6 +634,121 @@ def test_independent_validator_detects_changed_referee_source() -> None:
     assert validation["valid"] is False
     assert any(
         issue["code"] == "TOURNAMENT_PREVIOUS_WINNER_REFEREE_REQUIRED"
+        for issue in validation["diagnostics"]
+    )
+
+
+def test_independent_validator_rejects_match_after_upper_final() -> None:
+    request, _tournament = _request((4, 4), courts=2)
+    result = generate_day2_schedule(request)
+    document = _validation_document(request, result)
+    matches = document["matches"]
+    schedule = document["schedule"]
+    assert isinstance(matches, list)
+    assert isinstance(schedule, dict)
+    slots = schedule["slots"]
+    assert isinstance(slots, list)
+    upper_final_id = next(
+        match["id"]
+        for match in matches
+        if isinstance(match, dict)
+        and match.get("phase") == "upper_tournament"
+        and match.get("rank_range") == [1, 2]
+    )
+    upper_slot = next(
+        slot for slot in slots if isinstance(slot, dict) and slot.get("match_id") == upper_final_id
+    )
+    earlier_slot = next(
+        slot
+        for slot in slots
+        if isinstance(slot, dict)
+        and slot.get("match_id") is not None
+        and int(slot["section_no"]) < int(upper_slot["section_no"])
+    )
+    upper_position = (upper_slot["section_no"], upper_slot["court_id"])
+    upper_slot["section_no"], upper_slot["court_id"] = (
+        earlier_slot["section_no"],
+        earlier_slot["court_id"],
+    )
+    earlier_slot["section_no"], earlier_slot["court_id"] = upper_position
+
+    validation = validate_day2_schedule(document)
+
+    assert validation["valid"] is False
+    assert "UPPER_TOURNAMENT_FINAL_NOT_LAST_SECTION" in {
+        issue["code"] for issue in validation["diagnostics"]
+    }
+
+
+def test_independent_validator_rejects_changed_final_definition() -> None:
+    request, _tournament = _request((4, 4), courts=2)
+    result = generate_day2_schedule(request)
+    document = _validation_document(request, result)
+    matches = document["matches"]
+    assert isinstance(matches, list)
+    upper_final = next(
+        match
+        for match in matches
+        if isinstance(match, dict)
+        and match.get("phase") == "upper_tournament"
+        and match.get("rank_range") == [1, 2]
+    )
+    upper_final["rank_range"] = [1, 3]
+
+    validation = validate_day2_schedule(document)
+
+    assert validation["valid"] is False
+    assert "TOURNAMENT_FINAL_DEFINITION_INVALID" in {
+        issue["code"] for issue in validation["diagnostics"]
+    }
+
+
+def test_independent_validator_rejects_missing_final_in_schedule_and_plan() -> None:
+    request, _tournament = _request((4, 4), courts=2)
+    result = generate_day2_schedule(request)
+    document = _validation_document(request, result)
+    matches = document["matches"]
+    plan = document["tournament_plan"]
+    assert isinstance(matches, list)
+    assert isinstance(plan, dict)
+    upper = plan["upper"]
+    assert isinstance(upper, dict)
+    plan_matches = upper["matches"]
+    assert isinstance(plan_matches, list)
+    for collection in (matches, plan_matches):
+        upper_final = next(
+            match
+            for match in collection
+            if isinstance(match, dict)
+            and match.get("phase") == "upper_tournament"
+            and match.get("rank_range") == [1, 2]
+        )
+        upper_final["rank_range"] = [1, 3]
+
+    validation = validate_day2_schedule(document)
+
+    assert validation["valid"] is False
+    assert "TOURNAMENT_FINAL_DEFINITION_INVALID" in {
+        issue["code"] for issue in validation["diagnostics"]
+    }
+
+
+def test_independent_validator_detects_changed_final_audit() -> None:
+    request, _tournament = _request((4, 4), courts=2)
+    result = generate_day2_schedule(request)
+    document = _validation_document(request, result)
+    metrics = document["metrics"]
+    assert isinstance(metrics, dict)
+    metrics["lower_tournament_final_section_gap"] = (
+        int(metrics["lower_tournament_final_section_gap"]) + 1
+    )
+
+    validation = validate_day2_schedule(document)
+
+    assert validation["valid"] is False
+    assert any(
+        issue["code"] == "SCHEDULE_AUDIT_MISMATCH"
+        and issue["details"].get("field") == "lower_tournament_final_section_gap"
         for issue in validation["diagnostics"]
     )
 

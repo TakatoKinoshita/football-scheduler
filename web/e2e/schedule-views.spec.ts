@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  scheduleViewDay2ScheduleResult,
   scheduleResult,
   scheduleViewTournamentFixture,
   standingsResult,
@@ -20,7 +21,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
 }) => {
   await openScheduleViewFixture(page);
   await page.locator('.step[data-step="4"]').click();
-  await expect(page.locator(".legacy-schedule-warning")).toHaveCount(0);
+  await expect(page.locator("#day1-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 
   const toggle = page.locator("#day1-schedule-view-toggle");
   await expect(toggle.getByLabel("時間順")).toBeChecked();
@@ -93,7 +94,11 @@ test("旧ルールの1日目日程を保持して警告し、2日目の再作成
   await page.locator('.step[data-step="5"]').click();
   await expect(page.locator("#day2-schedule-view")).toBeVisible();
   await page.emulateMedia({ media: "print" });
-  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toBeVisible();
+  await expect(
+    page.locator("#day2-schedule-view .legacy-schedule-warning").filter({
+      hasText: "元になった1日目は旧ルールの日程",
+    }),
+  ).toBeVisible();
 });
 
 test("表示切替後もリーグ得点入力を一組だけ保存し、確定順位を一度だけ失効する", async ({
@@ -134,6 +139,11 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   page,
 }) => {
   await openScheduleViewFixture(page);
+
+  const legacyFinalWarning = page.locator(
+    "#day2-schedule-view .legacy-schedule-warning",
+  );
+  await expect(legacyFinalWarning).toContainText("決勝より後に別の試合");
 
   const brackets = page.locator("#tournament-plan-view .tournament-bracket");
   await expect(brackets).toHaveCount(2);
@@ -177,6 +187,9 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await page.reload();
   await expect(page.locator("#day2-schedule-view-toggle").getByLabel("時間順")).toBeChecked();
   await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
+  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toContainText(
+    "決勝より後に別の試合",
+  );
 
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#day1-results-panel")).toBeHidden();
@@ -184,6 +197,70 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator("#day2-schedule-view-toggle")).toBeHidden();
   await expect(page.locator('#day2-schedule-view [data-schedule-view="time"]')).toBeVisible();
   await expect(page.locator('#day2-schedule-view [data-schedule-view="court"]')).toBeHidden();
+  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toBeVisible();
+});
+
+test("現行日程は決勝配置を表示し、下位決勝が早い理由を印刷にも載せる", async ({ page }) => {
+  const fixture = structuredClone(scheduleViewTournamentFixture());
+  const result = fixture.tournament.result as Record<string, unknown>;
+  const schedule = result.day2_schedule as Record<string, unknown>;
+  const slots = schedule.slots as Array<Record<string, unknown>>;
+  const upperFinal = slots.find((slot) => slot.match_id === "UT-FINAL")!;
+  const lowerFinal = slots.find((slot) => slot.match_id === "LT-FINAL")!;
+  upperFinal.match_id = "LT-FINAL";
+  lowerFinal.match_id = "UT-FINAL";
+  const metrics = schedule.metrics as Record<string, unknown>;
+  metrics.upper_tournament_final_section = 5;
+  metrics.lower_tournament_final_section = 4;
+  metrics.lower_tournament_final_section_gap = 1;
+  schedule.diagnostics = [{
+    code: "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION",
+    message: "コート数と主催者審判能力の範囲では、下位決勝は第4セクションが最も遅い配置です。",
+    details: { reason_codes: ["court_capacity"] },
+  }];
+
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, fixture);
+
+  const day2View = page.locator("#day2-schedule-view");
+  await expect(day2View).toContainText("上位決勝は第5セクション（最終）");
+  await expect(day2View).toContainText("下位決勝は第4セクション");
+  await expect(day2View).toContainText("下位決勝は第4セクションが最も遅い配置");
+  await expect(day2View.locator(".legacy-schedule-warning")).toHaveCount(0);
+
+  await page.emulateMedia({ media: "print" });
+  await expect(day2View.getByText(/下位決勝は第4セクションが最も遅い配置/)).toBeVisible();
+});
+
+test("決勝が最終でない新しいAPI応答を保存しない", async ({ page }) => {
+  const fixture = structuredClone(scheduleViewTournamentFixture());
+  const result = fixture.tournament.result as Record<string, unknown>;
+  delete result.day2_schedule;
+  delete result.integrated_validation;
+  const invalidResponse = structuredClone(scheduleViewDay2ScheduleResult) as Record<string, unknown>;
+  const metrics = invalidResponse.metrics as Record<string, unknown>;
+  metrics.upper_tournament_final_section = 4;
+  metrics.lower_tournament_final_section = 5;
+  metrics.lower_tournament_final_section_gap = 0;
+
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, fixture);
+  await page.unroute("**/api/v1/schedules:generate");
+  await page.route("**/api/v1/schedules:generate", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(invalidResponse),
+    });
+  });
+
+  await page.getByRole("button", { name: "2日目の日程を作成する" }).click();
+
+  await expect(page.locator("#day2-status")).toContainText("保存せず");
+  await expect(page.locator("#day2-status")).toContainText("日程を再作成");
+  await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
 });
 
 test("標準ブラケットだけを上位・下位のA4横ページとして印刷できる", async ({ page }) => {

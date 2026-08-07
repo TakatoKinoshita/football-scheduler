@@ -802,6 +802,9 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
     assert result["validation"]["valid"] is True
     assert result["integrated_validation"]["valid"] is True
     assert result["slots"] == []
+    assert result["metrics"]["upper_tournament_final_section"] is None
+    assert result["metrics"]["lower_tournament_final_section"] is None
+    assert result["metrics"]["lower_tournament_final_section_gap"] is None
 
     invalid_day1 = application.handle_request(
         {
@@ -862,6 +865,12 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
         route["rank_ref"] is not None and route["team_id"] is None
         for route in result["team_schedules"]
     )
+    occupied_sections = [
+        slot["section_no"] for slot in result["slots"] if slot["match_id"] is not None
+    ]
+    assert result["metrics"]["upper_tournament_final_section"] == max(occupied_sections)
+    assert result["metrics"]["lower_tournament_final_section"] is not None
+    assert result["metrics"]["lower_tournament_final_section_gap"] >= 0
 
 
 def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:

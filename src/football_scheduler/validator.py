@@ -196,6 +196,7 @@ def validate_day2_schedule(document: Any) -> JsonObject:
             normalized_slots.append(normalized)
     _validate_match_assignments(matches_by_id, normalized_slots, duplicates, diagnostics)
     _validate_slot_uniqueness(normalized_slots, diagnostics)
+    _validate_day2_final_placement(data, matches_by_id, normalized_slots, diagnostics)
 
     try:
         paths, rank_teams, resolution, explicit_resolution = _independent_tournament_paths(
@@ -911,6 +912,121 @@ def _validate_day2_referees(
             )
 
 
+def _is_tournament_final(match: Mapping[str, Any]) -> bool:
+    rank_range = match.get("rank_range")
+    return (
+        isinstance(rank_range, Sequence)
+        and not isinstance(rank_range, (str, bytes, bytearray))
+        and len(rank_range) == 2
+        and list(rank_range) == [1, 2]
+    )
+
+
+def _final_ids_by_phase(
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+) -> dict[str, list[str]]:
+    return {
+        phase: sorted(
+            match_id
+            for match_id, match in matches_by_id.items()
+            if match.get("phase") == phase and _is_tournament_final(match)
+        )
+        for phase in ("upper_tournament", "lower_tournament")
+    }
+
+
+def _planned_final_ids(data: Mapping[str, Any], phase: str) -> set[str] | None:
+    plan = data.get("tournament_plan")
+    if not isinstance(plan, Mapping):
+        return None
+    pool_name = "upper" if phase == "upper_tournament" else "lower"
+    pool = plan.get(pool_name)
+    if not isinstance(pool, Mapping) or not isinstance(pool.get("matches"), Sequence):
+        return None
+    return {
+        str(match["id"])
+        for match in _as_mapping_list(pool.get("matches"))
+        if match.get("id") not in (None, "") and _is_tournament_final(match)
+    }
+
+
+def _planned_final_count(data: Mapping[str, Any], phase: str) -> int | None:
+    plan = data.get("tournament_plan")
+    if not isinstance(plan, Mapping):
+        return None
+    pool_name = "upper" if phase == "upper_tournament" else "lower"
+    pool = plan.get(pool_name)
+    if not isinstance(pool, Mapping) or not isinstance(pool.get("participant_count"), int):
+        return None
+    return int(pool["participant_count"] >= 2)
+
+
+def _validate_day2_final_placement(
+    data: Mapping[str, Any],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+    diagnostics: list[JsonObject],
+) -> None:
+    final_ids = _final_ids_by_phase(matches_by_id)
+    for phase, ids in final_ids.items():
+        planned = _planned_final_ids(data, phase)
+        expected_count = _planned_final_count(data, phase)
+        annotation_mismatches = [
+            match_id
+            for match_id, match in matches_by_id.items()
+            if match.get("phase") == phase
+            and "final" in match
+            and bool(match.get("final")) != _is_tournament_final(match)
+        ]
+        if (
+            len(ids) > 1
+            or (planned is not None and set(ids) != planned)
+            or (
+                planned is not None
+                and expected_count is not None
+                and len(planned) != expected_count
+            )
+            or annotation_mismatches
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "TOURNAMENT_FINAL_DEFINITION_INVALID",
+                    "トーナメント決勝の定義がトーナメント表と一致しません。",
+                    phase=phase,
+                    final_match_ids=ids,
+                    planned_final_match_ids=sorted(planned or ()),
+                    expected_final_count=expected_count,
+                    annotation_mismatch_match_ids=sorted(annotation_mismatches),
+                )
+            )
+
+    occupied = [slot for slot in slots if slot.get("match_id") in matches_by_id]
+    used_sections = max((int(slot["section_no"]) for slot in occupied), default=0)
+    positions = {str(slot["match_id"]): int(slot["section_no"]) for slot in occupied}
+    primary_id = next(iter(final_ids["upper_tournament"]), None)
+    if primary_id is None:
+        primary_id = next(iter(final_ids["lower_tournament"]), None)
+    if primary_id is not None and positions.get(primary_id) != used_sections:
+        upper_exists = bool(final_ids["upper_tournament"])
+        diagnostics.append(
+            _diagnostic(
+                "UPPER_TOURNAMENT_FINAL_NOT_LAST_SECTION",
+                (
+                    "上位トーナメント決勝は、2日目の最後の実試合セクションへ配置してください。"
+                    if upper_exists
+                    else (
+                        "上位決勝がない場合、下位トーナメント決勝は2日目の最後の"
+                        "実試合セクションへ配置してください。"
+                    )
+                ),
+                match_id=primary_id,
+                actual_section=positions.get(primary_id, 0),
+                final_section=used_sections,
+                upper_final_exists=upper_exists,
+            )
+        )
+
+
 def _day2_summary(
     data: Mapping[str, Any],
     matches_by_id: Mapping[str, Mapping[str, Any]],
@@ -932,6 +1048,19 @@ def _day2_summary(
     court_counts = Counter(str(slot["court_id"]) for slot in occupied)
     counts = [court_counts[court_id] for court_id in court_ids]
     positions = {str(slot["match_id"]): slot for slot in occupied}
+    final_ids = _final_ids_by_phase(matches_by_id)
+    upper_final_id = next(iter(final_ids["upper_tournament"]), None)
+    lower_final_id = next(iter(final_ids["lower_tournament"]), None)
+    upper_final_section = (
+        int(positions[upper_final_id]["section_no"])
+        if upper_final_id is not None and upper_final_id in positions
+        else None
+    )
+    lower_final_section = (
+        int(positions[lower_final_id]["section_no"])
+        if lower_final_id is not None and lower_final_id in positions
+        else None
+    )
     waits: list[int] = []
     for match_id, match in matches_by_id.items():
         target = positions.get(match_id)
@@ -1016,6 +1145,11 @@ def _day2_summary(
         "team_court_change_count": dependency_court_changes,
         "court_usage_difference": max(counts, default=0) - min(counts, default=0),
         "unused_slot_count": len(slots) - len(occupied),
+        "upper_tournament_final_section": upper_final_section,
+        "lower_tournament_final_section": lower_final_section,
+        "lower_tournament_final_section_gap": (
+            used_sections - lower_final_section if lower_final_section is not None else None
+        ),
     }
 
 
@@ -1111,6 +1245,9 @@ def _validate_day2_metrics(
         "team_court_change_count",
         "court_usage_difference",
         "unused_slot_count",
+        "upper_tournament_final_section",
+        "lower_tournament_final_section",
+        "lower_tournament_final_section_gap",
     ):
         if key in metrics and metrics[key] != summary[key]:
             diagnostics.append(

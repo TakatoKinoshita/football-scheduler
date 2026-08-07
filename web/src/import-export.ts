@@ -15,6 +15,10 @@ import {
   resolveTournamentProgress,
   TournamentProgressError,
 } from "./tournament-results";
+import {
+  analyzeDay2FinalPlacement,
+  Day2FinalPlacementError,
+} from "./day2-finals";
 
 export const MAX_JSON_BYTES = 1_000_000;
 export const LIMITS = {
@@ -792,6 +796,15 @@ function validateDay2ScheduleResult(
   ]) {
     if (metrics[field] !== undefined) nonNegativeInteger(metrics[field], `2日目監査値${field}`);
   }
+  for (const field of [
+    "upper_tournament_final_section",
+    "lower_tournament_final_section",
+    "lower_tournament_final_section_gap",
+  ]) {
+    if (metrics[field] !== undefined && metrics[field] !== null) {
+      nonNegativeInteger(metrics[field], `2日目監査値${field}`);
+    }
+  }
   for (const stage of arrayValue(metrics.objective_stages ?? [], "目的別監査値", 16)) {
     if (
       typeof stage.objective !== "string" ||
@@ -817,6 +830,26 @@ function validateDay2ScheduleResult(
     JSON.stringify(result.integrated_validation) !== JSON.stringify(schedule.integrated_validation)
   ) {
     throw new ImportValidationError("INVALID_REFERENCE", "保存された統合検証結果が一致しません。");
+  }
+  try {
+    const finalPlacement = analyzeDay2FinalPlacement(schedule, tournamentPlan);
+    if (
+      finalPlacement.hasFinalPlacementAudit
+      && (!finalPlacement.finalPlacementAuditMatches || !finalPlacement.primaryFinalIsLast)
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "2日目日程の決勝配置が現行ルールまたは監査値と一致しません。",
+      );
+    }
+  } catch (error) {
+    if (error instanceof ImportValidationError) throw error;
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      error instanceof Day2FinalPlacementError
+        ? error.message
+        : "2日目日程の決勝配置を読み取れませんでした。",
+    );
   }
 }
 

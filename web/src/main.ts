@@ -36,6 +36,11 @@ import {
   day2ParticipantResolution,
   unbindDay2ScheduleParticipants,
 } from "./day2-resolution";
+import {
+  analyzeDay2FinalPlacement,
+  assertNewDay2FinalPlacement,
+  Day2FinalPlacementError,
+} from "./day2-finals";
 import { setupPwaUpdates } from "./pwa-update";
 import {
   buildSchedulePresentation,
@@ -1887,7 +1892,7 @@ function renderTournamentPlan(
 function renderDay2Schedule(
   content: HTMLElement,
   schedule: JsonObject,
-  _plan: JsonObject,
+  plan: JsonObject,
   standings: JsonObject | undefined,
   teamNames: Map<string, string>,
   courtNames: Map<string, string>,
@@ -1935,6 +1940,63 @@ function renderDay2Schedule(
     `使用 ${String(metrics?.used_sections ?? 0)}セクション／終了予定 ${endTime}／主催者審判 ${String(metrics?.organizer_referee_count ?? 0)}試合`,
     "muted",
   );
+  try {
+    const finalPlacement = analyzeDay2FinalPlacement(schedule, plan);
+    if (finalPlacement.legacyRuleViolation) {
+      appendTextElement(
+        section,
+        "p",
+        "この2日目日程は旧ルールで作成され、決勝より後に別の試合があります。既存の日程・結果・順位はそのまま閲覧、入力、印刷できます。新ルールへ更新する場合は2日目日程を再作成してください。",
+        "notice legacy-schedule-warning",
+      );
+    } else if (finalPlacement.bothFinalsShareLastSection) {
+      appendTextElement(
+        section,
+        "p",
+        `決勝配置：上位・下位決勝とも第${String(finalPlacement.usedSections)}セクション（最終）`,
+        "validation-ok",
+      );
+    } else if (finalPlacement.upperFinalSection !== undefined) {
+      const lower = finalPlacement.lowerFinalSection === undefined
+        ? "下位決勝なし"
+        : `下位決勝は第${String(finalPlacement.lowerFinalSection)}セクション`;
+      appendTextElement(
+        section,
+        "p",
+        `決勝配置：上位決勝は第${String(finalPlacement.upperFinalSection)}セクション（最終）、${lower}`,
+        "muted",
+      );
+    } else if (finalPlacement.lowerFinalSection !== undefined) {
+      appendTextElement(
+        section,
+        "p",
+        `決勝配置：下位決勝は第${String(finalPlacement.lowerFinalSection)}セクション（最終）`,
+        "validation-ok",
+      );
+    }
+  } catch (error) {
+    appendTextElement(
+      section,
+      "p",
+      error instanceof Day2FinalPlacementError
+        ? error.message
+        : "2日目日程の決勝配置を確認できませんでした。",
+      "notice",
+    );
+  }
+  for (const diagnostic of asObjectArray(schedule.diagnostics)) {
+    if (
+      diagnostic.code === "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION"
+      || diagnostic.code === "LOWER_TOURNAMENT_FINAL_PLACEMENT_NOT_PROVEN"
+    ) {
+      appendTextElement(
+        section,
+        "p",
+        String(diagnostic.message ?? "下位決勝は最終セクションより前に配置されています。"),
+        "notice",
+      );
+    }
+  }
   const auditList = window.document.createElement("ul");
   auditList.className = "audit-list";
   for (const [label, value] of [
@@ -2075,7 +2137,7 @@ function renderDay2Schedule(
   section.append(routeGrid);
   content.append(section);
   if (!provisional) {
-    renderTournamentResultsInput(content, schedule, _plan, teamNames);
+    renderTournamentResultsInput(content, schedule, plan, teamNames);
   }
 }
 
@@ -2580,6 +2642,7 @@ function requestDay2Schedule(): void {
     day2TurnstileToken,
   )
     .then((schedule) => {
+      assertNewDay2FinalPlacement(schedule, tournamentPlan);
       saveDay2Schedule(schedule);
       day2Status.textContent = provisional
         ? "仮の2日目日程を作成し、この端末へ保存しました。"
@@ -2590,6 +2653,8 @@ function requestDay2Schedule(): void {
       day2Status.textContent =
         error instanceof ScheduleApiError
           ? error.message
+          : error instanceof Day2FinalPlacementError
+            ? error.message
           : "2日目日程を作成できませんでした。設定とトーナメント表は保存されています。";
       refreshDay2Enabled();
     })

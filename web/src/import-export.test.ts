@@ -6,6 +6,7 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
+import { scheduleViewTournamentFixture } from "../e2e/fixtures";
 import { createTournamentDocument } from "./types";
 
 function validDocument() {
@@ -715,6 +716,36 @@ describe("大会JSONの入出力", () => {
   it("2日目設定・日程・統合検証を同じ内容で復元する", () => {
     const document = day2Document();
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("決勝が最終でない旧ルールの2日目日程を監査値なしなら復元する", () => {
+    const document = scheduleViewTournamentFixture();
+
+    expect(parseTournamentJson(JSON.stringify(document))).toEqual(document);
+  });
+
+  it("現行監査値のある2日目日程で決勝が最終でなければ拒否する", () => {
+    const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    const metrics = schedule.metrics as Record<string, unknown>;
+    metrics.upper_tournament_final_section = 4;
+    metrics.lower_tournament_final_section = 5;
+    metrics.lower_tournament_final_section_gap = 0;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/現行ルール/);
+  });
+
+  it("2日目日程の決勝配置と現行監査値の不一致を拒否する", () => {
+    const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    const metrics = schedule.metrics as Record<string, unknown>;
+    metrics.upper_tournament_final_section = 5;
+    metrics.lower_tournament_final_section = 5;
+    metrics.lower_tournament_final_section_gap = 0;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/監査値/);
   });
 
   it("2日目試合結果と総合最終順位を同じ内容で復元する", () => {

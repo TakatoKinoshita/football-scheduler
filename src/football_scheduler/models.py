@@ -261,6 +261,9 @@ class SolverMetrics(ContractModel):
     tournament_team_referee_count: Annotated[int, Field(ge=0)] | None = None
     tournament_referee_fallback_count: Annotated[int, Field(ge=0)] | None = None
     unused_slot_count: Annotated[int, Field(ge=0)] | None = None
+    upper_tournament_final_section: Annotated[int, Field(ge=1)] | None = None
+    lower_tournament_final_section: Annotated[int, Field(ge=1)] | None = None
+    lower_tournament_final_section_gap: Annotated[int, Field(ge=0)] | None = None
     optimized_objectives: tuple[Identifier, ...] = ()
     objective_stages: tuple[ObjectiveStageMetric, ...] = ()
     optimality_proven: bool
