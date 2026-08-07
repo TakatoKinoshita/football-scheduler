@@ -40,6 +40,12 @@ import {
 } from "./schedule-presentation";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
+  buildTournamentBracketModel,
+  renderTournamentBracket,
+  TournamentBracketError,
+  type TournamentBracketScheduleDetails,
+} from "./tournament-bracket";
+import {
   bindTournamentParticipants,
   tournamentParticipantResolution,
   unbindTournamentParticipants,
@@ -289,7 +295,10 @@ root.innerHTML = `
           <h2 id="day2-results-heading">2日目のトーナメントと日程</h2>
           <p id="day2-result-summary">1日目の日程を作成すると、仮トーナメントを作成できます。</p>
         </div>
-        <button id="print-day2" class="secondary no-print" type="button" disabled>2日目を印刷</button>
+        <div class="button-row no-print">
+          <button id="print-day2" class="secondary" type="button" disabled>2日目を印刷</button>
+          <button id="print-bracket" class="secondary" type="button" disabled>トーナメント表だけ印刷</button>
+        </div>
       </div>
       <div id="day2-result-content" class="result-content empty">
         1日目タブで日程を作成してください。
@@ -610,6 +619,7 @@ const generationStatus = requiredElement<HTMLElement>("#generation-status");
 const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
 const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
+const bracketPrintButton = requiredElement<HTMLButtonElement>("#print-bracket");
 const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
 const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
@@ -1220,6 +1230,7 @@ function renderResult(): void {
   tournamentResultsConfirmation.hidden = true;
   goDay2Area.hidden = true;
   day2PrintButton.disabled = true;
+  bracketPrintButton.disabled = true;
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
     content.textContent =
@@ -1688,7 +1699,9 @@ function renderTournamentPlan(
   plan: JsonObject,
   standings: JsonObject | undefined,
   teamNames: Map<string, string>,
-  displayNumberByMatchId?: ReadonlyMap<string, string>,
+  scheduleByMatchId?: ReadonlyMap<string, TournamentBracketScheduleDetails>,
+  results: readonly JsonObject[] = [],
+  finalStandings?: JsonObject,
 ): void {
   const provisional = tournamentParticipantResolution(plan) === "provisional";
   const section = window.document.createElement("section");
@@ -1722,6 +1735,11 @@ function renderTournamentPlan(
       )
       .map((row) => [`${String(row.block_id)}:${String(row.rank)}`, String(row.team_id)]),
   );
+  const displayNumberByMatchId = scheduleByMatchId === undefined
+    ? undefined
+    : new Map(
+        [...scheduleByMatchId].map(([matchId, details]) => [matchId, details.displayNumber]),
+      );
 
   for (const [field, heading] of [
     ["upper", "上位トーナメント"],
@@ -1730,12 +1748,33 @@ function renderTournamentPlan(
     const pool = asObject(plan[field]);
     if (pool === undefined) continue;
     const poolSection = window.document.createElement("section");
-    poolSection.className = "tournament-pool";
+    poolSection.className = "tournament-pool tournament-bracket-page";
     appendTextElement(
       poolSection,
       "h4",
       `${heading}（${String(pool.participant_count ?? 0)}チーム）`,
     );
+
+    try {
+      const bracketModel = buildTournamentBracketModel({
+        plan,
+        pool: field,
+        teamNames,
+        ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
+        results,
+        ...(finalStandings === undefined ? {} : { finalStandings }),
+      });
+      poolSection.append(renderTournamentBracket(bracketModel, `${heading}の進行図`));
+    } catch (error) {
+      appendTextElement(
+        poolSection,
+        "p",
+        error instanceof TournamentBracketError
+          ? `ブラケット図を表示できませんでした。${error.message} 下の一覧表で内容を確認してください。`
+          : "ブラケット図を表示できませんでした。下の一覧表で内容を確認してください。",
+        "notice tournament-bracket-error",
+      );
+    }
 
     const seedList = window.document.createElement("ol");
     seedList.className = "seed-list";
@@ -2868,18 +2907,29 @@ function renderDay2Preparation(
   refreshTournamentEnabled();
   day2Confirmation.hidden = true;
   day2PrintButton.disabled = tournamentPlan === undefined;
+  bracketPrintButton.disabled = tournamentPlan === undefined;
   if (tournamentPlan === undefined) return;
   const day2Schedule = asObject(result.day2_schedule);
-  const displayNumberByMatchId =
-    day2Schedule === undefined
-      ? undefined
-      : buildWebSchedulePresentation("day2", day2Schedule).displayNumberByMatchId;
+  const scheduleByMatchId = day2Schedule === undefined
+    ? undefined
+    : new Map(
+        buildWebSchedulePresentation("day2", day2Schedule).timeRows.map((row) => [
+          row.matchId,
+          {
+            displayNumber: row.displayNumber,
+            timeLabel: row.timeLabel,
+            courtName: courtNames.get(row.courtId) ?? row.courtId,
+          },
+        ] as const),
+      );
   renderTournamentPlan(
     day2Content,
     tournamentPlan,
     standings,
     teamNames,
-    displayNumberByMatchId,
+    scheduleByMatchId,
+    asObjectArray(result.tournament_results),
+    asObject(result.final_standings),
   );
   day2Confirmation.hidden = false;
   setupDay2Turnstile();
@@ -3211,6 +3261,13 @@ printButton.addEventListener("click", () => {
 day2PrintButton.addEventListener("click", () => {
   document.body.dataset.printScope = "day2";
   window.print();
+});
+bracketPrintButton.addEventListener("click", () => {
+  document.body.dataset.printScope = "bracket";
+  window.print();
+});
+window.addEventListener("afterprint", () => {
+  delete document.body.dataset.printScope;
 });
 standingsButton.addEventListener("click", requestLeagueStandings);
 tournamentButton.addEventListener("click", requestTournamentPlan);

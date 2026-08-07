@@ -137,6 +137,21 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   ).toContainText("保存済み");
 
   await expect(finalRow).toContainText("青空FC 対 赤松FC");
+  const upperBracket = page.locator(
+    '#tournament-plan-view .tournament-bracket[data-pool="upper"]',
+  );
+  await expect(
+    upperBracket.locator('.bracket-match-node[data-match-id="UT-SF2"]'),
+  ).toContainText("PK 4");
+  await expect(
+    upperBracket.locator('.bracket-match-node[data-match-id="UT-SF2"] .bracket-team-row.winner'),
+  ).toHaveCount(1);
+  await expect(
+    upperBracket.locator('.bracket-match-node[data-match-id="UT-FINAL"]'),
+  ).toContainText("青空FC");
+  await expect(
+    upperBracket.locator('.bracket-match-node[data-match-id="UT-FINAL"]'),
+  ).toContainText("赤松FC");
   await fillRegularResult(page, "LT-SF1", "1", "0");
   await fillRegularResult(page, "UT-PLACE3", "1", "0");
   await fillRegularResult(page, "LT-SF2", "1", "0");
@@ -164,6 +179,10 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await expect(
     page.getByRole("table", { name: "検証済みの2日目試合結果" }),
   ).toContainText("赤松FC 1 (PK 4-3) 1 北星FC");
+  await expect(upperBracket.locator(".bracket-terminal.confirmed")).toHaveCount(4);
+  await expect(upperBracket.locator('.bracket-terminal[data-rank="1"]')).toContainText(
+    "1位確定",
+  );
 
   const correctedScore = page
     .locator('#tournament-results-input tr[data-match-id="UT-SF1"] td')

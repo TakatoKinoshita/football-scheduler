@@ -139,6 +139,36 @@ tbody tr:last-child td { border-bottom: 0; }
 .tournament-pool { margin-top: 1rem; padding: 1rem; background: white; border: 1px solid var(--border); border-radius: .5rem; break-inside: avoid; }
 .tournament-pool h4 { margin: 0 0 .6rem; color: var(--green); }
 .tournament-pool h5 { margin: 1rem 0 .4rem; }
+.tournament-bracket { margin: .8rem 0 1.2rem; }
+.tournament-bracket figcaption { margin-bottom: .45rem; color: var(--green); font-weight: 800; }
+.tournament-bracket-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--border); border-radius: .4rem; background: #fff; }
+.tournament-bracket-svg { display: block; width: 100%; min-width: 900px; height: auto; background: #fff; }
+.tournament-bracket-svg.compact { min-width: 1100px; }
+.bracket-edge { fill: none; stroke: #285f4f; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bracket-edge.loser { stroke: #855433; stroke-dasharray: 7 5; }
+.bracket-edge.terminal { stroke-width: 1.7; }
+.bracket-edge-label { fill: #174f3f; font-size: 9px; font-weight: 800; }
+.bracket-edge-label.loser { fill: #754126; }
+.bracket-match-card { fill: #fffdf7; stroke: #617069; stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.bracket-card-divider { stroke: #9ca69f; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bracket-match-heading { fill: #174f3f; font-size: 10px; font-weight: 800; }
+.bracket-match-meta { fill: #52635b; font-size: 8px; }
+.bracket-team-name { fill: #18332b; font-size: 10px; font-weight: 700; }
+.bracket-team-source { fill: #617069; font-size: 7px; }
+.bracket-score { fill: #18332b; font-size: 10px; font-weight: 800; }
+.bracket-winner-highlight { fill: #dbe8df; }
+.bracket-team-row.winner .bracket-team-name { fill: #0f4938; font-weight: 900; }
+.bracket-bye { fill: #8a5900; font-size: 8px; font-weight: 800; }
+.bracket-terminal { fill: #18332b; font-size: 9px; font-weight: 800; }
+.bracket-terminal-team { fill: #52635b; font-size: 7px; }
+.bracket-terminal.confirmed { fill: #0f4938; }
+.bracket-terminal.pending { fill: #8a5900; }
+.bracket-direct-label { fill: #18332b; font-size: 13px; font-weight: 800; }
+.bracket-watermark { fill: rgb(217 95 44 / 12%); font-size: min(220px, 35vw); font-weight: 900; text-anchor: middle; dominant-baseline: central; }
+.tournament-bracket-svg.compact .bracket-match-heading { font-size: 8px; }
+.tournament-bracket-svg.compact .bracket-team-name, .tournament-bracket-svg.compact .bracket-score { font-size: 8px; }
+.tournament-bracket-svg.compact .bracket-edge-label, .tournament-bracket-svg.compact .bracket-terminal { font-size: 7px; }
+.tournament-bracket-empty { margin: .4rem 0; padding: .8rem; border: 1px dashed var(--border); border-radius: .4rem; }
 .seed-list { columns: 2; padding-left: 1.5rem; }
 footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: center; }
 
@@ -155,6 +185,12 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .wizard-actions > button { width: 100%; }
   .next-day-callout { align-items: stretch; flex-direction: column; }
   .next-day-callout button { width: 100%; }
+  .tournament-bracket { margin-inline: 0; }
+}
+
+@page bracket {
+  size: A4 landscape;
+  margin: 8mm;
 }
 
 @media print {
@@ -163,7 +199,8 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   body, main { margin: 0; width: 100%; background: white; }
   .panel { display: none; box-shadow: none; border: 0; }
   body[data-print-scope="day1"] #day1-results-panel,
-  body[data-print-scope="day2"] #day2-results-panel { display: block; padding: 0; border-top: 0; }
+  body[data-print-scope="day2"] #day2-results-panel,
+  body[data-print-scope="bracket"] #day2-results-panel { display: block; padding: 0; border-top: 0; }
   .result-content { background: white; border: 1px solid #777; }
   .table-wrap { overflow: visible; }
   table { min-width: 0; font-size: 9pt; }
@@ -175,5 +212,19 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .block-grid { grid-template-columns: repeat(3, 1fr); }
   .tournament-pool { break-inside: auto; }
   .tournament-pool h4, .tournament-pool h5 { break-after: avoid; }
+  .tournament-bracket { page: bracket; break-before: page; break-after: page; }
+  .tournament-bracket-scroll { overflow: visible; border: 0; }
+  .tournament-bracket-svg, .tournament-bracket-svg.compact { width: 100%; min-width: 0; max-height: 180mm; }
+  .bracket-edge { stroke: #222; }
+  .bracket-edge.loser { stroke: #555; }
+  .bracket-edge-label, .bracket-edge-label.loser, .bracket-terminal { fill: #111; }
+  body[data-print-scope="bracket"] #day2-result-content { border: 0; padding: 0; }
+  body[data-print-scope="bracket"] #day2-result-content > :not(#tournament-plan-view),
+  body[data-print-scope="bracket"] #tournament-plan-view > :not(.tournament-pool),
+  body[data-print-scope="bracket"] .tournament-pool > :not(h4):not(.tournament-bracket):not(.tournament-bracket-error) { display: none !important; }
+  body[data-print-scope="bracket"] .tournament-pool { page: bracket; margin: 0; padding: 0; border: 0; break-inside: avoid; break-after: page; }
+  body[data-print-scope="bracket"] .tournament-pool:last-of-type { break-after: auto; }
+  body[data-print-scope="bracket"] .tournament-bracket { margin: 0; break-before: auto; break-after: auto; }
+  body[data-print-scope="bracket"] .tournament-bracket figcaption { font-size: 14pt; }
   .score-input { min-height: 0; padding: .1rem; border: 0; background: white; }
 }
