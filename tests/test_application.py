@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from time import monotonic
 from typing import Any
 
@@ -694,6 +695,58 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
         route["rank_ref"] is not None and route["team_id"] is None
         for route in result["team_schedules"]
     )
+
+
+def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
+    tournament = application.handle_request(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": day1["league_plan"],
+            "odd_split_policy": "upper",
+            "random_seed": 20260803,
+        }
+    )
+
+    legacy_slots = deepcopy(day1["slots"])
+    occupied = [slot for slot in legacy_slots if slot["match_id"] is not None]
+    occupied[0]["section_no"] = 1
+    occupied[0]["court_id"] = "court-1"
+    occupied[0]["referee_assignment"] = {"kind": "team", "team_id": "team-4"}
+    occupied[1]["section_no"] = 2
+    occupied[1]["court_id"] = "court-2"
+    occupied[1]["referee_assignment"] = {"kind": "team", "team_id": "team-4"}
+
+    result = application.handle_request(
+        {
+            "request_kind": "day2_schedule",
+            "teams": day1_request["teams"],
+            "courts": day1_request["courts"],
+            "league_plan": day1["league_plan"],
+            "day1_schedule": {"day": day1_request["day"], "slots": legacy_slots},
+            "tournament_plan": tournament,
+            "day": {
+                "id": "day2",
+                "start_time": "09:30",
+                "game_duration_minutes": 35,
+                "margin_minutes": 10,
+            },
+            "referees": {
+                "organizer_capacity": 2,
+                "tournament_fallback": "organizer",
+            },
+            "random_seed": 20260803,
+            "solver": {"max_time_seconds": 5},
+        }
+    )
+
+    assert result["status"] == "error"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "DAY1_SCHEDULE_INVALID"
+    nested_codes = {item["code"] for item in diagnostic["details"]["diagnostics"]}
+    assert "ADJACENT_ASSIGNMENT_COURT_CONFLICT" in nested_codes
 
 
 def test_day2_schedule_rejects_section_limit_before_solver() -> None:

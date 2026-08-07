@@ -86,6 +86,7 @@ def test_valid_schedule_passes_independent_validation(valid_document: dict[str, 
             "league_team_referee_count_min": 0,
             "league_team_referee_count_max": 1,
             "league_team_referee_count_difference": 1,
+            "adjacent_assignment_court_change_count": 0,
         },
     }
 
@@ -201,6 +202,34 @@ def test_detects_match_and_referee_role_conflict_in_same_section(
     slots[0]["referee_assignment"] = {"type": "team", "team_id": "C"}
 
     assert "TEAM_ROLE_SAME_SECTION_CONFLICT" in codes(document)
+
+
+def test_detects_adjacent_assignment_court_change(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    slots = document["schedule"]["slots"]  # type: ignore[index]
+    slots[0]["referee_assignment"] = {"type": "team", "team_id": "E"}
+    slots[2]["section_no"] = 2
+    slots[2]["court_id"] = "court-b"
+
+    report = validate_schedule(document)
+    conflict = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "ADJACENT_ASSIGNMENT_COURT_CONFLICT"
+        and item["details"]["team_id"] == "E"
+    )
+
+    assert conflict["details"] == {
+        "day_id": "day1",
+        "team_id": "E",
+        "section_nos": [1, 2],
+        "court_ids": ["court-a", "court-b"],
+        "roles": ["referee", "referee"],
+        "match_ids": ["M1", "M3"],
+    }
+    assert report["summary"]["adjacent_assignment_court_change_count"] == 3
 
 
 def test_detects_organizer_capacity_overrun(valid_document: dict[str, object]) -> None:

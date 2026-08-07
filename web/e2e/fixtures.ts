@@ -243,7 +243,7 @@ export const scheduleViewDay1Result = {
     { day_id: "day1", section_no: 1, court_id: "court-a", match_id: "LG-A-M1", referee_assignment: { kind: "organizer" } },
     { day_id: "day1", section_no: 1, court_id: "court-b", match_id: "LG-B-M1", referee_assignment: { kind: "organizer" } },
     { day_id: "day1", section_no: 2, court_id: "court-a", match_id: null, referee_assignment: null },
-    { day_id: "day1", section_no: 2, court_id: "court-b", match_id: "LG-C-M1", referee_assignment: { kind: "team", team_id: "team-01" } },
+    { day_id: "day1", section_no: 2, court_id: "court-b", match_id: "LG-C-M1", referee_assignment: { kind: "team", team_id: "team-04" } },
     { day_id: "day1", section_no: 3, court_id: "court-a", match_id: "LG-D-M1", referee_assignment: { kind: "team", team_id: "team-03" } },
     { day_id: "day1", section_no: 3, court_id: "court-b", match_id: null, referee_assignment: null },
   ],

@@ -20,6 +20,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
 }) => {
   await openScheduleViewFixture(page);
   await page.locator('.step[data-step="4"]').click();
+  await expect(page.locator(".legacy-schedule-warning")).toHaveCount(0);
 
   const toggle = page.locator("#day1-schedule-view-toggle");
   await expect(toggle.getByLabel("時間順")).toBeChecked();
@@ -60,6 +61,39 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await page.locator('.step[data-step="4"]').click();
   await expect(page.locator("#day1-schedule-view-toggle").getByLabel("コート別")).toBeChecked();
   await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
+});
+
+test("旧ルールの1日目日程を保持して警告し、2日目の再作成だけを無効化する", async ({
+  page,
+}) => {
+  const fixture = structuredClone(scheduleViewTournamentFixture());
+  const result = fixture.tournament.result as Record<string, unknown>;
+  const slots = result.slots as Array<Record<string, unknown>>;
+  const secondSection = slots.find(
+    (slot) => slot.section_no === 2 && slot.court_id === "court-b",
+  );
+  expect(secondSection).toBeDefined();
+  secondSection!.referee_assignment = { kind: "team", team_id: "team-01" };
+
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, fixture);
+  await page.locator('.step[data-step="4"]').click();
+
+  const day1Warning = page.locator("#result-content .legacy-schedule-warning");
+  await expect(day1Warning).toContainText("旧ルールの日程");
+  await expect(day1Warning).toContainText("1件");
+  await expect(page.locator("#day1-schedule-view")).toBeVisible();
+  await expect(page.locator("#generate-day2")).toBeDisabled();
+  await expect(page.locator("#day2-review")).toContainText("1日目日程を再作成");
+
+  await page.emulateMedia({ media: "print" });
+  await expect(day1Warning).toBeVisible();
+  await page.emulateMedia({ media: "screen" });
+  await page.locator('.step[data-step="5"]').click();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toBeVisible();
 });
 
 test("表示切替後もリーグ得点入力を一組だけ保存し、確定順位を一度だけ失効する", async ({

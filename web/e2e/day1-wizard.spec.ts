@@ -3,6 +3,69 @@ import { expect, test } from "@playwright/test";
 import { scheduleResult, tournamentFixture } from "./fixtures";
 import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
 
+function generatedRolePathResult(
+  request: {
+    teams?: Array<{ id?: unknown }>;
+    courts?: Array<{ id?: unknown }>;
+  },
+  moveOnAdjacentSection = false,
+) {
+  const teamIds = (request.teams ?? []).map((team) => String(team.id));
+  const courtIds = (request.courts ?? []).map((court) => String(court.id));
+  if (teamIds.length < 4 || courtIds.length < 2) throw new Error("E2E入力が不足しています。");
+  const matches = [
+    {
+      id: "LG-A-M1",
+      phase: "league",
+      round: "Aブロック 第1ラウンド",
+      possible_home_team_ids: [teamIds[0]],
+      possible_away_team_ids: [teamIds[1]],
+      prerequisite_match_ids: [],
+      organizer_referee_required: false,
+    },
+    {
+      id: "LG-B-M1",
+      phase: "league",
+      round: "Bブロック 第1ラウンド",
+      possible_home_team_ids: [teamIds[2]],
+      possible_away_team_ids: [teamIds[3]],
+      prerequisite_match_ids: [],
+      organizer_referee_required: false,
+    },
+  ];
+  return {
+    ...scheduleResult,
+    league_plan: {
+      ...scheduleResult.league_plan,
+      blocks: [
+        { id: "A", team_ids: teamIds.slice(0, 2) },
+        { id: "B", team_ids: teamIds.slice(2, 4) },
+      ],
+      logical_rounds: [
+        { block_id: "A", round_no: 1, match_ids: ["LG-A-M1"] },
+        { block_id: "B", round_no: 1, match_ids: ["LG-B-M1"] },
+      ],
+      matches,
+    },
+    slots: [
+      {
+        day_id: "day1",
+        section_no: 1,
+        court_id: courtIds[0],
+        match_id: "LG-A-M1",
+        referee_assignment: { kind: "organizer" },
+      },
+      {
+        day_id: "day1",
+        section_no: 2,
+        court_id: moveOnAdjacentSection ? courtIds[1] : courtIds[0],
+        match_id: "LG-B-M1",
+        referee_assignment: { kind: "team", team_id: teamIds[0] },
+      },
+    ],
+  };
+}
+
 async function fillThroughGeneration(page: import("@playwright/test").Page): Promise<void> {
   await page.locator("#tournament-name").fill("本番確認大会");
   await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
@@ -68,6 +131,54 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
     courts: [{ name: "Aコート" }, { name: "Bコート" }],
   });
   expect(requests[0]).not.toHaveProperty("day2");
+});
+
+test("生成した1日目の全担当経路が隣接同一コートなら保存する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillThroughGeneration(page);
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    const request = route.request().postDataJSON() as {
+      teams?: Array<{ id?: unknown }>;
+      courts?: Array<{ id?: unknown }>;
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(generatedRolePathResult(request)),
+    });
+  });
+
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
+  await expect(page.locator(".legacy-schedule-warning")).toHaveCount(0);
+});
+
+test("旧バックエンドから届いた隣接コート違反の日程は保存しない", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillThroughGeneration(page);
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    const request = route.request().postDataJSON() as {
+      teams?: Array<{ id?: unknown }>;
+      courts?: Array<{ id?: unknown }>;
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(generatedRolePathResult(request, true)),
+    });
+  });
+
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+
+  await expect(page.locator("#generation-status")).toContainText(
+    "隣接セクションの担当を同じコート",
+  );
+  await expect(page.locator("#result-summary")).toContainText("まだ生成結果はありません");
 });
 
 test("読込み済み文書のチームIDとコートIDを設定変更後の再生成でも保持する", async ({

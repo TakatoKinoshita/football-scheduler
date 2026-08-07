@@ -120,14 +120,33 @@ def validate_schedule(document: Any) -> JsonObject:
         _organizer_capacity(data),
         diagnostics,
     )
+    adjacent_court_changes = _adjacent_assignment_court_changes(
+        normalized_slots,
+        matches_by_id,
+        candidate_cache,
+    )
+    diagnostics.extend(
+        _diagnostic(
+            "ADJACENT_ASSIGNMENT_COURT_CONFLICT",
+            (
+                f"{change['day_id']}の連続する第{change['section_nos'][0]}・"
+                f"第{change['section_nos'][1]}セクションで、チーム「{change['team_id']}」の"
+                "担当コートが変わっています。"
+            ),
+            **change,
+        )
+        for change in adjacent_court_changes
+    )
     _validate_max_sections(normalized_slots, _max_sections(data), diagnostics)
     _validate_result_match_ids(data, set(matches_by_id), diagnostics)
 
+    summary = _league_team_referee_summary(data, matches_by_id, normalized_slots)
+    summary["adjacent_assignment_court_change_count"] = len(adjacent_court_changes)
     return _report(
         diagnostics,
         match_count=len(matches),
         slot_count=len(normalized_slots),
-        summary_details=_league_team_referee_summary(data, matches_by_id, normalized_slots),
+        summary_details=summary,
     )
 
 
@@ -1427,6 +1446,49 @@ def _validate_dependencies(
                         dependency_match_id=dependency_id,
                     )
                 )
+
+
+def _adjacent_assignment_court_changes(
+    slots: Sequence[Mapping[str, Any]],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    candidate_cache: dict[str, frozenset[str]],
+) -> list[JsonObject]:
+    """1日目の試合・チーム審判をチーム別に並べ、隣接コート移動を返す。"""
+
+    assignments: defaultdict[tuple[str, str, int], set[tuple[str, str, str]]] = defaultdict(set)
+    for slot in slots:
+        day_id = str(slot["day_id"])
+        match_id = slot.get("match_id")
+        if day_id != "day1" or match_id not in matches_by_id:
+            continue
+        section_no = int(slot["section_no"])
+        court_id = str(slot["court_id"])
+        for team_id in _slot_candidates(slot, matches_by_id, candidate_cache):
+            assignments[day_id, team_id, section_no].add((court_id, "match", str(match_id)))
+        referee_type, referee_team_id = _referee(slot)
+        if referee_type == "team" and referee_team_id is not None:
+            assignments[day_id, referee_team_id, section_no].add(
+                (court_id, "referee", str(match_id))
+            )
+
+    changes: list[JsonObject] = []
+    for (day_id, team_id, section_no), earlier in sorted(assignments.items()):
+        later = assignments.get((day_id, team_id, section_no + 1), set())
+        for left in sorted(earlier):
+            for right in sorted(later):
+                if left[0] == right[0]:
+                    continue
+                changes.append(
+                    {
+                        "day_id": day_id,
+                        "team_id": team_id,
+                        "section_nos": [section_no, section_no + 1],
+                        "court_ids": [left[0], right[0]],
+                        "roles": [left[1], right[1]],
+                        "match_ids": [left[2], right[2]],
+                    }
+                )
+    return changes
 
 
 def _validate_referees(

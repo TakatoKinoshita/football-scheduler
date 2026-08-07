@@ -38,6 +38,7 @@ _FULL_API_TIME_BUDGET_SECONDS = 30.0
 _MIN_FAIRNESS_TIME_SECONDS = 2.0
 _LARGE_LEAGUE_FAIRNESS_TIME_SECONDS = 8.0
 _MINIMUM_HORIZON_TIME_SHARE = 0.85
+_DAY1_ID = "day1"
 
 
 def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResult:
@@ -214,6 +215,24 @@ def _solve_schedule_at_horizon(
             ]
             model.add(sum((*participant_roles, *referee_roles)) <= 1)
 
+    role_any, role_on_court, role_court, match_court = _add_team_role_court_state(
+        model,
+        placement,
+        match_in_section,
+        team_referee,
+        possible_matches_by_team,
+        horizon,
+        len(request.courts),
+    )
+    if request.day.id == _DAY1_ID:
+        _add_adjacent_assignment_same_court_constraints(
+            model,
+            role_any,
+            role_court,
+            team_ids,
+            horizon,
+        )
+
     for team_id in team_ids:
         relevant_matches = possible_matches_by_team[team_id]
         for section_index in range(horizon - 1):
@@ -240,14 +259,42 @@ def _solve_schedule_at_horizon(
             prerequisite_index = match_index_by_id[prerequisite_id]
             model.add(section_number[match_index] >= section_number[prerequisite_index] + 2)
 
+    initial_hint_added = _add_day1_league_initial_hint(
+        model,
+        request,
+        placement,
+        match_in_section,
+        active_sections,
+        organizer_referee,
+        team_referee,
+        section_number,
+        role_any,
+        role_on_court,
+        role_court,
+        match_court,
+        horizon,
+    )
+
     league_match_indexes = frozenset(
         index for index, match in enumerate(request.matches) if match.phase == "league"
     )
     league_match_count = len(league_match_indexes)
     used_sections_expression = sum(active_sections)
     primary_objective_weight = league_match_count + 1
-    model.minimize(used_sections_expression)
+    capacity_minimum = (match_count + len(request.courts) - 1) // len(request.courts)
+    horizon_is_capacity_minimum = horizon == capacity_minimum
+    if horizon_is_capacity_minimum:
+        # 容量下限と探索範囲が一致するため、実行可能解が見つかれば
+        # 使用セクション数の最適性も同時に証明できる。
+        model.add(used_sections_expression == horizon)
+        model.minimize(0)
+    else:
+        model.minimize(used_sections_expression)
     primary_solver = _configured_solver(solver_time_budget, request.random_seed)
+    if initial_hint_added:
+        # このモデルはチーム審判候補の対称性が大きく、最大入力では
+        # presolveだけで時間上限へ達し得る。完全な実行可能hintを直接探索する。
+        primary_solver.parameters.cp_model_presolve = False
     primary_status = _STATUS_MAP.get(primary_solver.solve(model), SolverStatus.UNKNOWN)
     wall_time = primary_solver.wall_time
 
@@ -260,9 +307,13 @@ def _solve_schedule_at_horizon(
     optimized_objectives: list[str] = []
     if primary_status is SolverStatus.OPTIMAL:
         optimized_objectives.append("used_sections")
-    best_primary_bound = primary_solver.best_objective_bound
     primary_used_sections = sum(
         primary_solver.boolean_value(section) for section in active_sections
+    )
+    best_primary_bound = (
+        float(primary_used_sections)
+        if horizon_is_capacity_minimum
+        else primary_solver.best_objective_bound
     )
     remaining_time = solver_time_budget - wall_time
     fairness_time_threshold = (
@@ -312,7 +363,12 @@ def _solve_schedule_at_horizon(
             *organizer_referee.values(),
             *team_referee.values(),
             *section_number.values(),
+            *role_any.values(),
+            *role_on_court.values(),
+            *role_court.values(),
+            *match_court.values(),
         ]
+        model.clear_hints()  # type: ignore[no-untyped-call]
         for variable in hint_variables:
             model.add_hint(variable, primary_solver.value(variable))
 
@@ -362,6 +418,7 @@ def _solve_schedule_at_horizon(
                     match_in_section,
                     team_referee,
                     possible_matches_by_team,
+                    role_on_court,
                     solver,
                     solver_time_budget - wall_time,
                 )
@@ -492,10 +549,6 @@ def _solve_schedule_at_horizon(
                         "league_previous_same_court_referee_count",
                         audit["league_previous_same_court_referee_count"],
                     ),
-                    (
-                        "adjacent_assignment_court_change_count",
-                        audit["adjacent_assignment_court_change_count"],
-                    ),
                     ("team_court_change_count", audit["team_court_change_count"]),
                     ("court_usage_difference", audit["court_usage_difference"]),
                 )
@@ -506,6 +559,254 @@ def _solve_schedule_at_horizon(
     )
 
 
+def _add_team_role_court_state(
+    model: cp_model.CpModel,
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
+    possible_matches_by_team: Mapping[str, tuple[int, ...]],
+    horizon: int,
+    court_count: int,
+) -> tuple[
+    dict[tuple[str, int], cp_model.IntVar],
+    dict[tuple[str, int, int], cp_model.IntVar],
+    dict[tuple[str, int], cp_model.IntVar],
+    dict[int, cp_model.IntVar],
+]:
+    """チームが各セクションで担当するコートを試合・審判共通で表す。"""
+
+    sections, courts = range(horizon), range(court_count)
+    match_count = max((match for match, _section in match_in_section), default=-1) + 1
+    match_court: dict[int, cp_model.IntVar] = {}
+    for match in range(match_count):
+        court_value = model.new_int_var(1, court_count, f"match_{match}_court_number")
+        model.add(
+            court_value
+            == sum(
+                (court + 1) * placement[match, section, court]
+                for section in sections
+                for court in courts
+            )
+        )
+        match_court[match] = court_value
+
+    role_any: dict[tuple[str, int], cp_model.IntVar] = {}
+    role_on_court: dict[tuple[str, int, int], cp_model.IntVar] = {}
+    role_court: dict[tuple[str, int], cp_model.IntVar] = {}
+    referee_roles_by_team_section: defaultdict[
+        tuple[str, int], list[tuple[int, cp_model.IntVar]]
+    ] = defaultdict(list)
+    for (match, section, team_id), variable in team_referee.items():
+        referee_roles_by_team_section[team_id, section].append((match, variable))
+    for team_id, relevant_matches in possible_matches_by_team.items():
+        for section in sections:
+            referee_roles = referee_roles_by_team_section[team_id, section]
+            activities = [
+                *(match_in_section[match, section] for match in relevant_matches),
+                *(variable for _match, variable in referee_roles),
+            ]
+            active = model.new_bool_var(f"role_any_{team_id}_{section}")
+            model.add(active == sum(activities))
+            role_any[team_id, section] = active
+
+            court_roles = []
+            for court in courts:
+                assigned = model.new_bool_var(f"role_court_{team_id}_{section}_{court}")
+                role_on_court[team_id, section, court] = assigned
+                court_roles.append(assigned)
+                for match in relevant_matches:
+                    model.add(placement[match, section, court] <= assigned)
+            model.add(sum(court_roles) == active)
+            court_value = model.new_int_var(
+                0, court_count, f"role_court_number_{team_id}_{section}"
+            )
+            model.add(court_value == sum((court + 1) * court_roles[court] for court in courts))
+            role_court[team_id, section] = court_value
+
+            for match, referee in referee_roles:
+                model.add(court_value == match_court[match]).only_enforce_if(referee)
+
+    return role_any, role_on_court, role_court, match_court
+
+
+def _add_adjacent_assignment_same_court_constraints(
+    model: cp_model.CpModel,
+    role_any: Mapping[tuple[str, int], cp_model.IntVar],
+    role_court: Mapping[tuple[str, int], cp_model.IntVar],
+    team_ids: tuple[str, ...],
+    horizon: int,
+) -> None:
+    """1日目の隣接セクションで担当コートが変わることを禁止する。"""
+
+    for team_id in team_ids:
+        for section in range(horizon - 1):
+            model.add(
+                role_court[team_id, section] == role_court[team_id, section + 1]
+            ).only_enforce_if([role_any[team_id, section], role_any[team_id, section + 1]])
+
+
+def _add_day1_league_initial_hint(
+    model: cp_model.CpModel,
+    request: ScheduleRequest,
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    active_sections: list[cp_model.IntVar],
+    organizer_referee: Mapping[tuple[int, int], cp_model.IntVar],
+    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
+    section_number: Mapping[int, cp_model.IntVar],
+    role_any: Mapping[tuple[str, int], cp_model.IntVar],
+    role_on_court: Mapping[tuple[str, int, int], cp_model.IntVar],
+    role_court: Mapping[tuple[str, int], cp_model.IntVar],
+    match_court: Mapping[int, cp_model.IntVar],
+    horizon: int,
+) -> bool:
+    """主催者審判で成立する1日目リーグの貪欲解を探索開始点にする。"""
+
+    if (
+        request.day.id != _DAY1_ID
+        or request.referees.organizer_capacity <= 0
+        or any(match.phase != "league" or match.prerequisite_match_ids for match in request.matches)
+    ):
+        return False
+
+    section_capacities = [
+        (
+            min(len(request.courts), request.referees.organizer_capacity)
+            if section == 0 or not request.referees.team_referees_required_after_first
+            else len(request.courts)
+        )
+        for section in range(horizon)
+    ]
+    teams_by_section: list[set[str]] = [set() for _ in range(horizon)]
+    match_count_by_section = [0 for _ in range(horizon)]
+    assignment: dict[int, tuple[int, int]] = {}
+    for match_index, match in enumerate(request.matches):
+        possible_team_ids = set(match.possible_team_ids)
+        position = next(
+            (
+                (section, match_count_by_section[section])
+                for section in range(horizon)
+                if match_count_by_section[section] < section_capacities[section]
+                and not possible_team_ids.intersection(teams_by_section[section])
+                and (
+                    section == 0
+                    or not possible_team_ids.intersection(teams_by_section[section - 1])
+                )
+            ),
+            None,
+        )
+        if position is None:
+            return False
+        section, court = position
+        assignment[match_index] = position
+        teams_by_section[section].update(possible_team_ids)
+        match_count_by_section[section] += 1
+
+    organizer_matches: set[int] = set()
+    referee_by_match: dict[int, str] = {}
+    role_positions: dict[tuple[str, int], int] = {}
+    for match_index, (section, court) in assignment.items():
+        for team_id in request.matches[match_index].possible_team_ids:
+            role_positions[team_id, section] = court
+        if (
+            section == 0
+            or request.matches[match_index].organizer_referee_required
+            or not request.referees.team_referees_required_after_first
+        ):
+            organizer_matches.add(match_index)
+
+    for section in range(horizon):
+        organizer_count = sum(
+            1 for match_index in organizer_matches if assignment[match_index][0] == section
+        )
+        if organizer_count > request.referees.organizer_capacity:
+            return False
+
+        needs_team_referee = [
+            match_index
+            for match_index, (match_section, _court) in assignment.items()
+            if match_section == section and match_index not in organizer_matches
+        ]
+        candidates_by_match: dict[int, list[str]] = {}
+        for match_index in needs_team_referee:
+            court = assignment[match_index][1]
+            candidates_by_match[match_index] = [
+                team.id
+                for team in request.teams
+                if (match_index, section, team.id) in team_referee
+                and (team.id, section) not in role_positions
+                and role_positions.get((team.id, section - 1), court) == court
+                and role_positions.get((team.id, section + 1), court) == court
+            ]
+
+        ordered_matches = sorted(
+            needs_team_referee,
+            key=lambda match_index: (len(candidates_by_match[match_index]), match_index),
+        )
+        chosen = _choose_distinct_team_referees(ordered_matches, candidates_by_match)
+        if chosen is None:
+            return False
+        for match_index, team_id in chosen.items():
+            referee_by_match[match_index] = team_id
+            role_positions[team_id, section] = assignment[match_index][1]
+
+    used_sections = max((section for section, _court in assignment.values()), default=-1) + 1
+    for (item_index, section, court), variable in placement.items():
+        model.add_hint(variable, int(assignment[item_index] == (section, court)))
+    for (item_index, section), variable in match_in_section.items():
+        model.add_hint(variable, int(assignment[item_index][0] == section))
+    for section, variable in enumerate(active_sections):
+        model.add_hint(variable, int(section < used_sections))
+    for (item_index, section), variable in organizer_referee.items():
+        model.add_hint(
+            variable,
+            int(item_index in organizer_matches and assignment[item_index][0] == section),
+        )
+    for (item_index, section, team_id), variable in team_referee.items():
+        model.add_hint(
+            variable,
+            int(
+                assignment[item_index][0] == section and referee_by_match.get(item_index) == team_id
+            ),
+        )
+    for item_index, variable in section_number.items():
+        model.add_hint(variable, assignment[item_index][0] + 1)
+    for item_index, variable in match_court.items():
+        model.add_hint(variable, assignment[item_index][1] + 1)
+
+    for key, variable in role_any.items():
+        model.add_hint(variable, int(key in role_positions))
+    for (team_id, section, court), variable in role_on_court.items():
+        model.add_hint(variable, int(role_positions.get((team_id, section)) == court))
+    for key, variable in role_court.items():
+        model.add_hint(variable, role_positions[key] + 1 if key in role_positions else 0)
+    return True
+
+
+def _choose_distinct_team_referees(
+    ordered_matches: list[int],
+    candidates_by_match: Mapping[int, list[str]],
+) -> dict[int, str] | None:
+    """同一セクション内で重複しないチーム審判の組合せを返す。"""
+
+    chosen: dict[int, str] = {}
+
+    def assign(index: int, used_team_ids: set[str]) -> bool:
+        if index == len(ordered_matches):
+            return True
+        match_index = ordered_matches[index]
+        for team_id in candidates_by_match[match_index]:
+            if team_id in used_team_ids:
+                continue
+            chosen[match_index] = team_id
+            if assign(index + 1, {*used_team_ids, team_id}):
+                return True
+            chosen.pop(match_index)
+        return False
+
+    return chosen if assign(0, set()) else None
+
+
 def _optimize_lower_objectives(
     model: cp_model.CpModel,
     request: ScheduleRequest,
@@ -513,6 +814,7 @@ def _optimize_lower_objectives(
     match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
     team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
     possible_matches_by_team: Mapping[str, tuple[int, ...]],
+    role_on_court: Mapping[tuple[str, int, int], cp_model.IntVar],
     initial_solver: cp_model.CpSolver,
     time_budget: float,
 ) -> tuple[cp_model.CpSolver, SolverStatus, float, tuple[str, ...]]:
@@ -528,8 +830,6 @@ def _optimize_lower_objectives(
         model, possible_matches_by_team, match_in_section, horizon
     )
     referee_then_match: list[cp_model.IntVar] = []
-    referee_on_court: dict[tuple[str, int, int], cp_model.LinearExpr] = {}
-    role_on_court: dict[tuple[str, int, int], cp_model.LinearExpr] = {}
     previous_same_court: list[cp_model.IntVar] = []
     for team_id, relevant_matches in possible_matches_by_team.items():
         for section in sections:
@@ -549,24 +849,6 @@ def _optimize_lower_objectives(
                 referee_then_match.append(transition)
 
             for court in courts:
-                referee_court_terms: list[cp_model.IntVar] = []
-                for (match, ref_section, referee_team), ref_var in team_referee.items():
-                    if ref_section != section or referee_team != team_id:
-                        continue
-                    conjunction = model.new_bool_var(
-                        f"referee_court_{team_id}_{match}_{section}_{court}"
-                    )
-                    slot_var = placement[match, section, court]
-                    model.add(conjunction <= ref_var)
-                    model.add(conjunction <= slot_var)
-                    model.add(conjunction >= ref_var + slot_var - 1)
-                    referee_court_terms.append(conjunction)
-                referee_expr = cp_model.LinearExpr.sum(referee_court_terms)
-                referee_on_court[team_id, section, court] = referee_expr
-                played_expr = cp_model.LinearExpr.sum(
-                    [placement[index, section, court] for index in relevant_matches]
-                )
-                role_on_court[team_id, section, court] = played_expr + referee_expr
                 if section > 0:
                     previous_played = sum(
                         placement[index, section - 1, court] for index in relevant_matches
@@ -574,9 +856,16 @@ def _optimize_lower_objectives(
                     continued = model.new_bool_var(
                         f"previous_same_court_referee_{team_id}_{section}_{court}"
                     )
-                    model.add(continued <= referee_expr)
+                    model.add(continued <= sum(referee_now))
+                    model.add(continued <= role_on_court[team_id, section, court])
                     model.add(continued <= previous_played)
-                    model.add(continued >= referee_expr + previous_played - 1)
+                    model.add(
+                        continued
+                        >= sum(referee_now)
+                        + role_on_court[team_id, section, court]
+                        + previous_played
+                        - 2
+                    )
                     previous_same_court.append(continued)
 
     referee_then_match_count = model.new_int_var(
@@ -587,25 +876,6 @@ def _optimize_lower_objectives(
         0, len(previous_same_court), "previous_same_court_referee_count"
     )
     model.add(previous_same_court_count == sum(previous_same_court))
-
-    adjacent_moves: list[cp_model.IntVar] = []
-    for team_id in possible_matches_by_team:
-        for section in range(horizon - 1):
-            for left_court in courts:
-                for right_court in courts:
-                    if left_court == right_court:
-                        continue
-                    moved = model.new_bool_var(
-                        f"adjacent_move_{team_id}_{section}_{left_court}_{right_court}"
-                    )
-                    left = role_on_court[team_id, section, left_court]
-                    right = role_on_court[team_id, section + 1, right_court]
-                    model.add(moved <= left)
-                    model.add(moved <= right)
-                    model.add(moved >= left + right - 1)
-                    adjacent_moves.append(moved)
-    adjacent_move_count = model.new_int_var(0, len(adjacent_moves), "adjacent_move_count")
-    model.add(adjacent_move_count == sum(adjacent_moves))
 
     # 直前の割当てコートを状態として持ち、空きセクションを挟む移動も1回として数える。
     # 全セクション対の組合せを作らないため、最大入力でもモデルサイズを抑えられる。
@@ -668,7 +938,6 @@ def _optimize_lower_objectives(
         ("maximum_team_wait_sections", maximum_wait, False),
         ("referee_then_match_count", referee_then_match_count, False),
         ("league_previous_same_court_referee_count", previous_same_court_count, True),
-        ("adjacent_assignment_court_change_count", adjacent_move_count, False),
         ("team_court_change_count", all_move_count, False),
         ("court_usage_difference", court_usage_difference, False),
     )

@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from itertools import pairwise
 
 import pytest
+from ortools.sat.python import cp_model
 
 from football_scheduler import solver as solver_module
 from football_scheduler.fixtures import (
@@ -147,6 +148,7 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     possible_teams = {match.id: match.possible_team_ids for match in request.matches}
     roles_by_section: dict[int, list[str]] = defaultdict(list)
     matches_by_team: dict[str, list[int]] = defaultdict(list)
+    assignments_by_team: dict[str, list[tuple[int, str]]] = defaultdict(list)
     organizer_count: Counter[int] = Counter()
     for slot in scheduled_slots:
         assert slot.match_id is not None
@@ -154,9 +156,13 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
         roles_by_section[slot.section_no].extend(possible_teams[slot.match_id])
         for team_id in possible_teams[slot.match_id]:
             matches_by_team[team_id].append(slot.section_no)
+            assignments_by_team[team_id].append((slot.section_no, slot.court_id))
         if slot.referee_assignment.kind is RefereeKind.TEAM:
             assert slot.referee_assignment.team_id is not None
             roles_by_section[slot.section_no].append(slot.referee_assignment.team_id)
+            assignments_by_team[slot.referee_assignment.team_id].append(
+                (slot.section_no, slot.court_id)
+            )
             assert slot.section_no != 1
         else:
             organizer_count[slot.section_no] += 1
@@ -166,6 +172,10 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     for sections in matches_by_team.values():
         ordered = sorted(sections)
         assert all(right - left >= 2 for left, right in pairwise(ordered))
+    for assignments in assignments_by_team.values():
+        for left, right in pairwise(sorted(assignments)):
+            if right[0] == left[0] + 1:
+                assert right[1] == left[1]
     assert all(count <= request.referees.organizer_capacity for count in organizer_count.values())
     assert all(
         slot.referee_assignment is not None
@@ -182,6 +192,95 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     assert result.metrics.league_team_referee_count_min == 1
     assert result.metrics.league_team_referee_count_max == 2
     assert result.metrics.league_team_referee_count_difference == 1
+    assert result.metrics.adjacent_assignment_court_change_count == 0
+    assert "adjacent_assignment_court_change_count" not in result.metrics.optimized_objectives
+    assert "adjacent_assignment_court_change_count" not in {
+        stage.objective for stage in result.metrics.objective_stages
+    }
+
+
+def _transition_model_status(
+    first_role: str,
+    second_role: str,
+    *,
+    second_section: int = 1,
+    second_court: int = 1,
+) -> cp_model.CpSolverStatus:
+    model = cp_model.CpModel()
+    horizon = 3
+    placement: dict[tuple[int, int, int], cp_model.IntVar] = {}
+    match_in_section: dict[tuple[int, int], cp_model.IntVar] = {}
+    fixed_positions = ((0, 0), (second_section, second_court))
+    for match_index, fixed_position in enumerate(fixed_positions):
+        for section in range(horizon):
+            in_section = model.new_bool_var(f"match_{match_index}_{section}")
+            match_in_section[match_index, section] = in_section
+            court_variables = []
+            for court in range(2):
+                variable = model.new_bool_var(f"placement_{match_index}_{section}_{court}")
+                placement[match_index, section, court] = variable
+                court_variables.append(variable)
+                model.add(variable == int(fixed_position == (section, court)))
+            model.add(sum(court_variables) == in_section)
+
+    possible_matches = {
+        "focus": tuple(
+            match_index
+            for match_index, role in enumerate((first_role, second_role))
+            if role == "match"
+        )
+    }
+    team_referee: dict[tuple[int, int, str], cp_model.IntVar] = {}
+    for match_index, (role, (section, _court)) in enumerate(
+        zip((first_role, second_role), fixed_positions, strict=True)
+    ):
+        if role != "referee":
+            continue
+        variable = model.new_bool_var(f"referee_{match_index}_{section}")
+        model.add(variable == 1)
+        team_referee[match_index, section, "focus"] = variable
+
+    role_any, _role_on_court, role_court, _match_court = solver_module._add_team_role_court_state(
+        model,
+        placement,
+        match_in_section,
+        team_referee,
+        possible_matches,
+        horizon,
+        2,
+    )
+    solver_module._add_adjacent_assignment_same_court_constraints(
+        model,
+        role_any,
+        role_court,
+        ("focus",),
+        horizon,
+    )
+    return cp_model.CpSolver().solve(model)
+
+
+@pytest.mark.parametrize(
+    ("first_role", "second_role"),
+    [("match", "referee"), ("referee", "match"), ("referee", "referee")],
+)
+def test_adjacent_day1_roles_cannot_change_courts(
+    first_role: str,
+    second_role: str,
+) -> None:
+    assert _transition_model_status(first_role, second_role) == cp_model.INFEASIBLE
+    assert _transition_model_status(first_role, second_role, second_court=0) == cp_model.OPTIMAL
+
+
+def test_day1_court_change_is_allowed_after_an_empty_section() -> None:
+    assert (
+        _transition_model_status(
+            "match",
+            "referee",
+            second_section=2,
+            second_court=1,
+        )
+        == cp_model.OPTIMAL
+    )
 
 
 def test_same_seed_produces_same_schedule() -> None:

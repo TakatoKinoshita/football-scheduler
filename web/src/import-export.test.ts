@@ -273,6 +273,44 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("旧ルールの隣接コート移動がある1日目日程も失わずに復元する", () => {
+    const document = validDocument();
+    const teams = document.tournament.input.teams as Array<Record<string, unknown>>;
+    teams.push(
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+    );
+    const courts = document.tournament.input.courts as Array<Record<string, unknown>>;
+    courts.push({ id: "court-b", name: "Bコート" });
+    const matches = document.tournament.input.matches as Array<Record<string, unknown>>;
+    matches.push({
+      id: "LG-B-M1",
+      possible_home_team_ids: ["team-03"],
+      possible_away_team_ids: ["team-04"],
+    });
+    document.tournament.result = {
+      status: "OPTIMAL",
+      slots: [
+        {
+          day_id: "day1",
+          section_no: 1,
+          court_id: "court-a",
+          match_id: "LG-A-M1",
+          referee_assignment: { kind: "organizer" },
+        },
+        {
+          day_id: "day1",
+          section_no: 2,
+          court_id: "court-b",
+          match_id: "LG-B-M1",
+          referee_assignment: { kind: "team", team_id: "team-01" },
+        },
+      ],
+    };
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("新しい1日目リーグ形式はmatchesなしで読み込む", () => {
     const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
     document.tournament.name = "地区大会";

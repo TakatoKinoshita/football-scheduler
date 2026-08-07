@@ -17,6 +17,7 @@ import {
   type FieldIssue,
   type WizardStep,
 } from "./day1-form";
+import { day1AdjacentCourtViolations } from "./day1-schedule-policy";
 import {
   ImportValidationError,
   parseTournamentJson,
@@ -730,11 +731,23 @@ function resultLeaguePlan(): JsonObject | undefined {
   return asObject(documentState.tournament.result?.league_plan);
 }
 
-function resultMatches(): JsonObject[] {
-  const planned = asObjectArray(resultLeaguePlan()?.matches);
+function day1MatchesForResult(result: JsonObject | undefined): JsonObject[] {
+  const planned = asObjectArray(asObject(result?.league_plan)?.matches);
   return planned.length > 0
     ? planned
     : asObjectArray(documentState.tournament.input.matches);
+}
+
+function resultMatches(): JsonObject[] {
+  return day1MatchesForResult(asObject(documentState.tournament.result));
+}
+
+function day1PolicyViolationCount(result = asObject(documentState.tournament.result)): number {
+  if (result === undefined) return 0;
+  return day1AdjacentCourtViolations(
+    day1MatchesForResult(result),
+    asObjectArray(result.slots),
+  ).length;
 }
 
 function leagueResults(): JsonObject[] {
@@ -1062,14 +1075,18 @@ function refreshDay2Enabled(): void {
   const provisional =
     tournamentPlan !== undefined && tournamentParticipantResolution(tournamentPlan) === "provisional";
   const settings = currentDay2Settings();
+  const legacyDay1ViolationCount = day1PolicyViolationCount(result);
   day2Review.textContent =
     !hasTournament
       ? "先に2日目トーナメントを作成してください。"
+      : legacyDay1ViolationCount > 0
+      ? `1日目の旧ルール日程に隣接コート移動が${String(legacyDay1ViolationCount)}件あります。先に1日目日程を再作成してください。`
       : settings === undefined
       ? "2日目設定に入力誤りがあります。休憩は「4:60」の形式で入力してください。"
       : `${provisional ? "仮日程／" : ""}${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
   day2Button.disabled =
     !hasTournament ||
+    legacyDay1ViolationCount > 0 ||
     settings === undefined ||
     !navigator.onLine ||
     day2TurnstileToken.length === 0;
@@ -1251,8 +1268,16 @@ function renderResult(): void {
   content.append(overview);
 
   const validation = asObject(result.validation);
-  if (validation?.valid === true) {
+  const legacyDay1ViolationCount = day1PolicyViolationCount(result);
+  if (validation?.valid === true && legacyDay1ViolationCount === 0) {
     appendTextElement(content, "p", "大会規則の独立チェックに合格しています。", "validation-ok");
+  } else if (legacyDay1ViolationCount > 0) {
+    appendTextElement(
+      content,
+      "p",
+      `旧ルールの日程です。隣接セクションで担当コートが変わる割当てが${String(legacyDay1ViolationCount)}件あります。閲覧・印刷はできますが、現在の規則に合わせるには1日目の日程を再作成してください。`,
+      "notice legacy-schedule-warning",
+    );
   }
 
   const leaguePlan = resultLeaguePlan();
@@ -1845,12 +1870,20 @@ function renderDay2Schedule(
     );
   }
   const validation = asObject(schedule.integrated_validation);
-  if (validation?.valid === true) {
+  const legacyDay1ViolationCount = day1PolicyViolationCount();
+  if (validation?.valid === true && legacyDay1ViolationCount === 0) {
     appendTextElement(
       section,
       "p",
       "1日目と2日目を通した大会規則の独立チェックに合格しています。",
       "validation-ok",
+    );
+  } else if (legacyDay1ViolationCount > 0) {
+    appendTextElement(
+      section,
+      "p",
+      `この2日目日程の元になった1日目は旧ルールの日程です。隣接コート移動が${String(legacyDay1ViolationCount)}件あります。既存の日程・結果は閲覧と印刷を続けられます。`,
+      "notice legacy-schedule-warning",
     );
   }
   const endTime = typeof schedule.expected_end_time === "string"
@@ -2467,6 +2500,13 @@ function requestDay2Schedule(): void {
     day2 === undefined
   ) {
     day2Status.textContent = "2日目日程の作成に必要な設定またはトーナメント表がありません。";
+    return;
+  }
+  const legacyDay1ViolationCount = day1PolicyViolationCount(result);
+  if (legacyDay1ViolationCount > 0) {
+    day2Status.textContent =
+      `1日目の旧ルール日程に隣接コート移動が${String(legacyDay1ViolationCount)}件あります。1日目の日程を再作成してからお試しください。`;
+    refreshDay2Enabled();
     return;
   }
   if (day2TurnstileToken.length === 0) {
@@ -3104,6 +3144,14 @@ generateButton.addEventListener("click", () => {
   generationStatus.textContent = "1日目の日程を生成しています。画面を閉じずにお待ちください…";
   void generateSchedule(buildDay1ScheduleRequest(documentState.tournament.input), turnstileToken)
     .then((result) => {
+      const violationCount = day1PolicyViolationCount(result);
+      if (violationCount > 0) {
+        throw new ScheduleApiError(
+          "ADJACENT_ASSIGNMENT_COURT_CONFLICT",
+          "生成結果が、隣接セクションの担当を同じコートにする規則へ適合しませんでした。入力は変更せず保持しています。もう一度お試しください。",
+          { violation_count: violationCount },
+        );
+      }
       documentState = {
         ...documentState,
         updatedAt: new Date().toISOString(),
