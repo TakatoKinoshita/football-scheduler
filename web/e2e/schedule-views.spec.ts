@@ -135,18 +135,8 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
 }) => {
   await openScheduleViewFixture(page);
 
-  const brackets = page.locator("#tournament-plan-view .tournament-bracket");
-  await expect(brackets).toHaveCount(2);
-  await expect(
-    page.locator('#tournament-plan-view .tournament-bracket[data-pool="upper"]'),
-  ).toBeVisible();
-  await expect(
-    page.locator('#tournament-plan-view .tournament-bracket[data-pool="upper"] .bracket-match-node'),
-  ).toHaveCount(4);
-  await expect(
-    page.locator('#tournament-plan-view .tournament-bracket[data-pool="upper"] .bracket-edge:not(.terminal)'),
-  ).toHaveCount(4);
-  await expect(page.locator("#tournament-plan-view .bracket-watermark").first()).toHaveText("仮");
+  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "トーナメント表だけ印刷" })).toBeHidden();
   await expect(page.locator("#tournament-plan-view table")).toHaveCount(2);
 
   const toggle = page.locator("#day2-schedule-view-toggle");
@@ -161,11 +151,6 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(
     page.locator('#tournament-plan-view .match-display-number[data-match-id="UT-SF1"]'),
   ).toHaveText("A①");
-  const semifinalNode = page.locator(
-    '#tournament-plan-view .tournament-bracket[data-pool="upper"] .bracket-match-node[data-match-id="UT-SF1"]',
-  );
-  await expect(semifinalNode).toContainText("A①");
-  await expect(semifinalNode).toContainText("09:30〜10:05 Aコート");
   await expect(courtA.locator("table")).toHaveAttribute("aria-label", "Aコートの日程");
 
   await toggle.getByLabel("時間順").check();
@@ -174,7 +159,7 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await page.context().setOffline(true);
   await page.reload();
   await expect(page.locator("#day2-schedule-view-toggle").getByLabel("時間順")).toBeChecked();
-  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
+  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(0);
 
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#day1-results-panel")).toBeHidden();
@@ -184,38 +169,20 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator('#day2-schedule-view [data-schedule-view="court"]')).toBeHidden();
 });
 
-test("ブラケットだけを上位・下位のA4横ページとして印刷できる", async ({ page }) => {
+test("再設計中の進行図と専用印刷を隠し、一覧表と通常印刷を維持する", async ({ page }) => {
   await openScheduleViewFixture(page);
-  await page.evaluate(() => {
-    window.print = () => {
-      document.body.dataset.printInvoked = "true";
-    };
-  });
   const printButton = page.getByRole("button", { name: "トーナメント表だけ印刷" });
-  await expect(printButton).toBeEnabled();
-  await printButton.click();
-  await expect(page.locator("body")).toHaveAttribute("data-print-scope", "bracket");
-  await expect(page.locator("body")).toHaveAttribute("data-print-invoked", "true");
+  await expect(printButton).toBeHidden();
+  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(0);
+  await expect(page.locator("#tournament-plan-view table")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "2日目を印刷" })).toBeEnabled();
 
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#day1-results-panel")).toBeHidden();
   await expect(page.locator("#day2-results-panel")).toBeVisible();
   await expect(page.locator("#tournament-plan-view .tournament-pool")).toHaveCount(2);
-  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
-  expect(
-    await page.locator("#tournament-plan-view .seed-list").evaluateAll(
-      (lists) => lists.every((list) => getComputedStyle(list).display === "none"),
-    ),
-  ).toBe(true);
-  await expect(page.locator("#day2-schedule-view")).toBeHidden();
-  const printVisibility = await page.locator("#tournament-plan-view .tournament-pool").evaluateAll(
-    (pools) => pools.map((pool) => ({
-      page: getComputedStyle(pool).page,
-      breakAfter: getComputedStyle(pool).breakAfter,
-    })),
-  );
-  expect(printVisibility.every((style) => style.page === "bracket")).toBe(true);
-  expect(printVisibility[0]?.breakAfter).toBe("page");
+  await expect(page.locator("#tournament-plan-view .seed-list").first()).toBeVisible();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
 });
 
 test("2日目設定を変更すると日程とトーナメント一覧の派生番号をともに外す", async ({
@@ -278,14 +245,7 @@ for (const viewport of [
         scrollWidth: element.scrollWidth,
       }));
       expect(localDimensions.scrollWidth).toBeGreaterThanOrEqual(localDimensions.clientWidth);
-      const bracket = page.locator(
-        '#tournament-plan-view .tournament-bracket[data-pool="upper"] .tournament-bracket-scroll',
-      );
-      const bracketDimensions = await bracket.evaluate((element) => ({
-        clientWidth: element.clientWidth,
-        scrollWidth: element.scrollWidth,
-      }));
-      expect(bracketDimensions.scrollWidth).toBeGreaterThan(bracketDimensions.clientWidth);
+      await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(0);
     }
   });
 }

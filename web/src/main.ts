@@ -297,7 +297,7 @@ root.innerHTML = `
         </div>
         <div class="button-row no-print">
           <button id="print-day2" class="secondary" type="button" disabled>2日目を印刷</button>
-          <button id="print-bracket" class="secondary" type="button" disabled>トーナメント表だけ印刷</button>
+          <button id="print-bracket" class="secondary" type="button" disabled hidden>トーナメント表だけ印刷</button>
         </div>
       </div>
       <div id="day2-result-content" class="result-content empty">
@@ -620,6 +620,7 @@ const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
 const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
 const bracketPrintButton = requiredElement<HTMLButtonElement>("#print-bracket");
+const tournamentBracketVisible = false;
 const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
 const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
@@ -1231,6 +1232,7 @@ function renderResult(): void {
   goDay2Area.hidden = true;
   day2PrintButton.disabled = true;
   bracketPrintButton.disabled = true;
+  bracketPrintButton.hidden = true;
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
     content.textContent =
@@ -1755,25 +1757,27 @@ function renderTournamentPlan(
       `${heading}（${String(pool.participant_count ?? 0)}チーム）`,
     );
 
-    try {
-      const bracketModel = buildTournamentBracketModel({
-        plan,
-        pool: field,
-        teamNames,
-        ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
-        results,
-        ...(finalStandings === undefined ? {} : { finalStandings }),
-      });
-      poolSection.append(renderTournamentBracket(bracketModel, `${heading}の進行図`));
-    } catch (error) {
-      appendTextElement(
-        poolSection,
-        "p",
-        error instanceof TournamentBracketError
-          ? `ブラケット図を表示できませんでした。${error.message} 下の一覧表で内容を確認してください。`
-          : "ブラケット図を表示できませんでした。下の一覧表で内容を確認してください。",
-        "notice tournament-bracket-error",
-      );
+    if (tournamentBracketVisible) {
+      try {
+        const bracketModel = buildTournamentBracketModel({
+          plan,
+          pool: field,
+          teamNames,
+          ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
+          results,
+          ...(finalStandings === undefined ? {} : { finalStandings }),
+        });
+        poolSection.append(renderTournamentBracket(bracketModel, `${heading}の進行図`));
+      } catch (error) {
+        appendTextElement(
+          poolSection,
+          "p",
+          error instanceof TournamentBracketError
+            ? `ブラケット図を表示できませんでした。${error.message} 下の一覧表で内容を確認してください。`
+            : "ブラケット図を表示できませんでした。下の一覧表で内容を確認してください。",
+          "notice tournament-bracket-error",
+        );
+      }
     }
 
     const seedList = window.document.createElement("ol");
@@ -2907,7 +2911,8 @@ function renderDay2Preparation(
   refreshTournamentEnabled();
   day2Confirmation.hidden = true;
   day2PrintButton.disabled = tournamentPlan === undefined;
-  bracketPrintButton.disabled = tournamentPlan === undefined;
+  bracketPrintButton.disabled = !tournamentBracketVisible || tournamentPlan === undefined;
+  bracketPrintButton.hidden = !tournamentBracketVisible;
   if (tournamentPlan === undefined) return;
   const day2Schedule = asObject(result.day2_schedule);
   const scheduleByMatchId = day2Schedule === undefined
