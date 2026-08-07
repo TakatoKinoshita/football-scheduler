@@ -40,7 +40,7 @@ class ManualBlock(ContractModel):
         str,
         Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"),
     ]
-    team_ids: Annotated[tuple[Identifier, ...], Field(min_length=1)]
+    team_ids: tuple[Identifier, ...] = ()
 
 
 class LeaguePlanRequest(ContractModel):
@@ -67,6 +67,19 @@ class LeagueRound(ContractModel):
     match_ids: Annotated[tuple[Identifier, ...], Field(min_length=1)]
 
 
+class AutomaticManualAssignment(ContractModel):
+    """未割当てから自動補完したチームと確定ブロック。"""
+
+    team_id: Identifier
+    block_id: Identifier
+
+
+class ManualCompletion(ContractModel):
+    """部分的な手動割当てを補完した監査情報。"""
+
+    automatic_assignments: tuple[AutomaticManualAssignment, ...] = ()
+
+
 class LeaguePlan(ContractModel):
     """既存ソルバーへ渡せるMatchSpecを含むリーグ生成結果。"""
 
@@ -76,6 +89,10 @@ class LeaguePlan(ContractModel):
     blocks: tuple[LeagueBlock, ...]
     logical_rounds: tuple[LeagueRound, ...]
     matches: tuple[MatchSpec, ...]
+    manual_completion: ManualCompletion | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class LeagueGenerationError(ValueError):
@@ -109,7 +126,7 @@ def generate_league_plan(
             team_count=len(normalized.teams),
         )
 
-    blocks = _assign_blocks(normalized)
+    blocks, manual_completion = _assign_blocks(normalized)
     matches: list[MatchSpec] = []
     logical_rounds: list[LeagueRound] = []
     for block in blocks:
@@ -123,6 +140,7 @@ def generate_league_plan(
         blocks=blocks,
         logical_rounds=tuple(logical_rounds),
         matches=tuple(matches),
+        manual_completion=manual_completion,
     )
 
 
@@ -153,7 +171,9 @@ def _validate_team_ids(request: LeaguePlanRequest) -> None:
         )
 
 
-def _assign_blocks(request: LeaguePlanRequest) -> tuple[LeagueBlock, ...]:
+def _assign_blocks(
+    request: LeaguePlanRequest,
+) -> tuple[tuple[LeagueBlock, ...], ManualCompletion | None]:
     if request.assignment_mode is AssignmentMode.MANUAL:
         return _manual_blocks(request)
     if request.manual_blocks:
@@ -177,7 +197,7 @@ def _assign_blocks(request: LeaguePlanRequest) -> tuple[LeagueBlock, ...]:
                 )
             )
             offset += size
-        return tuple(blocks)
+        return tuple(blocks), None
 
     ordered_teams = _seeded_order(request.teams)
     assignments: list[list[str]] = [[] for _ in block_ids]
@@ -186,13 +206,18 @@ def _assign_blocks(request: LeaguePlanRequest) -> tuple[LeagueBlock, ...]:
         position = index % period
         block_index = position if position < request.block_count else period - position - 1
         assignments[block_index].append(team.id)
-    return tuple(
-        LeagueBlock(id=block_id, team_ids=tuple(team_ids))
-        for block_id, team_ids in zip(block_ids, assignments, strict=True)
+    return (
+        tuple(
+            LeagueBlock(id=block_id, team_ids=tuple(team_ids))
+            for block_id, team_ids in zip(block_ids, assignments, strict=True)
+        ),
+        None,
     )
 
 
-def _manual_blocks(request: LeaguePlanRequest) -> tuple[LeagueBlock, ...]:
+def _manual_blocks(
+    request: LeaguePlanRequest,
+) -> tuple[tuple[LeagueBlock, ...], ManualCompletion]:
     if not request.manual_blocks:
         raise LeagueGenerationError(
             "MANUAL_BLOCKS_REQUIRED",
@@ -235,15 +260,78 @@ def _manual_blocks(request: LeaguePlanRequest) -> tuple[LeagueBlock, ...]:
             "同じチームを複数の手動ブロックへ割り当てることはできません。",
             team_ids=duplicate_team_ids,
         )
-    missing_team_ids = sorted(known_team_ids - set(assigned_team_ids))
-    if missing_team_ids:
-        raise LeagueGenerationError(
-            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
-            "どの手動ブロックにも所属していないチームがあります。",
-            team_ids=missing_team_ids,
+    assigned_team_id_set = set(assigned_team_ids)
+    if len(assigned_team_id_set) == len(known_team_ids):
+        return (
+            tuple(
+                LeagueBlock(id=block.id, team_ids=block.team_ids) for block in request.manual_blocks
+            ),
+            ManualCompletion(),
         )
-    return tuple(
-        LeagueBlock(id=block.id, team_ids=block.team_ids) for block in request.manual_blocks
+
+    minimum_size, maximum_large_block_count = divmod(len(request.teams), request.block_count)
+    maximum_size = minimum_size + (1 if maximum_large_block_count > 0 else 0)
+    block_sizes = {block.id: len(block.team_ids) for block in request.manual_blocks}
+    over_capacity_block_ids = [
+        block.id for block in request.manual_blocks if len(block.team_ids) > maximum_size
+    ]
+    large_block_ids = [
+        block.id for block in request.manual_blocks if len(block.team_ids) > minimum_size
+    ]
+    excess_large_block_ids = large_block_ids[maximum_large_block_count:]
+    if over_capacity_block_ids or excess_large_block_ids:
+        raise LeagueGenerationError(
+            "MANUAL_BLOCK_SIZE_IMBALANCE",
+            "手動指定された人数が多すぎるブロックがあります。対象チームを未割当てへ戻してください。",
+            block_sizes=block_sizes,
+            minimum_size=minimum_size,
+            maximum_size=maximum_size,
+            maximum_large_block_count=maximum_large_block_count,
+            over_capacity_block_ids=over_capacity_block_ids,
+            excess_large_block_ids=excess_large_block_ids,
+        )
+
+    target_large_block_ids = set(large_block_ids)
+    for block in request.manual_blocks:
+        if len(target_large_block_ids) >= maximum_large_block_count:
+            break
+        if block.id not in target_large_block_ids:
+            target_large_block_ids.add(block.id)
+
+    unassigned_teams = [team for team in request.teams if team.id not in assigned_team_id_set]
+    ordered_unassigned = _random_order(unassigned_teams, request.random_seed)
+    unassigned_offset = 0
+    completed_blocks: list[LeagueBlock] = []
+    automatic_assignments: list[AutomaticManualAssignment] = []
+    for block in request.manual_blocks:
+        target_size = minimum_size + (block.id in target_large_block_ids)
+        automatic_teams = ordered_unassigned[
+            unassigned_offset : unassigned_offset + target_size - len(block.team_ids)
+        ]
+        unassigned_offset += len(automatic_teams)
+        automatic_assignments.extend(
+            AutomaticManualAssignment(team_id=team.id, block_id=block.id)
+            for team in automatic_teams
+        )
+        completed_blocks.append(
+            LeagueBlock(
+                id=block.id,
+                team_ids=(*block.team_ids, *(team.id for team in automatic_teams)),
+            )
+        )
+
+    if unassigned_offset != len(ordered_unassigned):
+        raise LeagueGenerationError(
+            "MANUAL_BLOCK_SIZE_IMBALANCE",
+            "未割当てチームを有効な人数構成へ配置できませんでした。手動割当てを確認してください。",
+            block_sizes=block_sizes,
+            minimum_size=minimum_size,
+            maximum_size=maximum_size,
+            maximum_large_block_count=maximum_large_block_count,
+            unassigned_team_ids=[team.id for team in ordered_unassigned],
+        )
+    return tuple(completed_blocks), ManualCompletion(
+        automatic_assignments=tuple(automatic_assignments)
     )
 
 

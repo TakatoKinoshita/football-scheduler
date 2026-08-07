@@ -383,6 +383,52 @@ describe("大会JSONの入出力", () => {
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/手動割当てと一致/);
   });
 
+  it("部分的な手動割当てと自動配置監査を復元する", () => {
+    const document = rankedDocument();
+    document.tournament.input.league = {
+      block_count: 1,
+      assignment_mode: "manual",
+      manual_blocks: [{ id: "A", team_ids: ["team-01"] }],
+    };
+    const plan = document.tournament.result!.league_plan as Record<string, unknown>;
+    plan.assignment_mode = "manual";
+    plan.manual_completion = {
+      automatic_assignments: [{ team_id: "team-02", block_id: "A" }],
+    };
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("部分的な手動割当ての監査不足と改ざんを拒否する", () => {
+    const document = rankedDocument();
+    document.tournament.input.league = {
+      block_count: 1,
+      assignment_mode: "manual",
+      manual_blocks: [{ id: "A", team_ids: ["team-01"] }],
+    };
+    const plan = document.tournament.result!.league_plan as Record<string, unknown>;
+    plan.assignment_mode = "manual";
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/手動割当てと一致/);
+    plan.manual_completion = {
+      automatic_assignments: [{ team_id: "team-01", block_id: "A" }],
+    };
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/自動配置情報/);
+  });
+
+  it("監査情報のない従来の完全な手動割当てを復元する", () => {
+    const document = rankedDocument();
+    document.tournament.input.league = {
+      block_count: 1,
+      assignment_mode: "manual",
+      manual_blocks: [{ id: "A", team_ids: ["team-01", "team-02"] }],
+    };
+    const plan = document.tournament.result!.league_plan as Record<string, unknown>;
+    plan.assignment_mode = "manual";
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("未知のschema versionを利用者向けメッセージで拒否する", () => {
     const document = validDocument() as unknown as Record<string, unknown>;
     document.schemaVersion = "9.9.9";

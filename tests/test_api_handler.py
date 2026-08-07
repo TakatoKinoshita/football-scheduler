@@ -209,7 +209,16 @@ def test_manual_block_validation_error_returns_http_400() -> None:
     result = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert result["diagnostics"][0]["code"] == "MANUAL_BLOCK_SIZE_IMBALANCE"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "MANUAL_BLOCK_SIZE_IMBALANCE"
+    assert diagnostic["details"] == {
+        "block_sizes": {"A": 4, "B": 1},
+        "minimum_size": 2,
+        "maximum_size": 3,
+        "maximum_large_block_count": 1,
+        "over_capacity_block_ids": ["A"],
+        "excess_large_block_ids": [],
+    }
 
 
 def test_content_length_over_one_megabyte_is_rejected_before_application(

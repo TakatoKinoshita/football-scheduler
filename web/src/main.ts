@@ -1296,6 +1296,14 @@ function renderResult(): void {
 
   const leaguePlan = resultLeaguePlan();
   const blocks = asObjectArray(leaguePlan?.blocks);
+  const automaticAssignments = new Map(
+    asObjectArray(asObject(leaguePlan?.manual_completion)?.automatic_assignments)
+      .filter(
+        (assignment) =>
+          typeof assignment.team_id === "string" && typeof assignment.block_id === "string",
+      )
+      .map((assignment) => [String(assignment.team_id), String(assignment.block_id)]),
+  );
   standingsConfirmation.hidden = blocks.length === 0;
   goDay2Area.hidden = blocks.length === 0;
 
@@ -1380,6 +1388,14 @@ function renderResult(): void {
 
   if (blocks.length > 0) {
     appendTextElement(content, "h3", "ブロック分け");
+    if (automaticAssignments.size > 0) {
+      appendTextElement(
+        content,
+        "p",
+        `未割当てだった${String(automaticAssignments.size)}チームを抽選番号で自動配置しました。`,
+        "muted",
+      );
+    }
     const blockGrid = window.document.createElement("div");
     blockGrid.className = "block-grid";
     const rounds = asObjectArray(leaguePlan?.logical_rounds);
@@ -1390,7 +1406,15 @@ function renderResult(): void {
       appendTextElement(card, "h4", `${blockId}ブロック`);
       const list = window.document.createElement("ol");
       for (const teamId of Array.isArray(block.team_ids) ? block.team_ids : []) {
-        appendTextElement(list, "li", teamNames.get(String(teamId)) ?? "名称未設定");
+        const normalizedTeamId = String(teamId);
+        const item = appendTextElement(
+          list,
+          "li",
+          teamNames.get(normalizedTeamId) ?? "名称未設定",
+        );
+        if (automaticAssignments.get(normalizedTeamId) === blockId) {
+          appendTextElement(item, "span", "自動配置", "automatic-assignment");
+        }
       }
       card.append(list);
       const roundCount = rounds.filter((round) => round.block_id === block.id).length;
@@ -2772,20 +2796,23 @@ function renderManualBlockAssignment(): void {
   manualBlockSummary.textContent = blockCount < 1
     ? "先にブロック数を選択してください。"
     : analysis.unassignedTeamIds.length > 0
-      ? `未割当て ${analysis.unassignedTeamIds.length}チーム。各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームにしてください。`
+      ? analysis.completionPossible
+        ? `未割当て ${analysis.unassignedTeamIds.length}チームは、日程生成時に抽選番号で自動配置します。`
+        : `手動指定が多すぎるブロックがあります。各ブロック${analysis.minimumSize}〜${analysis.maximumSize}チームに収まるよう修正してください。`
       : analysis.valid
         ? `全${teamIds.length}チームの割当てが完了しました。`
         : `各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームに調整してください。`;
-  manualBlockSummary.dataset.state = analysis.valid ? "valid" : "invalid";
+  manualBlockSummary.dataset.state = analysis.completionPossible ? "valid" : "invalid";
 
   manualBlockCounts.replaceChildren();
   for (const blockId of analysis.expectedBlockIds) {
     const count = analysis.blockSizes[blockId] ?? 0;
-    const acceptable = count >= analysis.minimumSize && count <= analysis.maximumSize;
+    const acceptable = !analysis.overCapacityBlockIds.includes(blockId)
+      && !analysis.excessLargeBlockIds.includes(blockId);
     const badge = window.document.createElement("span");
     badge.id = `manual-block-count-${blockId}`;
     badge.className = `manual-block-count ${acceptable ? "valid" : "invalid"}`;
-    badge.textContent = `${blockId}ブロック：${count}チーム${acceptable ? "（適正）" : "（要調整）"}`;
+    badge.textContent = `${blockId}ブロック：現在${count}チーム／最終${analysis.minimumSize}〜${analysis.maximumSize}チーム${acceptable ? "" : "（要調整）"}`;
     manualBlockCounts.append(badge);
   }
 
@@ -2804,7 +2831,7 @@ function renderManualBlockAssignment(): void {
     select.disabled = legacyCompatibility || blockCount < 1;
     const placeholder = window.document.createElement("option");
     placeholder.value = "";
-    placeholder.textContent = "未割当て";
+    placeholder.textContent = "未割当て（自動配置）";
     select.append(placeholder);
     for (const blockId of analysis.expectedBlockIds) {
       const option = window.document.createElement("option");
@@ -3396,11 +3423,15 @@ generateButton.addEventListener("click", () => {
           { violation_count: violationCount },
         );
       }
-      documentState = {
+      const candidateDocument: TournamentDocument = {
         ...documentState,
         updatedAt: new Date().toISOString(),
         tournament: { ...documentState.tournament, result },
       };
+      const league = asObject(documentState.tournament.input.league);
+      documentState = league?.assignment_mode === "manual"
+        ? parseTournamentJson(serializeTournamentJson(candidateDocument))
+        : candidateDocument;
       tournamentResultDrafts.clear();
       autosave.cancel();
       return storage.confirm(documentState).then(() => {
@@ -3423,6 +3454,9 @@ generateButton.addEventListener("click", () => {
         } else {
           generationStatus.textContent = error.message;
         }
+      } else if (error instanceof ImportValidationError) {
+        generationStatus.textContent =
+          `生成結果を安全に確認できなかったため保存しませんでした。もう一度お試しください。${error.message}`;
       } else {
         generationStatus.textContent =
           "日程を生成できませんでした。入力は保存されています。もう一度お試しください。";

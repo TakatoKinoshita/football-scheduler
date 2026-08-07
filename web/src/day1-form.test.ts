@@ -156,7 +156,7 @@ describe("1日目リーグ入力", () => {
     expect(validateDay1LeagueDocument(document)).toEqual([]);
   });
 
-  it("手動割当ての未選択と人数不均衡をチーム別エラーにする", () => {
+  it("自動補完できる未割当てを受理し、人数超過だけをチーム別エラーにする", () => {
     const document = createTournamentDocument();
     document.tournament.name = "地区大会";
     document.tournament.input.teams = [
@@ -171,16 +171,12 @@ describe("1日目リーグ入力", () => {
       block_count: 2,
       assignment_mode: "manual",
       manual_blocks: [
-        { id: "A", team_ids: ["team-01", "team-02", "team-03", "team-04"] },
+        { id: "A", team_ids: ["team-01"] },
         { id: "B", team_ids: [] },
       ],
     };
 
-    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
-      field: "manual-block-team-team-05",
-      step: 2,
-      message: "黄の割当て先を選択してください。",
-    });
+    expect(validateDay1LeagueDocument(document, 2)).toEqual([]);
     (document.tournament.input.league as Record<string, unknown>).manual_blocks = [
       { id: "A", team_ids: ["team-01", "team-02", "team-03", "team-04"] },
       { id: "B", team_ids: ["team-05"] },
@@ -188,7 +184,7 @@ describe("1日目リーグ入力", () => {
     expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
       field: "manual-block-team-team-01",
       step: 2,
-      message: "Aブロックは4チームです。各ブロックを2〜3チームにしてください。",
+      message: "Aブロックは4チーム指定済みです。自動配置後は各ブロック2〜3チームになるため、対象チームを未割当てへ戻してください。",
     });
   });
 

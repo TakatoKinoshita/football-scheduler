@@ -21,7 +21,12 @@ export interface ManualBlockAnalysis {
   blockSizes: Record<string, number>;
   minimumSize: number;
   maximumSize: number;
+  maximumLargeBlockCount: number;
+  largeBlockIds: string[];
+  overCapacityBlockIds: string[];
+  excessLargeBlockIds: string[];
   imbalancedBlockIds: string[];
+  completionPossible: boolean;
   valid: boolean;
 }
 
@@ -148,16 +153,28 @@ export function analyzeManualBlocks(
   const maximumSize = blockCount > 0
     ? minimumSize + (teamIds.length % blockCount === 0 ? 0 : 1)
     : 0;
+  const maximumLargeBlockCount = blockCount > 0 ? teamIds.length % blockCount : 0;
+  const largeBlockIds = expectedBlockIds.filter(
+    (blockId) => (blockSizes[blockId] ?? 0) > minimumSize,
+  );
+  const overCapacityBlockIds = expectedBlockIds.filter(
+    (blockId) => (blockSizes[blockId] ?? 0) > maximumSize,
+  );
+  const excessLargeBlockIds = largeBlockIds.slice(maximumLargeBlockCount);
   const imbalancedBlockIds = expectedBlockIds.filter((blockId) => {
     const size = blockSizes[blockId] ?? 0;
     return size < minimumSize || size > maximumSize;
   });
-  const valid = expectedBlockIds.length === blockCount
+  const structurallyValid = expectedBlockIds.length === blockCount
     && missingBlockIds.length === 0
     && unknownBlockIds.length === 0
     && duplicateBlockIds.length === 0
     && unknownTeamIds.length === 0
-    && duplicateTeamIds.length === 0
+    && duplicateTeamIds.length === 0;
+  const completionPossible = structurallyValid
+    && overCapacityBlockIds.length === 0
+    && excessLargeBlockIds.length === 0;
+  const valid = completionPossible
     && unassignedTeamIds.length === 0
     && imbalancedBlockIds.length === 0;
   return {
@@ -171,7 +188,12 @@ export function analyzeManualBlocks(
     blockSizes,
     minimumSize,
     maximumSize,
+    maximumLargeBlockCount,
+    largeBlockIds,
+    overCapacityBlockIds,
+    excessLargeBlockIds,
     imbalancedBlockIds,
+    completionPossible,
     valid,
   };
 }

@@ -71,6 +71,37 @@ describe("手動ブロック割当て", () => {
       { id: "B", team_ids: ["T5"] },
     ], ["T1", "T2", "T3", "T4", "T5"], 2).imbalancedBlockIds).toEqual(["A", "B"]);
   });
+
+  it("不足は自動補完可能とし、人数超過だけを補完不能にする", () => {
+    expect(analyzeManualBlocks([
+      { id: "A", team_ids: ["T1"] },
+      { id: "B", team_ids: [] },
+    ], ["T1", "T2", "T3", "T4", "T5"], 2)).toMatchObject({
+      unassignedTeamIds: ["T2", "T3", "T4", "T5"],
+      completionPossible: true,
+      valid: false,
+    });
+    expect(analyzeManualBlocks([
+      { id: "A", team_ids: ["T1", "T2", "T3", "T4"] },
+      { id: "B", team_ids: [] },
+    ], ["T1", "T2", "T3", "T4", "T5"], 2)).toMatchObject({
+      overCapacityBlockIds: ["A"],
+      completionPossible: false,
+    });
+  });
+
+  it("大人数側ブロックの上限超過を補完不能にする", () => {
+    const analysis = analyzeManualBlocks([
+      { id: "A", team_ids: ["T1", "T2"] },
+      { id: "B", team_ids: ["T3", "T4"] },
+      { id: "C", team_ids: ["T5", "T6"] },
+      { id: "D", team_ids: [] },
+    ], ["T1", "T2", "T3", "T4", "T5", "T6"], 4);
+
+    expect(analysis.maximumLargeBlockCount).toBe(2);
+    expect(analysis.excessLargeBlockIds).toEqual(["C"]);
+    expect(analysis.completionPossible).toBe(false);
+  });
 });
 
 describe("入力IDの維持", () => {

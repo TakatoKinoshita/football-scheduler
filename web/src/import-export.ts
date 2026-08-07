@@ -296,11 +296,11 @@ function validateManualLeagueSettings(
   }
   if (
     requireComplete &&
-    (analysis.unassignedTeamIds.length > 0 || analysis.imbalancedBlockIds.length > 0)
+    !analysis.completionPossible
   ) {
     throw new ImportValidationError(
       "INVALID_REFERENCE",
-      "生成済み日程の手動割当てに未割当てまたは人数不均衡があります。",
+      "生成済み日程の手動割当てを有効な人数構成へ自動補完できません。",
     );
   }
   return blocks;
@@ -874,6 +874,12 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
   const plan = objectValue(planValue, "リーグ日程を読み取れませんでした。");
   const blocks = arrayValue(plan.blocks, "リーグブロック", LIMITS.teams);
+  if (blocks.length === 0) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "生成済みリーグにブロックがありません。",
+    );
+  }
   const blockIds = uniqueIds(blocks, "ブロック");
   const teamIds = new Set(
     teams.filter((team) => typeof team.id === "string").map((team) => team.id as string),
@@ -897,19 +903,106 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       teamToBlock.set(teamId, blockId);
     }
   }
+  if (teamToBlock.size !== teamIds.size) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "生成済みリーグのブロックに所属していないチームがあります。",
+    );
+  }
+  const minimumBlockSize = Math.floor(teamIds.size / blocks.length);
+  const maximumLargeBlockCount = teamIds.size % blocks.length;
+  const maximumBlockSize = minimumBlockSize + (maximumLargeBlockCount > 0 ? 1 : 0);
+  const generatedBlockSizes = blocks.map((block) =>
+    stringArray(block.team_ids, `${String(block.id)}ブロックのチーム一覧`).length
+  );
+  if (
+    generatedBlockSizes.some(
+      (size) => size < minimumBlockSize || size > maximumBlockSize,
+    ) ||
+    generatedBlockSizes.filter((size) => size === maximumBlockSize).length !==
+      (maximumLargeBlockCount > 0 ? maximumLargeBlockCount : blocks.length)
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "生成済みリーグのブロック人数が均等ではありません。",
+    );
+  }
   const manualBlocks = validateManualLeagueSettings(input, teams, true);
+  const league = objectValue(input.league, "リーグ設定を読み取れませんでした。");
   if (
     manualBlocks !== undefined &&
-    objectValue(input.league, "リーグ設定を読み取れませんでした。").assignment_mode === "manual"
+    league.assignment_mode === "manual"
   ) {
     const generatedBlocks = blocks.map((block) => ({
       id: String(block.id),
       team_ids: stringArray(block.team_ids, `${String(block.id)}ブロックのチーム一覧`),
     }));
-    if (JSON.stringify(generatedBlocks) !== JSON.stringify(manualBlocks)) {
+    if (plan.manual_completion === undefined) {
+      if (JSON.stringify(generatedBlocks) !== JSON.stringify(manualBlocks)) {
+        throw new ImportValidationError(
+          "INVALID_REFERENCE",
+          "生成済みリーグの所属が保存された手動割当てと一致しません。",
+        );
+      }
+    } else {
+      const completion = objectValue(
+        plan.manual_completion,
+        "手動割当ての自動配置情報を読み取れませんでした。",
+      );
+      const actualAssignments = arrayValue(
+        completion.automatic_assignments,
+        "手動割当ての自動配置情報",
+        LIMITS.teams,
+      ).map((assignment) => {
+        if (typeof assignment.team_id !== "string" || typeof assignment.block_id !== "string") {
+          throw new ImportValidationError(
+            "INVALID_REFERENCE",
+            "手動割当ての自動配置情報に不正な参照があります。",
+          );
+        }
+        return { team_id: assignment.team_id, block_id: assignment.block_id };
+      });
+      const expectedAssignments: Array<{ team_id: string; block_id: string }> = [];
+      for (const manualBlock of manualBlocks) {
+        const generatedBlock = generatedBlocks.find((block) => block.id === manualBlock.id);
+        if (
+          generatedBlock === undefined ||
+          JSON.stringify(
+            generatedBlock.team_ids.slice(0, manualBlock.team_ids.length),
+          ) !== JSON.stringify(manualBlock.team_ids)
+        ) {
+          throw new ImportValidationError(
+            "INVALID_REFERENCE",
+            "生成済みリーグで手動指定されたチームの所属または順序が変更されています。",
+          );
+        }
+        expectedAssignments.push(
+          ...generatedBlock.team_ids.slice(manualBlock.team_ids.length).map((teamId) => ({
+            team_id: teamId,
+            block_id: manualBlock.id,
+          })),
+        );
+      }
+      if (JSON.stringify(actualAssignments) !== JSON.stringify(expectedAssignments)) {
+        throw new ImportValidationError(
+          "INVALID_REFERENCE",
+          "手動割当ての自動配置情報が確定したブロック所属と一致しません。",
+        );
+      }
+    }
+  } else if (plan.manual_completion !== undefined) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "自動方式のリーグ日程に手動割当ての自動配置情報があります。",
+    );
+  }
+
+  if (manualBlocks !== undefined && league.assignment_mode === "manual") {
+    const generatedBlockIds = blocks.map((block) => String(block.id));
+    if (JSON.stringify(generatedBlockIds) !== JSON.stringify(manualBlocks.map((block) => block.id))) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
-        "生成済みリーグの所属が保存された手動割当てと一致しません。",
+        "生成済みリーグのブロック順が保存された手動割当てと一致しません。",
       );
     }
   }

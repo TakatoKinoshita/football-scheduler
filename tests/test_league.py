@@ -193,13 +193,6 @@ def test_manual_assignment_is_balanced_complete_and_reproducible(
         (
             [
                 {"id": "A", "team_ids": ["team-01", "team-02"]},
-                {"id": "B", "team_ids": ["team-03"]},
-            ],
-            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
-        ),
-        (
-            [
-                {"id": "A", "team_ids": ["team-01", "team-02"]},
                 {"id": "B", "team_ids": ["team-03", "team-99"]},
             ],
             "UNKNOWN_TEAM_IN_MANUAL_BLOCKS",
@@ -219,6 +212,119 @@ def test_manual_assignment_rejects_invalid_membership(
 
     assert error.value.code == code
     assert error.value.message
+
+
+@pytest.mark.parametrize(
+    ("team_count", "block_count"),
+    [(2, 1), (5, 2), (16, 4), (32, 8)],
+)
+def test_partial_manual_assignment_is_completed_without_moving_fixed_teams(
+    team_count: int,
+    block_count: int,
+) -> None:
+    manual_blocks = [{"id": chr(ord("A") + index), "team_ids": []} for index in range(block_count)]
+    manual_blocks[0]["team_ids"] = ["team-01"]
+    request = {
+        **_request(team_count, block_count, assignment_mode="manual"),
+        "manual_blocks": manual_blocks,
+    }
+
+    plan = generate_league_plan(request)
+
+    assert plan.blocks[0].team_ids[0] == "team-01"
+    assigned = [team_id for block in plan.blocks for team_id in block.team_ids]
+    assert len(assigned) == team_count
+    assert len(set(assigned)) == team_count
+    sizes = [len(block.team_ids) for block in plan.blocks]
+    assert max(sizes) - min(sizes) <= 1
+    assert plan.manual_completion is not None
+    assert len(plan.manual_completion.automatic_assignments) == team_count - 1
+
+
+def test_all_unassigned_manual_uses_the_same_seeded_completion_as_random() -> None:
+    automatic = generate_league_plan(_request(5, 2, assignment_mode="random"))
+    manual = generate_league_plan(
+        {
+            **_request(5, 2, assignment_mode="manual"),
+            "manual_blocks": [
+                {"id": "A", "team_ids": []},
+                {"id": "B", "team_ids": []},
+            ],
+        }
+    )
+
+    assert manual.blocks == automatic.blocks
+    assert manual.manual_completion is not None
+    automatic_team_ids = [
+        assignment.team_id for assignment in manual.manual_completion.automatic_assignments
+    ]
+    assert automatic_team_ids == [team_id for block in manual.blocks for team_id in block.team_ids]
+
+
+def test_partial_manual_assignment_can_change_with_random_seed() -> None:
+    request = {
+        **_request(16, 4, assignment_mode="manual"),
+        "manual_blocks": [{"id": block_id, "team_ids": []} for block_id in ("A", "B", "C", "D")],
+    }
+
+    first = generate_league_plan({**request, "random_seed": 1})
+    second = generate_league_plan({**request, "random_seed": 2})
+
+    assert first.blocks != second.blocks
+    assert sorted(team_id for block in first.blocks for team_id in block.team_ids) == sorted(
+        team_id for block in second.blocks for team_id in block.team_ids
+    )
+
+
+def test_partial_manual_assignment_respects_a_fixed_large_block() -> None:
+    plan = generate_league_plan(
+        {
+            **_request(5, 2, assignment_mode="manual"),
+            "manual_blocks": [
+                {"id": "A", "team_ids": []},
+                {"id": "B", "team_ids": ["team-01", "team-03", "team-05"]},
+            ],
+        }
+    )
+
+    assert [len(block.team_ids) for block in plan.blocks] == [2, 3]
+    assert plan.blocks[1].team_ids == ("team-01", "team-03", "team-05")
+    assert plan.manual_completion is not None
+    assert {assignment.block_id for assignment in plan.manual_completion.automatic_assignments} == {
+        "A"
+    }
+
+
+@pytest.mark.parametrize(
+    "manual_blocks",
+    [
+        [
+            {"id": "A", "team_ids": ["team-01", "team-02", "team-03", "team-04"]},
+            {"id": "B", "team_ids": []},
+        ],
+        [
+            {"id": "A", "team_ids": ["team-01", "team-02", "team-03"]},
+            {"id": "B", "team_ids": ["team-04", "team-05", "team-06"]},
+            {"id": "C", "team_ids": ["team-07", "team-08", "team-09"]},
+            {"id": "D", "team_ids": []},
+        ],
+    ],
+)
+def test_partial_manual_assignment_rejects_unrecoverable_block_sizes(
+    manual_blocks: list[dict[str, object]],
+) -> None:
+    team_count = 5 if len(manual_blocks) == 2 else 10
+    with pytest.raises(LeagueGenerationError) as error:
+        generate_league_plan(
+            {
+                **_request(team_count, len(manual_blocks), assignment_mode="manual"),
+                "manual_blocks": manual_blocks,
+            }
+        )
+
+    assert error.value.code == "MANUAL_BLOCK_SIZE_IMBALANCE"
+    assert error.value.details["block_sizes"]
+    assert "maximum_large_block_count" in error.value.details
 
 
 def test_rejects_duplicate_and_empty_team_ids_with_diagnostics() -> None:

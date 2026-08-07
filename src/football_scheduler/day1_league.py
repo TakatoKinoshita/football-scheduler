@@ -190,26 +190,28 @@ def _validated_manual_blocks(
             "同じチームを複数の手動ブロックへ割り当てることはできません。",
             team_ids=duplicate_team_ids,
         )
-    missing_team_ids = sorted(known_team_ids - set(assigned_team_ids))
-    if missing_team_ids:
-        raise LeagueGenerationError(
-            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
-            "どの手動ブロックにも所属していないチームがあります。",
-            team_ids=missing_team_ids,
-        )
-
+    minimum_size, maximum_large_block_count = divmod(len(request.teams), request.league.block_count)
+    maximum_size = minimum_size + (1 if maximum_large_block_count > 0 else 0)
     block_sizes = {block.id: len(block.team_ids) for block in blocks}
-    minimum_size = len(request.teams) // request.league.block_count
-    maximum_size = minimum_size + (1 if len(request.teams) % request.league.block_count > 0 else 0)
-    if any(size < minimum_size or size > maximum_size for size in block_sizes.values()):
+    over_capacity_block_ids = [block.id for block in blocks if len(block.team_ids) > maximum_size]
+    large_block_ids = [block.id for block in blocks if len(block.team_ids) > minimum_size]
+    excess_large_block_ids = large_block_ids[maximum_large_block_count:]
+    if over_capacity_block_ids or excess_large_block_ids:
         raise LeagueGenerationError(
             "MANUAL_BLOCK_SIZE_IMBALANCE",
-            "ブロック間の人数差を1以内にしてください。",
+            "手動指定された人数が多すぎるブロックがあります。対象チームを未割当てへ戻してください。",
             block_sizes=block_sizes,
             minimum_size=minimum_size,
             maximum_size=maximum_size,
+            maximum_large_block_count=maximum_large_block_count,
+            over_capacity_block_ids=over_capacity_block_ids,
+            excess_large_block_ids=excess_large_block_ids,
         )
-    return tuple(ManualBlock(id=block.id, team_ids=block.team_ids) for block in blocks)
+    block_by_id = {block.id: block for block in blocks}
+    return tuple(
+        ManualBlock(id=block_id, team_ids=block_by_id[block_id].team_ids)
+        for block_id in expected_block_ids
+    )
 
 
 def _day1_block_id(index: int) -> str:

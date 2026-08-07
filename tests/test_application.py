@@ -176,7 +176,36 @@ def test_day1_league_request_preserves_manual_blocks() -> None:
     assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
     assert result["league_plan"]["assignment_mode"] == "manual"
     assert result["league_plan"]["blocks"] == manual_blocks
+    assert result["league_plan"]["manual_completion"] == {"automatic_assignments": []}
     assert len(result["league_plan"]["matches"]) == 2
+
+
+def test_day1_league_request_completes_partial_manual_blocks() -> None:
+    result = application.handle_request(
+        _day1_league_request(
+            team_count=5,
+            block_count=2,
+            assignment_mode="manual",
+            court_count=2,
+            manual_blocks=[
+                {"id": "A", "team_ids": ["team-1"]},
+                {"id": "B", "team_ids": ["team-2"]},
+            ],
+        )
+    )
+
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    blocks = result["league_plan"]["blocks"]
+    assert blocks[0]["team_ids"][0] == "team-1"
+    assert blocks[1]["team_ids"][0] == "team-2"
+    assert sorted(team_id for block in blocks for team_id in block["team_ids"]) == [
+        "team-1",
+        "team-2",
+        "team-3",
+        "team-4",
+        "team-5",
+    ]
+    assert len(result["league_plan"]["manual_completion"]["automatic_assignments"]) == 3
 
 
 def test_day1_league_request_rejects_manual_imbalance_before_solver(
@@ -263,13 +292,6 @@ def test_day1_league_request_rejects_unknown_manual_block_before_solver(
                 {"id": "B", "team_ids": ["team-2", "team-4"]},
             ],
             "DUPLICATE_TEAM_IN_MANUAL_BLOCKS",
-        ),
-        (
-            [
-                {"id": "A", "team_ids": ["team-1", "team-2"]},
-                {"id": "B", "team_ids": []},
-            ],
-            "TEAM_MISSING_FROM_MANUAL_BLOCKS",
         ),
     ],
 )

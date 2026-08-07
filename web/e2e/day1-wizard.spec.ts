@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test } from "@playwright/test";
 
 import { scheduleResult, tournamentFixture } from "./fixtures";
@@ -71,11 +73,34 @@ function manualGeneratedResult(request: {
   courts?: Array<{ id?: unknown }>;
   league?: { manual_blocks?: Array<{ id?: unknown; team_ids?: unknown }> };
 }) {
+  const teamIds = (request.teams ?? []).map((team) => String(team.id));
   const courtIds = (request.courts ?? []).map((court) => String(court.id));
   const blocks = (request.league?.manual_blocks ?? []).map((block) => ({
     id: String(block.id),
     team_ids: Array.isArray(block.team_ids) ? block.team_ids.map(String) : [],
   }));
+  const assignedTeamIds = new Set(blocks.flatMap((block) => block.team_ids));
+  const unassignedTeamIds = teamIds.filter((teamId) => !assignedTeamIds.has(teamId));
+  const minimumSize = Math.floor(teamIds.length / blocks.length);
+  const largerBlockCount = teamIds.length % blocks.length;
+  const fixedLargerBlockIds = new Set(
+    blocks.filter((block) => block.team_ids.length > minimumSize).map((block) => block.id),
+  );
+  for (const block of blocks) {
+    if (fixedLargerBlockIds.size >= largerBlockCount) break;
+    fixedLargerBlockIds.add(block.id);
+  }
+  const automaticAssignments: Array<{ team_id: string; block_id: string }> = [];
+  let offset = 0;
+  for (const block of blocks) {
+    const targetSize = minimumSize + (fixedLargerBlockIds.has(block.id) ? 1 : 0);
+    const additions = unassignedTeamIds.slice(offset, offset + targetSize - block.team_ids.length);
+    offset += additions.length;
+    block.team_ids.push(...additions);
+    automaticAssignments.push(
+      ...additions.map((teamId) => ({ team_id: teamId, block_id: block.id })),
+    );
+  }
   const matches = blocks.map((block) => ({
     id: `LG-${block.id}-M1`,
     phase: "league",
@@ -92,6 +117,7 @@ function manualGeneratedResult(request: {
       assignment_mode: "manual",
       random_seed: 20260803,
       blocks,
+      manual_completion: { automatic_assignments: automaticAssignments },
       logical_rounds: blocks.map((block) => ({
         block_id: block.id,
         round_no: 1,
@@ -147,25 +173,20 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
     const request = route.request().postDataJSON() as {
+      teams?: Array<{ id?: unknown }>;
       courts?: Array<{ id?: unknown }>;
     };
     requests.push(request);
-    const courtId = typeof request.courts?.[0]?.id === "string"
-      ? request.courts[0].id
-      : scheduleResult.slots[0]!.court_id;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        ...scheduleResult,
-        slots: scheduleResult.slots.map((slot) => ({ ...slot, court_id: courtId })),
-      }),
+      body: JSON.stringify(generatedRolePathResult(request)),
     });
   });
 
   await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
 
-  await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({
     request_kind: "day1_league",
@@ -197,8 +218,8 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await page.getByLabel("中央キッカーズ").selectOption("A");
   await page.getByLabel("海浜ユナイテッド").selectOption("B");
   await expect(page.locator("#manual-block-summary")).toContainText("割当てが完了");
-  await expect(page.locator("#manual-block-count-A")).toContainText("2チーム（適正）");
-  await expect(page.locator("#manual-block-count-B")).toContainText("2チーム（適正）");
+  await expect(page.locator("#manual-block-count-A")).toContainText("現在2チーム／最終2〜2チーム");
+  await expect(page.locator("#manual-block-count-B")).toContainText("現在2チーム／最終2〜2チーム");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -238,7 +259,95 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await expect(page.locator("#result-summary")).toContainText("まだ生成結果はありません");
 });
 
-test("手動割当ての未選択と人数不均衡ではAPIを呼ばない", async ({ page }) => {
+test("一部だけ手動指定し、残りを自動配置して入力との区別を表示する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("部分手動割当て大会");
+  await page.locator("#teams").fill("青\n赤\n白\n緑");
+  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByLabel("青", { exact: true }).selectOption("A");
+  await page.getByLabel("緑", { exact: true }).selectOption("B");
+  await expect(page.locator("#manual-block-summary")).toContainText(
+    "未割当て 2チームは、日程生成時に抽選番号で自動配置します",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+
+  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await page.unroute(GENERATE_API);
+  let request: Record<string, unknown> | undefined;
+  await page.route(GENERATE_API, async (route) => {
+    request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(manualGeneratedResult(request)),
+    });
+  });
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+
+  expect(request).toMatchObject({
+    league: {
+      assignment_mode: "manual",
+      manual_blocks: [
+        { id: "A", team_ids: ["team-01"] },
+        { id: "B", team_ids: ["team-04"] },
+      ],
+    },
+  });
+  await expect(page.locator("#result-content")).toContainText("2チームを抽選番号で自動配置");
+  await expect(page.locator(".automatic-assignment")).toHaveCount(2);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "ファイルへ保存" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  const exported = JSON.parse(await readFile(downloadPath!, "utf8")) as {
+    tournament: {
+      input: { league: { manual_blocks: Array<{ id: string; team_ids: string[] }> } };
+      result: {
+        league_plan: {
+          blocks: Array<{ id: string; team_ids: string[] }>;
+          manual_completion: { automatic_assignments: unknown[] };
+        };
+      };
+    };
+  };
+  expect(exported.tournament.input.league.manual_blocks).toEqual([
+    { id: "A", team_ids: ["team-01"] },
+    { id: "B", team_ids: ["team-04"] },
+  ]);
+  expect(exported.tournament.result.league_plan.blocks.flatMap((block) => block.team_ids)).toHaveLength(4);
+  expect(exported.tournament.result.league_plan.manual_completion.automatic_assignments).toHaveLength(2);
+  await importDocument(page, exported);
+  await expect(page.locator(".automatic-assignment")).toHaveCount(2);
+  await page.locator('.step[data-step="2"]').click();
+  await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
+  await expect(page.getByLabel("緑", { exact: true })).toHaveValue("B");
+  await expect(page.getByLabel("赤", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("白", { exact: true })).toHaveValue("");
+  await page.getByLabel("青", { exact: true }).selectOption("");
+  await page.getByLabel("緑", { exact: true }).selectOption("");
+  await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
+  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  expect(request).toMatchObject({
+    league: {
+      manual_blocks: [
+        { id: "A", team_ids: [] },
+        { id: "B", team_ids: [] },
+      ],
+    },
+  });
+  await expect(page.locator(".automatic-assignment")).toHaveCount(4);
+});
+
+test("手動指定の人数超過では次へ進まない", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
   await page.locator("#tournament-name").fill("入力確認大会");
@@ -251,11 +360,6 @@ test("手動割当ての未選択と人数不均衡ではAPIを呼ばない", as
     await page.getByLabel(name, { exact: true }).selectOption("A");
   }
 
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
-  await expect(page.locator("#manual-block-team-team-05-error")).toContainText("割当て先");
-  await expect(page.locator('[data-panel="2"]')).toBeVisible();
-
-  await page.getByLabel("黄", { exact: true }).selectOption("B");
   await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await expect(page.locator("#manual-block-team-team-01-error")).toContainText("2〜3チーム");
   await expect(page.locator('[data-panel="2"]')).toBeVisible();

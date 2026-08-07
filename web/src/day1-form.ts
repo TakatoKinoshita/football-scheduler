@@ -200,25 +200,16 @@ export function validateDay1LeagueDocument(
           : "登録されていないチームの割当てがあります。割当てを選び直してください。",
       });
     }
-    for (const teamId of analysis.unassignedTeamIds) {
-      const team = teams.find((candidate) => candidate.id === teamId);
-      issues.push({
-        field: `manual-block-team-${teamId}`,
-        step: 2,
-        message: `${typeof team?.name === "string" ? team.name : teamId}の割当て先を選択してください。`,
-      });
-    }
-    if (
-      analysis.unassignedTeamIds.length === 0 &&
-      analysis.imbalancedBlockIds.length > 0
-    ) {
-      const blockId = analysis.imbalancedBlockIds[0]!;
+    if (!analysis.completionPossible) {
+      const blockId = analysis.overCapacityBlockIds[0]
+        ?? analysis.excessLargeBlockIds[0];
+      if (blockId === undefined) return issues;
       const firstTeamId = manualBlocks.find((block) => block.id === blockId)?.team_ids[0];
       const size = analysis.blockSizes[blockId] ?? 0;
       issues.push({
         field: firstTeamId === undefined ? "manual-blocks" : `manual-block-team-${firstTeamId}`,
         step: 2,
-        message: `${blockId}ブロックは${size}チームです。各ブロックを${analysis.minimumSize}〜${analysis.maximumSize}チームにしてください。`,
+        message: `${blockId}ブロックは${size}チーム指定済みです。自動配置後は各ブロック${analysis.minimumSize}〜${analysis.maximumSize}チームになるため、対象チームを未割当てへ戻してください。`,
       });
     }
   }
