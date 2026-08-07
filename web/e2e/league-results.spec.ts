@@ -48,6 +48,8 @@ test("順位未確定でも順位枠の仮トーナメントを作成・印刷�
   expect(requests[0]).toMatchObject({ request_kind: "tournament_plan" });
   expect(requests[0]).not.toHaveProperty("league_standings");
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
+  await expect(page.locator("#tournament-plan-view .tournament-bracket figcaption").first())
+    .toHaveText("上位トーナメント表（仮）");
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
   await expect(page.locator("#day2-confirmation")).toBeVisible();
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");

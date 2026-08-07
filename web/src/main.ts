@@ -620,7 +620,7 @@ const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
 const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
 const bracketPrintButton = requiredElement<HTMLButtonElement>("#print-bracket");
-const tournamentBracketVisible = false;
+const tournamentBracketVisible = true;
 const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
 const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
@@ -1767,7 +1767,7 @@ function renderTournamentPlan(
           results,
           ...(finalStandings === undefined ? {} : { finalStandings }),
         });
-        poolSection.append(renderTournamentBracket(bracketModel, `${heading}の進行図`));
+        poolSection.append(renderTournamentBracket(bracketModel, `${heading}表`));
       } catch (error) {
         appendTextElement(
           poolSection,

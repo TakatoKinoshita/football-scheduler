@@ -4,6 +4,8 @@ import {
   buildTournamentBracketModel,
   renderTournamentBracket,
   TournamentBracketError,
+  type TournamentBracketBox,
+  type TournamentBracketSegment,
 } from "./tournament-bracket";
 import type { JsonObject } from "./types";
 
@@ -43,6 +45,7 @@ function generatedPool(participantCount: number): GeneratedPool {
     rankStart: number,
     roundNo: number,
     label: string,
+    rankEnd = rankStart + entries.length - 1,
   ): [JsonObject[], JsonObject[]] => {
     const half = entries.length / 2;
     const winners: JsonObject[] = [];
@@ -56,7 +59,7 @@ function generatedPool(participantCount: number): GeneratedPool {
         round_no: roundNo,
         home: entries[index],
         away: entries[index + half],
-        rank_range: [rankStart, rankStart + entries.length - 1],
+        rank_range: [rankStart, rankEnd],
       });
       winners.push(winner(id));
       losers.push(loser(id));
@@ -81,6 +84,7 @@ function generatedPool(participantCount: number): GeneratedPool {
         rankStart,
         roundNo,
         "予備戦",
+        rankStart + entries.length - 1,
       );
       build([...byeEntries, ...preliminaryWinners], rankStart, roundNo + 1);
       build(preliminaryLosers, rankStart + mainSize, roundNo + 1);
@@ -157,119 +161,145 @@ function referenceCount(pool: GeneratedPool): number {
   }, 0);
 }
 
-describe("トーナメントブラケットモデル", () => {
-  for (const participantCount of [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 16, 32]) {
-    it(`${String(participantCount)}チームの全試合・進行線・順位を一意に配置する`, () => {
+function overlap(left: TournamentBracketBox, right: TournamentBracketBox): boolean {
+  return left.x < right.x + right.width && left.x + left.width > right.x &&
+    left.y < right.y + right.height && left.y + left.height > right.y;
+}
+
+function properIntersection(left: TournamentBracketSegment, right: TournamentBracketSegment): boolean {
+  if (left.ownerId === right.ownerId) return false;
+  const leftHorizontal = left.y1 === left.y2;
+  const rightHorizontal = right.y1 === right.y2;
+  if (leftHorizontal === rightHorizontal) return false;
+  const horizontal = leftHorizontal ? left : right;
+  const vertical = leftHorizontal ? right : left;
+  const horizontalMin = Math.min(horizontal.x1, horizontal.x2);
+  const horizontalMax = Math.max(horizontal.x1, horizontal.x2);
+  const verticalMin = Math.min(vertical.y1, vertical.y2);
+  const verticalMax = Math.max(vertical.y1, vertical.y2);
+  return horizontalMin < vertical.x1 && vertical.x1 < horizontalMax &&
+    verticalMin < horizontal.y1 && horizontal.y1 < verticalMax;
+}
+
+describe("標準トーナメントブラケットモデル", () => {
+  for (const participantCount of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 24, 31, 32]) {
+    it(`${String(participantCount)}チームを一意な試合・順位帯ページへ配置する`, () => {
       const plan = planFor(participantCount, true);
       const pool = plan.upper as unknown as GeneratedPool;
-      const model = buildTournamentBracketModel({
-        plan,
-        pool: "upper",
-        teamNames: new Map(),
-      });
+      const model = buildTournamentBracketModel({ plan, pool: "upper", teamNames: new Map() });
       expect(model.nodes).toHaveLength(expectedMatchCount(participantCount));
-      expect(model.edges).toHaveLength(referenceCount(pool));
-      expect(
-        model.nodes.flatMap((node) => node.terminals).length + model.directPlacements.length,
-      ).toBe(participantCount);
+      expect(model.references).toHaveLength(referenceCount(pool));
       expect(new Set(model.nodes.map((node) => node.id)).size).toBe(model.nodes.length);
-      expect(model.width).toBeGreaterThan(0);
-      expect(model.height).toBeGreaterThan(0);
-      if (participantCount === 0) expect(model.emptyMessage).toBe("該当チームなし");
-      if (participantCount === 1) {
-        expect(model.directPlacements[0]).toMatchObject({ rank: 1, confirmed: false });
-        expect(renderTournamentBracket(model, "進行図").textContent).toContain("1位・未確定");
+      expect(model.edges).toHaveLength(referenceCount(pool));
+      if (participantCount === 0) {
+        expect(model.emptyMessage).toBe("該当チームなし");
+        expect(model.sheets).toHaveLength(0);
+        return;
       }
-      for (const layer of model.layers) {
-        const nodes = layer.matchIds.map((id) => model.nodes.find((node) => node.id === id)!);
-        for (const [index, node] of nodes.entries()) {
-          for (const other of nodes.slice(index + 1)) {
-            expect(node.y + node.height <= other.y || other.y + other.height <= node.y).toBe(true);
+      if (participantCount <= 16) expect(model.sheets).toHaveLength(1);
+      if (participantCount > 16) {
+        expect(model.sheets.filter((sheet) => sheet.kind === "opening_overview").length)
+          .toBeGreaterThanOrEqual(2);
+        expect(model.sheets.some((sheet) => sheet.kind === "rank_band")).toBe(true);
+      }
+      expect(model.sheets.every((sheet) => sheet.slots.length <= 16)).toBe(true);
+      expect(model.references.every((reference) =>
+        reference.continuation === (reference.sourceSheetId !== reference.targetSheetId)
+      )).toBe(true);
+      expect(model.nodes.every((node) => node.labelBox.x >= 0 && node.labelBox.y >= 0)).toBe(true);
+      for (const sheet of model.sheets) {
+        for (const [index, slot] of sheet.slots.entries()) {
+          expect(sheet.slots.slice(index + 1).some((other) => overlap(slot, other))).toBe(false);
+        }
+        for (const [index, node] of sheet.nodes.entries()) {
+          expect(sheet.nodes.slice(index + 1).some((other) => overlap(node.labelBox, other.labelBox)))
+            .toBe(false);
+        }
+        expect(sheet.segments.every((segment) => segment.x1 === segment.x2 || segment.y1 === segment.y2))
+          .toBe(true);
+        for (const [index, segment] of sheet.segments.entries()) {
+          const crossing = sheet.segments.slice(index + 1).find((other) =>
+            properIntersection(segment, other)
+          );
+          if (crossing !== undefined) {
+            throw new Error(
+              `進行線交差 ${sheet.id}: ${JSON.stringify(segment)} / ${JSON.stringify(crossing)} / ${JSON.stringify(sheet.nodes.filter((node) => segment.ownerId.includes(node.id) || crossing.ownerId.includes(node.id)).map((node) => ({ id: node.id, range: node.rankRangeLabel, x: node.centerX, y: node.lineY })))}`,
+            );
           }
         }
       }
-      if ([3, 5, 6, 7, 9, 10].includes(participantCount)) {
-        expect(pool.byes.length).toBeGreaterThan(0);
-        expect(model.nodes.some((node) => node.home.bye || node.away.bye)).toBe(true);
-        expect(renderTournamentBracket(model, "進行図").textContent).toContain("予備戦免除");
-      }
-      if (participantCount > 16) expect(model.compact).toBe(true);
+      const rendered = renderTournamentBracket(model, "進行図");
+      expect(rendered.querySelectorAll(".bracket-match-node")).toHaveLength(model.nodes.length);
+      expect([...rendered.querySelectorAll("path")].every((path) =>
+        !/[CQ]/.test(path.getAttribute("d") ?? "")
+      )).toBe(true);
+      if (participantCount === 1) expect(rendered.textContent).toContain("1位・未確定");
+      if (pool.byes.length > 0) expect(rendered.textContent).toContain("予備戦免除");
     });
   }
 
-  it("同じ入力から同じ層順と座標を再現する", () => {
+  it("同じ入力から同じページ・座標・直交線を再現する", () => {
     const input = { plan: planFor(10, true), pool: "upper" as const, teamNames: new Map() };
     expect(buildTournamentBracketModel(input)).toEqual(buildTournamentBracketModel(input));
   });
 
-  it("仮表ではシードにチームIDが残っていても順位枠だけを表示する", () => {
-    const plan = planFor(2, true);
-    const model = buildTournamentBracketModel({
-      plan,
+  it("仮表では順位枠だけ、確定後はチーム名と由来を表示する", () => {
+    const provisionalPlan = planFor(2, true);
+    const provisional = buildTournamentBracketModel({
+      plan: provisionalPlan,
       pool: "upper",
       teamNames: new Map([["team-1", "青空FC"]]),
     });
-    expect(model.nodes[0]!.home.primaryLabel).toContain("ブロック");
-    expect(model.nodes[0]!.home.primaryLabel).not.toContain("青空FC");
-  });
+    expect(provisional.nodes[0]!.home.primaryLabel).toBe("B11位");
+    expect(provisional.nodes[0]!.home.fullLabel).toContain("ブロック");
+    expect(provisional.nodes[0]!.home.primaryLabel).not.toContain("青空FC");
 
-  it("下位1チームの総合順位枠を図の表示範囲内へ配置する", () => {
-    const plan = planFor(31, true);
-    plan.lower = generatedPool(1);
-    const model = buildTournamentBracketModel({
-      plan,
-      pool: "lower",
-      teamNames: new Map(),
+    const resolved = buildTournamentBracketModel({
+      plan: planFor(2),
+      pool: "upper",
+      teamNames: new Map([["team-1", "青空FC"]]),
     });
-    expect(model.directPlacements[0]?.rank).toBe(32);
-    const figure = renderTournamentBracket(model, "下位進行図");
-    const rect = figure.querySelector(".bracket-direct-placement rect");
-    expect(Number(rect?.getAttribute("y"))).toBeLessThan(model.height);
-    expect(figure.textContent).toContain("32位・未確定");
+    expect(resolved.nodes[0]!.home).toMatchObject({
+      primaryLabel: "青空FC",
+      secondaryLabel: "B1ブロック 1位",
+    });
   });
 
-  it("通常得点・PK・勝者・時刻・コートを試合枠へ反映する", () => {
+  it("表示番号・時刻・コート・通常得点・PK・勝者を同じ試合線へ反映する", () => {
     const plan = planFor(2);
-    const first = (plan.upper as unknown as GeneratedPool).matches[0]!;
-    const matchId = String(first.id);
+    const matchId = String((plan.upper as unknown as GeneratedPool).matches[0]!.id);
     const model = buildTournamentBracketModel({
       plan,
       pool: "upper",
-      teamNames: new Map([
-        ["team-1", "青空FC"],
-        ["team-2", "赤松FC"],
-      ]),
+      teamNames: new Map([["team-1", "青空FC"], ["team-2", "赤松FC"]]),
       scheduleByMatchId: new Map([
         [matchId, { displayNumber: "A①", timeLabel: "09:30〜10:05", courtName: "Aコート" }],
       ]),
-      results: [
-        {
-          match_id: matchId,
-          home_team_id: "team-1",
-          away_team_id: "team-2",
-          regular_score_home: 1,
-          regular_score_away: 1,
-          penalty_score_home: 4,
-          penalty_score_away: 3,
-        },
-      ],
+      results: [{
+        match_id: matchId,
+        home_team_id: "team-1",
+        away_team_id: "team-2",
+        regular_score_home: 1,
+        regular_score_away: 1,
+        penalty_score_home: 4,
+        penalty_score_away: 3,
+      }],
     });
     expect(model.nodes[0]).toMatchObject({
       displayNumber: "A①",
       metaLabel: "09:30〜10:05 Aコート",
-      home: { primaryLabel: "青空FC", scoreLabel: "1 (PK 4)", winner: true },
-      away: { primaryLabel: "赤松FC", scoreLabel: "1 (PK 3)", winner: false },
+      resultLabel: "1 - 1（PK 4-3）",
+      home: { primaryLabel: "青空FC", winner: true },
+      away: { primaryLabel: "赤松FC", winner: false },
     });
-    expect(model.nodes[0]!.terminals.map((terminal) => terminal.label)).toEqual([
-      "勝→1位・未確定",
-      "敗→2位・未確定",
-    ]);
+    const rendered = renderTournamentBracket(model, "上位トーナメント表");
+    expect(rendered.textContent).toContain("勝者：青空FC");
+    expect(rendered.textContent).toContain("PK 4-3");
   });
 
   it("サーバー確定後だけ順位を確定表示する", () => {
     const plan = planFor(2);
-    const match = (plan.upper as unknown as GeneratedPool).matches[0]!;
-    const matchId = String(match.id);
+    const matchId = String((plan.upper as unknown as GeneratedPool).matches[0]!.id);
     const results = [{
       match_id: matchId,
       home_team_id: "team-1",
@@ -277,7 +307,9 @@ describe("トーナメントブラケットモデル", () => {
       regular_score_home: 2,
       regular_score_away: 0,
     }];
-    const model = buildTournamentBracketModel({
+    const pending = buildTournamentBracketModel({ plan, pool: "upper", teamNames: new Map(), results });
+    expect(pending.nodes[0]!.terminals.every((terminal) => terminal.pendingConfirmation)).toBe(true);
+    const confirmed = buildTournamentBracketModel({
       plan,
       pool: "upper",
       teamNames: new Map([["team-1", "青空FC"], ["team-2", "赤松FC"]]),
@@ -289,34 +321,29 @@ describe("トーナメントブラケットモデル", () => {
         ],
       },
     });
-    expect(model.nodes[0]!.terminals.every((terminal) => terminal.confirmed)).toBe(true);
-    expect(model.nodes[0]!.terminals.map((terminal) => terminal.label)).toEqual([
-      "勝→1位確定",
-      "敗→2位確定",
-    ]);
+    expect(confirmed.nodes[0]!.terminals.every((terminal) => terminal.confirmed)).toBe(true);
+    expect(renderTournamentBracket(confirmed, "進行図").textContent).toContain("1位確定");
   });
 
-  it("長い名称を図では省略しつつ完全な文字をtitleと表向けモデルへ残す", () => {
-    const plan = planFor(2);
+  it("長い名称を省略し完全な文字をtitleとariaへ残す", () => {
     const longName = "とても長い地域サッカークラブ名称ジュニアユースチーム";
     const model = buildTournamentBracketModel({
-      plan,
+      plan: planFor(2),
       pool: "upper",
       teamNames: new Map([["team-1", longName], ["team-2", "対戦相手"]]),
     });
     const figure = renderTournamentBracket(model, "上位トーナメントの進行図");
     expect(model.nodes[0]!.home.fullLabel).toContain(longName);
-    expect(figure.querySelector(".bracket-team-name")?.textContent).toContain("…");
-    expect(figure.querySelector(".bracket-team-name title")?.textContent).toContain(longName);
+    expect(figure.querySelector(".bracket-entry-name")?.textContent).toContain("…");
+    expect(figure.querySelector(".bracket-entry-name title")?.textContent).toContain(longName);
     expect(figure.querySelector("svg")?.getAttribute("aria-labelledby")).toContain(
-      "tournament-bracket-upper-title",
+      "tournament-bracket-upper-1-title",
     );
   });
 
-  it("未知参照・重複ID・循環相当の前後関係を拒否する", () => {
+  it("未知参照・重複ID・循環・交差順位帯を図だけのエラーにする", () => {
     const unknown = planFor(2, true);
-    const unknownPool = unknown.upper as unknown as GeneratedPool;
-    unknownPool.matches[0]!.home = winner("UNKNOWN");
+    (unknown.upper as unknown as GeneratedPool).matches[0]!.home = winner("UNKNOWN");
     expect(() => buildTournamentBracketModel({ plan: unknown, pool: "upper", teamNames: new Map() }))
       .toThrow(TournamentBracketError);
 
@@ -328,9 +355,14 @@ describe("トーナメントブラケットモデル", () => {
 
     const cyclic = planFor(2, true);
     const cyclicPool = cyclic.upper as unknown as GeneratedPool;
-    const matchId = String(cyclicPool.matches[0]!.id);
-    cyclicPool.matches[0]!.home = winner(matchId);
+    cyclicPool.matches[0]!.home = winner(String(cyclicPool.matches[0]!.id));
     expect(() => buildTournamentBracketModel({ plan: cyclic, pool: "upper", teamNames: new Map() }))
       .toThrow(/循環/);
+
+    const crossing = planFor(4, true);
+    const crossingPool = crossing.upper as unknown as GeneratedPool;
+    crossingPool.matches[1]!.rank_range = [2, 4];
+    expect(() => buildTournamentBracketModel({ plan: crossing, pool: "upper", teamNames: new Map() }))
+      .toThrow(/順位帯/);
   });
 });
