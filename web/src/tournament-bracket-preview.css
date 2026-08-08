@@ -69,53 +69,6 @@ body {
   font-weight: 800;
 }
 
-.tournament-bracket.exploration {
-  margin: 0;
-}
-
-.tournament-bracket-exploration-svg {
-  display: block;
-  width: auto;
-  max-width: none;
-  height: auto;
-  margin-inline: auto;
-  background: #fff;
-}
-
-.bracket-exploration-line {
-  fill: none;
-  stroke: #111;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.bracket-exploration-line.loser {
-  stroke-dasharray: 8 6;
-}
-
-.bracket-exploration-box {
-  fill: #fff;
-  stroke: #111;
-  stroke-width: 1.6;
-  vector-effect: non-scaling-stroke;
-}
-
-.bracket-exploration-team {
-  fill: #111;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.bracket-exploration-match-label {
-  fill: #111;
-  font-size: 12px;
-  font-weight: 700;
-  paint-order: stroke;
-  stroke: #fff;
-  stroke-width: 5px;
-  stroke-linejoin: round;
-}
-
 @media (max-width: 640px) {
   .preview-header,
   .preview-main {

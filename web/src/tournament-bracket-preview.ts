@@ -83,9 +83,11 @@ function dummyScheduleByMatchId(
       const gameNumber = (gameCountByCourt.get(court) ?? 0) + 1;
       gameCountByCourt.set(court, gameNumber);
       const section = sectionOffset + Math.floor(index / courts.length);
+      const startTime = timeLabel(9 * 60 + section * 45);
       result.set(match.id, {
         displayNumber: `${court}${circledNumber(gameNumber)}`,
-        timeLabel: timeLabel(9 * 60 + section * 45),
+        startTime,
+        timeLabel: startTime,
         courtName: `${court}コート`,
       });
     });

@@ -52,12 +52,39 @@ function transformedSegment(
   return { start, end };
 }
 
+function matchAccessibilityLabel(
+  model: TournamentBracketModel,
+  matchId: string,
+  visibleLabel: string,
+): string {
+  const node = model.nodes.find((candidate) => candidate.id === matchId);
+  if (node === undefined) return visibleLabel;
+  const winner = node.home.winner
+    ? node.home.fullLabel
+    : node.away.winner
+      ? node.away.fullLabel
+      : undefined;
+  const placements = node.terminals.map((terminal) =>
+    terminal.teamLabel === undefined
+      ? terminal.label
+      : `${terminal.label} ${terminal.teamLabel}`
+  );
+  return [
+    visibleLabel,
+    node.metaLabel,
+    `${node.home.fullLabel} 対 ${node.away.fullLabel}`,
+    node.resultLabel,
+    winner === undefined ? undefined : `勝者 ${winner}`,
+    ...placements,
+  ].filter((part): part is string => part !== undefined && part.length > 0).join("、");
+}
+
 export function renderTournamentBracketExploration(
   model: TournamentBracketModel,
   heading: string,
 ): HTMLElement {
   if (!isTournamentBracketExplorationModel(model)) {
-    throw new TournamentBracketError("探索用トーナメント表モデルを読み取れませんでした。");
+    throw new TournamentBracketError("トーナメント表モデルを読み取れませんでした。");
   }
   const geometry = model.explorationGeometry;
   const width = geometry.orientation === "vertical" ? geometry.width : geometry.height;
@@ -69,18 +96,32 @@ export function renderTournamentBracketExploration(
   figure.dataset.pool = model.pool;
   figure.dataset.participantCount = String(model.participantCount);
   figure.dataset.layout = geometry.orientation;
+  const captionId = `tournament-bracket-${model.pool}-${geometry.orientation}-caption`;
+  const descriptionId = `tournament-bracket-${model.pool}-${geometry.orientation}-description`;
+  const caption = document.createElement("figcaption");
+  caption.id = captionId;
+  caption.textContent = model.provisional && !heading.includes("仮")
+    ? `${heading}（仮）`
+    : heading;
+  const legend = document.createElement("p");
+  legend.className = "bracket-line-legend";
+  legend.textContent = "実線：勝者の進路　破線：敗者の進路";
+  const wrapper = document.createElement("div");
+  wrapper.className = "tournament-bracket-scroll";
   const svg = svgElement("svg", {
     viewBox: `0 0 ${String(width)} ${String(height)}`,
     width,
     height,
     role: "img",
-    "aria-label": `${heading} ${geometry.orientation === "vertical" ? "垂直版" : "水平版"}`,
-    class: "tournament-bracket-exploration-svg",
+    "aria-labelledby": `${captionId} ${descriptionId}`,
+    preserveAspectRatio: "xMinYMin meet",
+    class: "tournament-bracket-svg tournament-bracket-exploration-svg",
   });
   const title = svgElement("title");
   title.textContent = `${heading} ${geometry.orientation === "vertical" ? "垂直版" : "水平版"}`;
-  const description = svgElement("desc");
-  description.textContent = "実線は勝者、破線は敗者の進路です。表示文字はチーム名だけです。";
+  const description = svgElement("desc", { id: descriptionId });
+  description.textContent =
+    "チーム枠から実線で勝者、破線で敗者の進路を示します。試合番号、開始時刻、特別試合名を表示し、完全な対戦・結果・順位情報は後続の一覧表でも確認できます。";
   svg.append(title, description);
   for (const segment of [...geometry.segments].sort(
     (left, right) => (left.outcome === "loser" ? 0 : 1) - (right.outcome === "loser" ? 0 : 1),
@@ -90,9 +131,10 @@ export function renderTournamentBracketExploration(
       d: `M ${String(transformed.start.x)} ${String(transformed.start.y)} L ${String(transformed.end.x)} ${String(transformed.end.y)}`,
       class: `bracket-exploration-line ${segment.outcome}`,
       "data-owner-id": segment.ownerId,
+      "aria-hidden": "true",
     });
     const pathTitle = svgElement("title");
-    pathTitle.textContent = `${segment.ownerId} ${segment.outcome === "winner" ? "勝者" : "敗者"}`;
+    pathTitle.textContent = segment.outcome === "winner" ? "勝者の進路" : "敗者の進路";
     path.append(pathTitle);
     svg.append(path);
   }
@@ -121,6 +163,14 @@ export function renderTournamentBracketExploration(
   }
   for (const matchLabel of geometry.matchLabels) {
     const center = transformedPoint(matchLabel.center, geometry);
+    const group = svgElement("g", {
+      class: "bracket-exploration-match",
+      "data-match-id": matchLabel.matchId,
+      "aria-label": matchAccessibilityLabel(model, matchLabel.matchId, matchLabel.text),
+    });
+    const labelTitle = svgElement("title");
+    labelTitle.textContent = matchAccessibilityLabel(model, matchLabel.matchId, matchLabel.text);
+    group.append(labelTitle);
     const label = svgElement("text", {
       x: center.x,
       class: "bracket-exploration-match-label",
@@ -137,11 +187,24 @@ export function renderTournamentBracketExploration(
       lineElement.textContent = line;
       label.append(lineElement);
     });
-    const labelTitle = svgElement("title");
-    labelTitle.textContent = matchLabel.text;
-    label.append(labelTitle);
-    svg.append(label);
+    group.append(label);
+    svg.append(group);
   }
-  figure.append(svg);
+  const visibleMatchIds = new Set(geometry.matchLabels.map((label) => label.matchId));
+  for (const node of model.nodes) {
+    if (visibleMatchIds.has(node.id)) continue;
+    const accessibilityLabel = matchAccessibilityLabel(model, node.id, node.roundLabel);
+    const group = svgElement("g", {
+      class: "bracket-exploration-match bracket-exploration-match-accessibility",
+      "data-match-id": node.id,
+      "aria-label": accessibilityLabel,
+    });
+    const matchTitle = svgElement("title");
+    matchTitle.textContent = accessibilityLabel;
+    group.append(matchTitle);
+    svg.append(group);
+  }
+  wrapper.append(svg);
+  figure.append(caption, legend, wrapper);
   return figure;
 }

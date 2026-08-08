@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  horizontalBracketTournamentFixture,
   scheduleViewDay2ScheduleResult,
   scheduleResult,
   scheduleViewTournamentFixture,
@@ -295,6 +296,104 @@ test("標準ブラケットだけを上位・下位のA4横ページとして印
       breakAfter: getComputedStyle(sheet).breakAfter,
     })));
   expect(printVisibility.every((style) => style.page === "bracket")).toBe(true);
+});
+
+test("mirroredな8チームは上下とも本番水平版となり、A4縦と局所スクロールを使う", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, horizontalBracketTournamentFixture(8));
+
+  const brackets = page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.horizontal",
+  );
+  await expect(brackets).toHaveCount(2);
+  await expect(brackets.nth(0)).toHaveAttribute("data-layout", "horizontal");
+  await expect(brackets.nth(1)).toHaveAttribute("data-layout", "horizontal");
+  await expect(brackets.nth(0).locator("figcaption")).toHaveText("上位トーナメント表");
+  await expect(brackets.nth(1).locator("figcaption")).toHaveText("下位トーナメント表");
+  await expect(brackets.nth(0).locator(".bracket-line-legend")).toContainText("実線：勝者");
+  await expect(brackets.nth(0).locator("svg title").first()).toContainText("水平版");
+  await expect(brackets.nth(0).locator("svg desc")).toContainText("完全な対戦・結果・順位情報");
+  const accessibleMatch = brackets.nth(0).locator(".bracket-exploration-match").first();
+  await expect(accessibleMatch).toHaveAttribute("aria-label", /対/u);
+  await expect(accessibleMatch.locator("title")).toHaveText(/対/u);
+
+  const visibleDiagramText = (await brackets.nth(0).locator("svg text").allTextContents()).join(" ");
+  expect(visibleDiagramText).not.toMatch(/UT-/u);
+  expect(visibleDiagramText).not.toMatch(/\d{2}:\d{2}/u);
+  const lowerStages = await page
+    .locator('#tournament-plan-view .tournament-pool:nth-of-type(2) table tbody td:nth-child(2)')
+    .allTextContents();
+  expect(lowerStages).toContain("決勝");
+  expect(lowerStages).toContain("3位決定戦");
+  expect(lowerStages.filter((stage) => stage === "準決勝")).toHaveLength(2);
+  expect(lowerStages.some((stage) => /9位決定戦/u.test(stage))).toBe(false);
+
+  const pageWidth = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
+  const bracketWidth = await brackets.nth(0).locator(".tournament-bracket-scroll").evaluate(
+    (element) => ({ client: element.clientWidth, scroll: element.scrollWidth }),
+  );
+  expect(bracketWidth.scroll).toBeGreaterThan(bracketWidth.client);
+
+  await page.evaluate(() => {
+    document.body.dataset.printScope = "bracket";
+  });
+  await page.emulateMedia({ media: "print" });
+  expect(await brackets.evaluateAll(
+    (figures) => figures.map((figure) => getComputedStyle(figure).page),
+  )).toEqual(["bracket-horizontal", "bracket-horizontal"]);
+  expect(await page.locator("#tournament-plan-view .tournament-pool").evaluateAll(
+    (pools) => pools.map((pool) => getComputedStyle(pool).page),
+  )).toEqual(["bracket-horizontal", "bracket-horizontal"]);
+  await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => {
+    delete document.body.dataset.printScope;
+  });
+
+  await importDocument(page, horizontalBracketTournamentFixture(8, {
+    withTournamentResults: true,
+  }));
+  const penaltyResult = page.locator(
+    '#tournament-plan-view .bracket-exploration-match[aria-label*="PK 4-3"]',
+  );
+  await expect(penaltyResult).toHaveCount(1);
+  await expect(penaltyResult).toHaveAttribute("aria-label", /勝者/u);
+  await expect(page.locator(
+    '#tournament-plan-view .bracket-exploration-match[aria-label*="1位確定"]',
+  )).toHaveCount(2);
+  expect((await page.locator(
+    "#tournament-plan-view .bracket-exploration-match-label",
+  ).allTextContents()).join(" ")).not.toContain("PK 4-3");
+
+  await page.evaluate(async () => navigator.serviceWorker.ready);
+  await page.context().setOffline(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.horizontal",
+  )).toHaveCount(2);
+});
+
+test("mirroredな16チームは上位・下位を独立に本番水平版へ選択する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, horizontalBracketTournamentFixture(16));
+  const horizontal = page.locator(
+    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="upper"]',
+  );
+  await expect(horizontal).toHaveCount(1);
+  await expect(horizontal).toHaveAttribute("data-participant-count", "16");
+  await expect(page.locator(
+    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="lower"]',
+  )).toHaveCount(1);
 });
 
 test("2日目設定を変更すると日程とトーナメント一覧の派生番号をともに外す", async ({

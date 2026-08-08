@@ -243,6 +243,17 @@ describe("標準トーナメントブラケットモデル", () => {
     expect(buildTournamentBracketModel(input)).toEqual(buildTournamentBracketModel(input));
   });
 
+  it("プール内順位から決勝・3位決定戦・準決勝を共通判定する", () => {
+    const model = buildTournamentBracketModel({
+      plan: planFor(4),
+      pool: "upper",
+      teamNames: new Map(),
+    });
+    expect(model.nodes.filter((node) => node.roundLabel === "決勝")).toHaveLength(1);
+    expect(model.nodes.filter((node) => node.roundLabel === "3位決定戦")).toHaveLength(1);
+    expect(model.nodes.filter((node) => node.roundLabel === "準決勝")).toHaveLength(2);
+  });
+
   it("仮表では順位枠だけ、確定後はチーム名と由来を表示する", () => {
     const provisionalPlan = planFor(2, true);
     const provisional = buildTournamentBracketModel({

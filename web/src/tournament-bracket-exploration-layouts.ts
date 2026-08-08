@@ -298,8 +298,8 @@ function reference(value: unknown): EntryReference | undefined {
 }
 
 function parsedMatches(plan: JsonObject, poolName: string): ParsedMatch[] {
-  const pool = objectValue(plan[poolName], "上位トーナメントを読み取れませんでした。");
-  return arrayValue(pool.matches, "上位トーナメント試合を読み取れませんでした。").map(
+  const pool = objectValue(plan[poolName], "トーナメントを読み取れませんでした。");
+  return arrayValue(pool.matches, "トーナメント試合を読み取れませんでした。").map(
     (match, inputIndex) => {
       const range = Array.isArray(match.rank_range) ? match.rank_range : [];
       return {
@@ -326,7 +326,7 @@ function explorationEntryDescription(
   teamNames: ReadonlyMap<string, string>,
 ): ExplorationEntryDescription {
   const key = entryKey(entry);
-  const seed = arrayValue(pool.seeds, "上位トーナメントシードを読み取れませんでした。")
+  const seed = arrayValue(pool.seeds, "トーナメントシードを読み取れませんでした。")
     .find((candidate) => entryKey(candidate.entry) === key);
   const teamId = entry.type === "concrete_team"
     ? textValue(entry.team_id, "チームIDを読み取れませんでした。")
@@ -339,7 +339,7 @@ function explorationEntryDescription(
     const fallback = `${String(entry.block_id)}${String(entry.rank)}位`;
     return { primaryLabel: fallback, fullLabel: fallback };
   }
-  throw new TournamentBracketError("探索用レイアウトのチーム名を読み取れませんでした。");
+  throw new TournamentBracketError("トーナメント表のチーム名を読み取れませんでした。");
 }
 
 function orderedWinnerLeaves(matches: readonly ParsedMatch[], participantCount: number): JsonObject[] {
@@ -533,13 +533,14 @@ function explorationBaseModel(
   matches: readonly ParsedMatch[],
   logicalOpeningEntries?: readonly JsonObject[],
 ): TournamentBracketModel {
-  const pool = objectValue(input.plan[input.pool], "上位トーナメントを読み取れませんでした。");
+  const semanticModel = standardTournamentBracketLayout.build(input);
+  const pool = objectValue(input.plan[input.pool], "トーナメントを読み取れませんでした。");
   const participantCount = positiveInteger(
     pool.participant_count,
     "トーナメント参加数を読み取れませんでした。",
   );
   if (logicalOpeningEntries === undefined && participantCount <= 9) {
-    return standardTournamentBracketLayout.build(input);
+    return semanticModel;
   }
 
   const byeKeys = new Set(
@@ -563,7 +564,7 @@ function explorationBaseModel(
   });
   const sheet = {
     id: "exploration",
-    title: "探索用トーナメント表",
+    title: "トーナメント表",
     kind: "complete" as const,
     rankStart: 1,
     rankEnd: participantCount,
@@ -577,17 +578,10 @@ function explorationBaseModel(
     segments: [],
   };
   return {
-    pool: input.pool,
-    participantCount,
-    provisional: input.plan.participant_resolution === "provisional",
-    compact: false,
+    ...semanticModel,
     width: 0,
     height: 0,
-    nodes: [],
-    edges: [],
     sheets: [sheet],
-    references: [],
-    directPlacements: [],
   };
 }
 
@@ -762,7 +756,7 @@ function buildExplorationModel(
   orientation: TournamentBracketExplorationOrientation,
 ): TournamentBracketExplorationModel {
   const matches = parsedMatches(input.plan, input.pool);
-  const pool = objectValue(input.plan[input.pool], "上位トーナメントを読み取れませんでした。");
+  const pool = objectValue(input.plan[input.pool], "トーナメントを読み取れませんでした。");
   const logicalLayout = readTournamentLogicalLayout(pool);
   const logicalIndex = logicalLayout === undefined
     ? undefined
@@ -776,7 +770,7 @@ function buildExplorationModel(
     : openingEntriesInSpatialOrder(matches, participantCount, logicalIndex);
   const base = explorationBaseModel(input, matches, logicalOpeningEntries);
   if (base.participantCount < 2 || base.participantCount > 16 || base.sheets.length !== 1) {
-    throw new TournamentBracketError("探索用レイアウトは2〜16チームの単一ページに対応します。");
+    throw new TournamentBracketError("このレイアウトは2〜16チームの単一ページに対応します。");
   }
   const baseSheet = base.sheets[0]!;
   const rowGap = base.participantCount >= 16 ? SIXTEEN_TEAM_ROW_GAP : ROW_GAP;
@@ -1120,38 +1114,19 @@ function buildExplorationModel(
     });
   }
 
-  const finalMatch = matches.find(
-    (match) => match.rangeStart === 1 && match.rangeEnd === 2,
-  );
-  const thirdPlaceMatch = matches.find(
-    (match) => match.rangeStart === 3 && match.rangeEnd === 4,
-  );
-  const sourceMatchIds = (match: ParsedMatch | undefined): Set<string> =>
-    new Set(
-      match === undefined
-        ? []
-        : [match.home, match.away].flatMap((entry) => {
-            const inputReference = reference(entry);
-            return inputReference === undefined ? [] : [inputReference.sourceMatchId];
-          }),
-    );
-  const finalSourceIds = sourceMatchIds(finalMatch);
-  const thirdPlaceSourceIds = sourceMatchIds(thirdPlaceMatch);
-  const semifinalMatchIds = new Set(
-    [...finalSourceIds].filter((matchId) => thirdPlaceSourceIds.has(matchId)),
-  );
+  const semanticNodeById = new Map(base.nodes.map((node) => [node.id, node]));
   const stageLabel = (match: ParsedMatch): string | undefined => {
-    if (match.id === finalMatch?.id) return "決勝";
-    if (match.id === thirdPlaceMatch?.id) return "3位決定戦";
-    if (semifinalMatchIds.has(match.id)) return "準決勝";
-    return undefined;
+    const label = semanticNodeById.get(match.id)?.roundLabel;
+    return label === "決勝" || label === "3位決定戦" || label === "準決勝"
+      ? label
+      : undefined;
   };
   const initialMatchLabels: TournamentBracketExplorationMatchLabel[] = matches.flatMap((match) => {
     const geometry = matchGeometry.get(match.id);
     if (geometry === undefined) return [];
     const schedule = input.scheduleByMatchId?.get(match.id);
     const stage = stageLabel(match);
-    const scheduleLabel = [schedule?.displayNumber, schedule?.timeLabel]
+    const scheduleLabel = [schedule?.displayNumber, schedule?.startTime ?? schedule?.timeLabel]
       .filter((part): part is string => part !== undefined)
       .join("　");
     const lines = [stage, scheduleLabel.length === 0 ? undefined : scheduleLabel]

@@ -53,10 +53,10 @@ import {
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
   buildTournamentBracketModel,
-  renderTournamentBracket,
   TournamentBracketError,
   type TournamentBracketScheduleDetails,
 } from "./tournament-bracket";
+import { defaultTournamentBracketPresentation } from "./tournament-bracket-presentations";
 import {
   bindTournamentParticipants,
   tournamentParticipantResolution,
@@ -1782,17 +1782,23 @@ function renderTournamentPlan(
       `${heading}（${String(pool.participant_count ?? 0)}チーム）`,
     );
 
+    let roundLabelByMatchId: ReadonlyMap<string, string> = new Map();
     if (tournamentBracketVisible) {
       try {
-        const bracketModel = buildTournamentBracketModel({
+        const bracketInput = {
           plan,
           pool: field,
           teamNames,
           ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
           results,
           ...(finalStandings === undefined ? {} : { finalStandings }),
-        });
-        poolSection.append(renderTournamentBracket(bracketModel, `${heading}表`));
+        };
+        const presentation = defaultTournamentBracketPresentation(bracketInput);
+        const bracketModel = buildTournamentBracketModel(bracketInput, presentation.layout);
+        roundLabelByMatchId = new Map(
+          bracketModel.nodes.map((node) => [node.id, node.roundLabel]),
+        );
+        poolSection.append(presentation.render(bracketModel, `${heading}表`));
       } catch (error) {
         appendTextElement(
           poolSection,
@@ -1849,12 +1855,7 @@ function renderTournamentPlan(
       const rankRange = overallRange === undefined
         ? "-"
         : `${String(overallRange[0])}〜${String(overallRange[1])}位`;
-      const roundLabel =
-        field === "lower" && overallRange !== undefined
-          ? overallRange[1] - overallRange[0] === 1
-            ? `${String(overallRange[0])}位決定戦`
-            : `${String(overallRange[0])}〜${String(overallRange[1])}位 順位決定`
-          : String(match.round ?? "-");
+      const roundLabel = roundLabelByMatchId.get(matchId) ?? String(match.round ?? "-");
       const numberCell = window.document.createElement("td");
       const displayNumber = displayNumberByMatchId?.get(matchId);
       if (displayNumber === undefined) {
@@ -3110,6 +3111,7 @@ function renderDay2Preparation(
           row.matchId,
           {
             displayNumber: row.displayNumber,
+            ...(row.startTime === undefined ? {} : { startTime: row.startTime }),
             timeLabel: row.timeLabel,
             courtName: courtNames.get(row.courtId) ?? row.courtId,
           },

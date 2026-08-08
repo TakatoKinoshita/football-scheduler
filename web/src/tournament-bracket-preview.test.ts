@@ -58,17 +58,32 @@ function modelFor(id: string) {
   );
 }
 
-function explorationModelFor(id: string, layoutName: "vertical" | "horizontal") {
+function explorationModelFor(
+  id: string,
+  layoutName: "vertical" | "horizontal",
+  withSchedule = false,
+) {
   const fixture = tournamentBracketPreviewFixture(id);
   const layout = tournamentBracketPreviewLayout(layoutName);
   if (fixture === undefined || layout === undefined) {
     throw new Error(`fixtureまたはレイアウトがありません: ${id}/${layoutName}`);
   }
+  const matches = ((fixture.tournamentPlan.upper as JsonObject).matches as JsonObject[]);
+  const scheduleByMatchId = new Map(matches.map((match, index) => [
+    String(match.id),
+    {
+      displayNumber: `A${String(index + 1)}`,
+      startTime: `${String(9 + Math.floor(index / 2)).padStart(2, "0")}:${index % 2 === 0 ? "00" : "30"}`,
+      timeLabel: "比較用時間帯",
+      courtName: "Aコート",
+    },
+  ]));
   return buildTournamentBracketModel(
     {
       plan: fixture.tournamentPlan,
       pool: "upper",
       teamNames: new Map(fixture.teams.map((team) => [team.id, team.name])),
+      ...(withSchedule ? { scheduleByMatchId } : {}),
     },
     layout,
   );
@@ -154,7 +169,7 @@ describe("トーナメント表ローカルプレビュー", () => {
     expect(() => validateTournamentBracketPreviewFixture(longName)).toThrow(/6文字/);
   });
 
-  it("プレビュー用レイアウト名を本番表示とは独立して解決する", () => {
+  it("プレビュー用レイアウト名を共通presentation registryから解決する", () => {
     expect(tournamentBracketPreviewLayout("standard")).toBe(standardTournamentBracketLayout);
     expect(tournamentBracketPreviewLayout("unknown")).toBeUndefined();
     expect(Object.keys(tournamentBracketPreviewLayouts)).toEqual([
@@ -186,6 +201,69 @@ describe("トーナメント表ローカルプレビュー", () => {
           expect(point.y).toBeGreaterThanOrEqual(0);
           expect(point.y).toBeLessThanOrEqual(geometry.height);
         }
+      }
+    }
+  });
+
+  it("8・16チーム水平版の全試合情報が線・枠・他の文字と衝突しない", () => {
+    type Bounds = { left: number; right: number; top: number; bottom: number };
+    const intersects = (left: Bounds, right: Bounds): boolean =>
+      left.left < right.right && left.right > right.left &&
+      left.top < right.bottom && left.bottom > right.top;
+    const point = (value: { x: number; y: number }, height: number) => ({
+      x: height - value.y,
+      y: value.x,
+    });
+    const approximateWidth = (lines: readonly string[]): number =>
+      Math.max(...lines.map((line) => [...line].reduce(
+        (width, character) => width + (/^[\x20-\x7e]$/u.test(character) ? 7 : 12),
+        0,
+      )));
+
+    for (const fixtureId of ["upper-8", "upper-16"] as const) {
+      const model = explorationModelFor(fixtureId, "horizontal", true);
+      expect(isTournamentBracketExplorationModel(model)).toBe(true);
+      if (!isTournamentBracketExplorationModel(model)) continue;
+      const geometry = model.explorationGeometry;
+      expect(geometry.matchLabels).toHaveLength(model.nodes.length);
+      expect(geometry.segments.every((segment) =>
+        segment.start.x === segment.end.x || segment.start.y === segment.end.y
+      )).toBe(true);
+      const fixedBounds: Bounds[] = [
+        ...geometry.segments.map((segment) => {
+          const start = point(segment.start, geometry.height);
+          const end = point(segment.end, geometry.height);
+          return {
+            left: Math.min(start.x, end.x) - 3,
+            right: Math.max(start.x, end.x) + 3,
+            top: Math.min(start.y, end.y) - 3,
+            bottom: Math.max(start.y, end.y) + 3,
+          };
+        }),
+        ...geometry.slots.map((slot) => {
+          const center = point(slot.center, geometry.height);
+          return {
+            left: center.x - slot.width / 2 - 3,
+            right: center.x + slot.width / 2 + 3,
+            top: center.y - slot.height / 2 - 3,
+            bottom: center.y + slot.height / 2 + 3,
+          };
+        }),
+      ];
+      const labelBounds = geometry.matchLabels.map((label) => {
+        const center = point(label.center, geometry.height);
+        const halfWidth = approximateWidth(label.lines) / 2 + 3;
+        const halfHeight = (label.lines.length > 1 ? 34 : 20) / 2;
+        return {
+          left: center.x - halfWidth,
+          right: center.x + halfWidth,
+          top: center.y - halfHeight,
+          bottom: center.y + halfHeight,
+        };
+      });
+      for (const [index, bounds] of labelBounds.entries()) {
+        expect(fixedBounds.some((fixed) => intersects(bounds, fixed))).toBe(false);
+        expect(labelBounds.slice(index + 1).some((other) => intersects(bounds, other))).toBe(false);
       }
     }
   });

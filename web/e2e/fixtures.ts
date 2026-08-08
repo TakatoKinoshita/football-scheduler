@@ -1,6 +1,298 @@
+import upperEightPreviewJson from "../src/fixtures/tournament-bracket-preview/upper-8.json" with { type: "json" };
+import upperSixteenPreviewJson from "../src/fixtures/tournament-bracket-preview/upper-16.json" with { type: "json" };
+
 export interface TournamentFixtureOptions {
   name?: string;
   withResult?: boolean;
+}
+
+type PreviewFixture = {
+  teams: Array<{ id: string; name: string }>;
+  tournament_plan: Record<string, unknown>;
+};
+
+function lowerTournamentValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    if (value === "upper") return "lower";
+    if (value === "upper_tournament") return "lower_tournament";
+    if (value.startsWith("UT-")) return `LT-${value.slice(3)}`;
+    if (value.startsWith("team-")) return `lower-${value}`;
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(lowerTournamentValue);
+  if (value !== null && typeof value === "object") {
+    const mapped = Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, lowerTournamentValue(child)]),
+    );
+    if (mapped.block_rank === 1) mapped.block_rank = 2;
+    if (mapped.type === "league_rank" && mapped.rank === 1) mapped.rank = 2;
+    return mapped;
+  }
+  return value;
+}
+
+export function horizontalBracketTournamentFixture(
+  participantCount: 8 | 16,
+  options: { withTournamentResults?: boolean } = {},
+) {
+  const preview = structuredClone(
+    participantCount === 8 ? upperEightPreviewJson : upperSixteenPreviewJson,
+  ) as PreviewFixture;
+  const plan = preview.tournament_plan;
+  const upperSeedDraws = structuredClone(plan.seed_draws) as unknown[];
+  plan.lower = lowerTournamentValue(plan.upper);
+  plan.seed_draws = [
+    ...upperSeedDraws,
+    ...upperSeedDraws.map(lowerTournamentValue),
+  ];
+  const teams = [
+    ...structuredClone(preview.teams),
+    ...preview.teams.map((team) => ({ id: `lower-${team.id}`, name: team.name })),
+  ];
+  const upper = plan.upper as {
+    seeds: Array<{ block_id: string; team_id: string }>;
+  };
+  const seedByBlock = new Map(upper.seeds.map((seed) => [seed.block_id, seed.team_id]));
+  const blocks = [...seedByBlock].sort(([left], [right]) => left.localeCompare(right)).map(
+    ([blockId, teamId]) => ({
+      id: blockId,
+      team_ids: [teamId, `lower-${teamId}`],
+    }),
+  );
+  const leagueMatches = blocks.map((block) => ({
+    id: `LG-${block.id}-M1`,
+    phase: "league",
+    round: `${block.id}ブロック 第1ラウンド`,
+    possible_home_team_ids: [block.team_ids[0]],
+    possible_away_team_ids: [block.team_ids[1]],
+    prerequisite_match_ids: [],
+    organizer_referee_required: false,
+  }));
+  const courts = ["A", "B", "C", "D"].map((name) => ({
+    id: `court-${name.toLowerCase()}`,
+    name: `${name}コート`,
+  }));
+  const slots = leagueMatches.map((match, index) => ({
+    day_id: "day1",
+    section_no: Math.floor(index / courts.length) + 1,
+    court_id: courts[index % courts.length]!.id,
+    match_id: match.id,
+    referee_assignment: { kind: "organizer" },
+  }));
+  const sectionCount = Math.ceil(leagueMatches.length / courts.length);
+  const sectionTimings = Array.from({ length: sectionCount }, (_, index) => ({
+    day_id: "day1",
+    section_no: index + 1,
+    start_time: `${String(9 + index).padStart(2, "0")}:30`,
+    match_end_time: `${String(10 + index).padStart(2, "0")}:05`,
+    break_after_minutes: 0,
+  }));
+  const standings = blocks.flatMap((block) => [
+    {
+      block_id: block.id,
+      rank: 1,
+      team_id: block.team_ids[0],
+      played: 1,
+      wins: 1,
+      draws: 0,
+      losses: 0,
+      goals_for: 1,
+      goals_against: 0,
+      goal_difference: 1,
+      points: 3,
+      tie_break: "勝点",
+      head_to_head: null,
+    },
+    {
+      block_id: block.id,
+      rank: 2,
+      team_id: block.team_ids[1],
+      played: 1,
+      wins: 0,
+      draws: 0,
+      losses: 1,
+      goals_for: 0,
+      goals_against: 1,
+      goal_difference: -1,
+      points: 0,
+      tie_break: "勝点",
+      head_to_head: null,
+    },
+  ]);
+  const document = {
+    documentType: "football-scheduler-tournament",
+    schemaVersion: "0.1.0",
+    updatedAt: "2026-08-09T00:00:00.000Z",
+    tournament: {
+      name: `水平ブラケット${String(participantCount)}チーム大会`,
+      input: {
+        schema_version: "0.1.0",
+        request_kind: "day1_league",
+        teams,
+        courts,
+        league: {
+          block_count: blocks.length,
+          assignment_mode: "random",
+          odd_split_policy: "upper",
+        },
+        day: {
+          id: "day1",
+          start_time: "09:30",
+          game_duration_minutes: 35,
+          margin_minutes: 25,
+          max_sections: sectionCount,
+          breaks: [],
+        },
+        referees: {
+          organizer_capacity: courts.length,
+          team_referees_required_after_first: false,
+        },
+        random_seed: 20260803,
+        solver: { max_time_seconds: 30 },
+      },
+      result: {
+        schema_version: "0.1.0",
+        status: "OPTIMAL",
+        schedule_scope: "day1_league",
+        league_plan: {
+          schema_version: "0.1.0",
+          assignment_mode: "random",
+          random_seed: 20260803,
+          blocks,
+          logical_rounds: blocks.map((block) => ({
+            block_id: block.id,
+            round_no: 1,
+            match_ids: [`LG-${block.id}-M1`],
+          })),
+          matches: leagueMatches,
+        },
+        slots,
+        section_timings: sectionTimings,
+        expected_end_time: sectionTimings.at(-1)?.match_end_time,
+        metrics: {
+          random_seed: 20260803,
+          wall_time_seconds: 0.01,
+          used_sections: sectionCount,
+          optimality_proven: true,
+        },
+        diagnostics: [],
+        validation: {
+          valid: true,
+          diagnostics: [],
+          summary: {
+            checked_match_count: leagueMatches.length,
+            checked_slot_count: slots.length,
+            error_count: 0,
+          },
+        },
+        league_results: leagueMatches.map((match) => ({
+          match_id: match.id,
+          home_score: 1,
+          away_score: 0,
+        })),
+        league_standings: {
+          schema_version: "0.1.0",
+          status: "COMPLETE",
+          standings,
+          draws: [],
+        },
+        tournament_plan: plan,
+      },
+    },
+  };
+  if (options.withTournamentResults === true) {
+    const pools = [plan.upper, plan.lower] as Array<{
+      pool: "upper" | "lower";
+      participant_count: number;
+      seeds: Array<Record<string, unknown>>;
+      matches: Array<Record<string, unknown>>;
+      placements: Array<Record<string, unknown>>;
+    }>;
+    const teamByRank = new Map<string, string>();
+    for (const pool of pools) {
+      for (const seed of pool.seeds) {
+        teamByRank.set(
+          `${String(seed.block_id)}:${String(seed.block_rank)}`,
+          String(seed.team_id),
+        );
+      }
+    }
+    const outcomes = new Map<string, { winner: string; loser: string }>();
+    const tournamentResults: Array<Record<string, unknown>> = [];
+    const canonicalResults: Array<Record<string, unknown>> = [];
+    const entryTeam = (raw: unknown): string | undefined => {
+      const entry = raw as Record<string, unknown>;
+      if (entry.type === "concrete_team") return String(entry.team_id);
+      if (entry.type === "league_rank") {
+        return teamByRank.get(`${String(entry.block_id)}:${String(entry.rank)}`);
+      }
+      const outcome = outcomes.get(String(entry.match_id));
+      if (entry.type === "winner_of") return outcome?.winner;
+      if (entry.type === "loser_of") return outcome?.loser;
+      return undefined;
+    };
+    const pending = pools.flatMap((pool) => pool.matches.map((match) => ({ pool, match })));
+    while (pending.length > 0) {
+      const readyIndex = pending.findIndex(({ match }) =>
+        entryTeam(match.home) !== undefined && entryTeam(match.away) !== undefined
+      );
+      if (readyIndex < 0) {
+        throw new Error("E2E用トーナメント結果の依存関係を解決できませんでした。");
+      }
+      const readyItem = pending.splice(readyIndex, 1)[0];
+      if (readyItem === undefined) {
+        throw new Error("E2E用トーナメント結果を読み取れませんでした。");
+      }
+      const { match } = readyItem;
+      const homeTeamId = entryTeam(match.home)!;
+      const awayTeamId = entryTeam(match.away)!;
+      const matchId = String(match.id);
+      const penaltyShootout = tournamentResults.length === 0;
+      const result = {
+        match_id: matchId,
+        home_team_id: homeTeamId,
+        away_team_id: awayTeamId,
+        regular_score_home: penaltyShootout ? 1 : 2,
+        regular_score_away: penaltyShootout ? 1 : 0,
+        ...(penaltyShootout
+          ? { penalty_score_home: 4, penalty_score_away: 3 }
+          : {}),
+      };
+      tournamentResults.push(result);
+      outcomes.set(matchId, { winner: homeTeamId, loser: awayTeamId });
+      canonicalResults.push({
+        ...result,
+        penalty_score_home: penaltyShootout ? 4 : null,
+        penalty_score_away: penaltyShootout ? 3 : null,
+        winner: "home",
+        winner_team_id: homeTeamId,
+        loser_team_id: awayTeamId,
+        decision: penaltyShootout ? "penalty_shootout" : "regular_time",
+      });
+    }
+    const upperCount = pools[0]!.participant_count;
+    const finalStandings = pools.flatMap((pool) => {
+      const offset = pool.pool === "upper" ? 0 : upperCount;
+      return [...pool.placements]
+        .sort((left, right) => Number(left.rank) - Number(right.rank))
+        .map((placement) => ({
+          rank: offset + Number(placement.rank),
+          pool: pool.pool,
+          pool_rank: Number(placement.rank),
+          team_id: entryTeam(placement.entry)!,
+          entry: placement.entry,
+        }));
+    });
+    const result = document.tournament.result as unknown as Record<string, unknown>;
+    result.tournament_results = tournamentResults;
+    result.final_standings = {
+      schema_version: "0.1.0",
+      status: "COMPLETE",
+      match_results: canonicalResults,
+      standings: finalStandings,
+    };
+  }
+  return document;
 }
 
 export const scheduleResult = {

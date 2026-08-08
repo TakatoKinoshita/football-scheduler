@@ -20,6 +20,7 @@ const PORT_OFFSET = 14;
 
 export interface TournamentBracketScheduleDetails {
   displayNumber: string;
+  startTime?: string;
   timeLabel: string;
   courtName: string;
 }
@@ -315,6 +316,29 @@ function parsedReference(value: unknown): ParsedReference | undefined {
     sourceMatchId,
     outcome: entry.type === "winner_of" ? "winner" : "loser",
   };
+}
+
+function specialStageLabels(matches: readonly ParsedMatch[]): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  const finalMatch = matches.find((match) => match.rangeStart === 1 && match.rangeEnd === 2);
+  const thirdPlaceMatch = matches.find(
+    (match) => match.rangeStart === 3 && match.rangeEnd === 4,
+  );
+  if (finalMatch !== undefined) labels.set(finalMatch.id, "決勝");
+  if (thirdPlaceMatch !== undefined) labels.set(thirdPlaceMatch.id, "3位決定戦");
+  if (finalMatch === undefined || thirdPlaceMatch === undefined) return labels;
+
+  const sourceIds = (match: ParsedMatch): Set<string> => new Set(
+    [match.raw.home, match.raw.away].flatMap((entry) => {
+      const inputReference = parsedReference(entry);
+      return inputReference === undefined ? [] : [inputReference.sourceMatchId];
+    }),
+  );
+  const finalSources = sourceIds(finalMatch);
+  for (const sourceId of sourceIds(thirdPlaceMatch)) {
+    if (finalSources.has(sourceId)) labels.set(sourceId, "準決勝");
+  }
+  return labels;
 }
 
 function validateEntry(value: unknown): JsonObject {
@@ -1133,6 +1157,10 @@ function buildStandardTournamentBracketModel(
   ) {
     throw new TournamentBracketError("前後関係が不正なトーナメント試合参照があります。");
   }
+  const stageLabels = specialStageLabels(parsedMatches);
+  for (const match of parsedMatches) {
+    match.roundLabel = stageLabels.get(match.id) ?? match.roundLabel;
+  }
 
   const groupsByKey = new Map<string, RankRangeGroup>();
   const groupByMatchId = new Map<string, RankRangeGroup>();
@@ -1840,6 +1868,7 @@ export function renderTournamentBracket(
   figure.className = "tournament-bracket";
   figure.dataset.pool = model.pool;
   figure.dataset.participantCount = String(model.participantCount);
+  figure.dataset.layout = "standard";
   const caption = document.createElement("figcaption");
   caption.textContent = model.provisional && !heading.includes("仮") ? `${heading}（仮）` : heading;
   figure.append(caption);

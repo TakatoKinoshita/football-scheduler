@@ -185,6 +185,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .bracket-continuation { fill: #174f3f; font-size: 16px; font-weight: 900; paint-order: stroke; stroke: white; stroke-width: 4px; }
 .bracket-direct-label { fill: #18332b; font-size: 20px; font-weight: 900; }
 .bracket-sheet-title { display: none; fill: #18332b; font-size: 20px; font-weight: 900; }
+.bracket-exploration-line { fill: none; stroke: #111; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.bracket-exploration-line.loser { stroke-dasharray: 8 6; }
+.bracket-exploration-box { fill: #fff; stroke: #111; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.bracket-exploration-team { fill: #111; font-size: 15px; font-weight: 700; }
+.bracket-exploration-match-label { fill: #111; font-size: 12px; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 5px; stroke-linejoin: round; }
 .tournament-bracket-empty { margin: .4rem 0; padding: .8rem; border: 1px dashed var(--border); border-radius: .4rem; }
 .seed-list { columns: 2; padding-left: 1.5rem; }
 footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: center; }
@@ -211,6 +216,11 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   margin: 8mm;
 }
 
+@page bracket-horizontal {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
 @media print {
   :root { background: white; color: black; }
   .no-print, footer { display: none !important; }
@@ -234,8 +244,11 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .tournament-bracket-sheet:first-of-type { break-before: auto; }
   .tournament-bracket-sheet h5 { display: none; }
   .tournament-bracket-sheet .bracket-line-legend { display: none; }
+  .tournament-bracket.exploration > .bracket-line-legend { display: none; }
   .tournament-bracket-scroll { overflow: visible; border: 0; }
   .tournament-bracket-svg { width: 100%; min-width: 0; max-height: 180mm; }
+  .tournament-bracket.exploration.horizontal { page: bracket-horizontal; break-inside: avoid; }
+  .tournament-bracket.exploration.horizontal .tournament-bracket-exploration-svg { max-height: 270mm; }
   .bracket-entry-name,
   .bracket-entry-source,
   .bracket-match-heading,
@@ -250,24 +263,26 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .bracket-match-node.narrow .bracket-match-heading,
   .bracket-match-node.narrow .bracket-match-meta,
   .bracket-match-node.narrow .bracket-matchup { font-size: 18px; }
-  .bracket-entry-line, .bracket-connector, .bracket-match-line, .bracket-terminal-line { stroke: #111; }
+  .bracket-entry-line, .bracket-connector, .bracket-match-line, .bracket-terminal-line,
+  .bracket-exploration-line, .bracket-exploration-box { stroke: #111; }
   .bracket-connector-label, .bracket-connector-label.loser, .bracket-terminal { fill: #111; }
   body[data-print-scope="bracket"] #day2-result-content { border: 0; padding: 0; }
   body[data-print-scope="bracket"],
   body[data-print-scope="bracket"] main,
   body[data-print-scope="bracket"] #day2-results-panel,
   body[data-print-scope="bracket"] #day2-result-content,
-  body[data-print-scope="bracket"] #tournament-plan-view,
-  body[data-print-scope="bracket"] .tournament-pool,
-  body[data-print-scope="bracket"] .tournament-bracket { page: bracket; }
+  body[data-print-scope="bracket"] #tournament-plan-view { page: auto; }
   body[data-print-scope="bracket"] #day2-results-panel { margin: 0; border-radius: 0; }
+  body[data-print-scope="bracket"] #day2-results-panel > .section-heading { display: none !important; }
   body[data-print-scope="bracket"] #day2-result-content { border-radius: 0; }
   body[data-print-scope="bracket"] #day2-result-content > :not(#tournament-plan-view),
   body[data-print-scope="bracket"] #tournament-plan-view > :not(.tournament-pool),
   body[data-print-scope="bracket"] .tournament-pool > :not(h4):not(.tournament-bracket):not(.tournament-bracket-error) { display: none !important; }
-  body[data-print-scope="bracket"] .tournament-pool { margin: 0; padding: 0; border: 0; break-inside: auto; break-after: auto; }
+  body[data-print-scope="bracket"] .tournament-pool { page: bracket; margin: 0; padding: 0; border: 0; break-inside: auto; break-after: auto; }
+  body[data-print-scope="bracket"] .tournament-pool:has(> .tournament-bracket.exploration.horizontal) { page: bracket-horizontal; }
   body[data-print-scope="bracket"] .tournament-pool + .tournament-pool { break-before: page; }
   body[data-print-scope="bracket"] .tournament-bracket { margin: 0; }
+  body[data-print-scope="bracket"] .tournament-bracket.exploration.horizontal { page: bracket-horizontal; }
   body[data-print-scope="bracket"] .tournament-pool > h4,
   body[data-print-scope="bracket"] .tournament-bracket > figcaption { display: none !important; }
   body[data-print-scope="bracket"] .tournament-bracket-sheet:first-of-type { break-before: auto; }
