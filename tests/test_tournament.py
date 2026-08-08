@@ -14,6 +14,7 @@ from football_scheduler.tournament import (
     LoserOfRef,
     TournamentGenerationError,
     TournamentPlan,
+    TournamentPoolPlan,
     TournamentSeed,
     WinnerOfRef,
     generate_tournament_plan,
@@ -85,6 +86,33 @@ def _request(
     return request
 
 
+def _dependency_graph(pool: TournamentPoolPlan) -> tuple[object, ...]:
+    """直接参加枠の値を除外し、試合IDと勝敗参照だけを正規化する。"""
+
+    def entry_key(
+        entry: ConcreteTeamRef | LeagueRankRef | WinnerOfRef | LoserOfRef,
+    ) -> tuple[str, str] | tuple[str]:
+        if isinstance(entry, WinnerOfRef):
+            return ("winner_of", entry.match_id)
+        if isinstance(entry, LoserOfRef):
+            return ("loser_of", entry.match_id)
+        return ("direct",)
+
+    return (
+        tuple(
+            (
+                match.id,
+                match.rank_range,
+                match.round_no,
+                entry_key(match.home),
+                entry_key(match.away),
+            )
+            for match in pool.matches
+        ),
+        tuple((placement.rank, entry_key(placement.entry)) for placement in pool.placements),
+    )
+
+
 @pytest.mark.parametrize(
     ("participant_count", "expected_matches"),
     [(2, 1), (4, 4), (8, 12), (16, 32)],
@@ -117,6 +145,13 @@ def test_power_of_two_tables_include_complete_logical_layout(
     assert len(layout.opening_entry_order) == participant_count
     assert set(layout.opening_entry_order) == {seed.entry for seed in pool.seeds}
     assert len(layout.branch_alignments) == participant_count // 2 - 1
+    assert layout.symmetry == "mirrored"
+    assert all(alignment.status == "mirrored" for alignment in layout.branch_alignments)
+    assert all(
+        alignment.loser_to_winner_permutation
+        == tuple(range(1, len(alignment.winner_source_order) + 1))
+        for alignment in layout.branch_alignments
+    )
     for rank_range in {position.rank_range for position in layout.match_positions}:
         orders = sorted(
             position.order
@@ -135,40 +170,38 @@ def test_non_power_of_two_tables_do_not_publish_logical_layout(
     assert pool.logical_layout is None
 
 
-def test_sixteen_team_layout_reports_known_outcome_branch_permutation() -> None:
-    pool = generate_tournament_plan(_request((2,) * 16, seed=20260803, with_standings=False)).upper
-    layout = pool.logical_layout
-    assert layout is not None
-    opening_matches = [match for match in pool.matches if match.rank_range == (1, 16)]
-    opening_labels = {match.id: f"O{index}" for index, match in enumerate(opening_matches, 1)}
-    root = next(
-        alignment for alignment in layout.branch_alignments if alignment.rank_range == (1, 16)
-    )
+@pytest.mark.parametrize("participant_count", [2, 4, 8, 16])
+def test_power_of_two_dependency_graph_depends_only_on_participant_count(
+    participant_count: int,
+) -> None:
+    one_block = generate_tournament_plan(
+        _request((participant_count * 2,), seed=17, with_standings=False)
+    ).upper
+    separate_blocks = generate_tournament_plan(
+        _request((2,) * participant_count, seed=20260803, with_standings=False)
+    ).upper
 
-    assert [opening_labels[match_id] for match_id in root.winner_source_order] == [
-        "O1",
-        "O5",
-        "O2",
-        "O6",
-        "O3",
-        "O4",
-        "O7",
-        "O8",
+    assert _dependency_graph(one_block) == _dependency_graph(separate_blocks)
+
+
+@pytest.mark.parametrize("participant_count", [2, 4, 8, 16])
+def test_power_of_two_opening_matches_keep_higher_seed_home(
+    participant_count: int,
+) -> None:
+    pool = generate_tournament_plan(
+        _request((2,) * participant_count, seed=20260803, with_standings=False)
+    ).upper
+    seed_by_slot = {(seed.entry.block_id, seed.entry.rank): seed.seed_no for seed in pool.seeds}
+    opening_matches = [
+        match for match in pool.matches if match.rank_range == (1, participant_count)
     ]
-    assert [opening_labels[match_id] for match_id in root.loser_source_order] == [
-        "O1",
-        "O6",
-        "O2",
-        "O8",
-        "O3",
-        "O5",
-        "O7",
-        "O4",
-    ]
-    assert root.loser_to_winner_permutation == (1, 4, 3, 8, 5, 2, 7, 6)
-    assert root.status == "permuted"
-    assert root.diagnostic_code == "OUTCOME_BRANCH_ORDER_DIFFERS"
-    assert layout.symmetry == "permuted"
+
+    assert len(opening_matches) == participant_count // 2
+    for match in opening_matches:
+        assert isinstance(match.home, LeagueRankRef)
+        assert isinstance(match.away, LeagueRankRef)
+        assert seed_by_slot[(match.home.block_id, match.home.rank)] <= participant_count // 2
+        assert seed_by_slot[(match.away.block_id, match.away.rank)] > participant_count // 2
 
 
 @pytest.mark.parametrize(
@@ -385,6 +418,27 @@ def test_legacy_and_null_logical_layouts_are_accepted() -> None:
     assert TournamentPlan.model_validate(null_layout).upper.logical_layout is None
 
 
+def test_legacy_permuted_logical_layout_is_accepted() -> None:
+    document = generate_tournament_plan(
+        _request((2,) * 4, seed=20260803, with_standings=False)
+    ).model_dump(mode="json")
+    upper = document["upper"]
+    loser_match = next(match for match in upper["matches"] if match["rank_range"] == [3, 4])
+    loser_match["home"], loser_match["away"] = loser_match["away"], loser_match["home"]
+    layout = upper["logical_layout"]
+    root = layout["branch_alignments"][0]
+    root["status"] = "permuted"
+    root["loser_source_order"] = list(reversed(root["loser_source_order"]))
+    root["loser_to_winner_permutation"] = [2, 1]
+    root["diagnostic_code"] = "OUTCOME_BRANCH_ORDER_DIFFERS"
+    layout["symmetry"] = "permuted"
+
+    restored = TournamentPlan.model_validate(document)
+
+    assert restored.upper.logical_layout is not None
+    assert restored.upper.logical_layout.symmetry == "permuted"
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -396,7 +450,7 @@ def test_legacy_and_null_logical_layouts_are_accepted() -> None:
         lambda layout: layout["branch_alignments"][0].update(
             {"loser_to_winner_permutation": [1, 2, 3, 4]}
         ),
-        lambda layout: layout.update({"symmetry": "mirrored"}),
+        lambda layout: layout.update({"symmetry": "permuted"}),
     ],
 )
 def test_invalid_logical_layout_contract_is_rejected(
@@ -413,7 +467,7 @@ def test_invalid_logical_layout_contract_is_rejected(
         TournamentPlan.model_validate(document)
 
 
-@pytest.mark.parametrize("participant_count", range(2, 8))
+@pytest.mark.parametrize("participant_count", range(2, 9))
 def test_every_outcome_path_assigns_each_team_to_one_final_rank(
     participant_count: int,
 ) -> None:
@@ -448,3 +502,31 @@ def test_every_outcome_path_assigns_each_team_to_one_final_rank(
         placed = [resolve(placement.entry) for placement in pool.placements]
         assert len(placed) == participant_count
         assert set(placed) == {seed.team_id for seed in pool.seeds}
+
+
+def test_sixteen_team_reference_dag_consumes_every_outcome_once() -> None:
+    pool = generate_tournament_plan(_request((2,) * 16, seed=20260803, with_standings=False)).upper
+    match_index = {match.id: index for index, match in enumerate(pool.matches)}
+    outcome_counts = {
+        (outcome, match.id): 0 for match in pool.matches for outcome in ("winner", "loser")
+    }
+
+    def record_reference(
+        entry: ConcreteTeamRef | LeagueRankRef | WinnerOfRef | LoserOfRef,
+        target_index: int,
+    ) -> None:
+        if isinstance(entry, WinnerOfRef):
+            assert match_index[entry.match_id] < target_index
+            outcome_counts[("winner", entry.match_id)] += 1
+        elif isinstance(entry, LoserOfRef):
+            assert match_index[entry.match_id] < target_index
+            outcome_counts[("loser", entry.match_id)] += 1
+
+    for index, match in enumerate(pool.matches):
+        record_reference(match.home, index)
+        record_reference(match.away, index)
+    for placement in pool.placements:
+        record_reference(placement.entry, len(pool.matches))
+
+    assert set(outcome_counts.values()) == {1}
+    assert [placement.rank for placement in pool.placements] == list(range(1, 17))

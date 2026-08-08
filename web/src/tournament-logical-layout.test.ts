@@ -29,40 +29,51 @@ describe("トーナメント論理配置契約", () => {
     )).toBe(true);
   });
 
-  it("16チームの既知の順序差を置換として読み取る", () => {
+  it("16チームの全分岐を鏡像として読み取る", () => {
     const layout = readTournamentLogicalLayout(upperPool(upperSixteenJson));
-    const root = layout?.branchAlignments.find(
-      (alignment) => alignment.rankRange[0] === 1 && alignment.rankRange[1] === 16,
-    );
 
-    expect(layout?.symmetry).toBe("permuted");
+    expect(layout?.symmetry).toBe("mirrored");
     expect(layout?.openingEntryOrder).toHaveLength(16);
     expect(layout?.matchPositions).toHaveLength(32);
-    expect(root).toMatchObject({
+    expect(layout?.branchAlignments).toHaveLength(7);
+    expect(layout?.branchAlignments.every((alignment) =>
+      alignment.status === "mirrored" &&
+      alignment.diagnosticCode === null &&
+      alignment.loserToWinnerPermutation.every((value, index) => value === index + 1)
+    )).toBe(true);
+  });
+
+  it("敗者側参照が異なる旧permutedデータを読み取る", () => {
+    const legacy = upperPool(upperSixteenJson);
+    const matches = legacy.matches as JsonObject[];
+    const loserMatch = matches.find((match) => {
+      const range = match.rank_range as number[];
+      return range[0] === 9 && range[1] === 16;
+    })!;
+    [loserMatch.home, loserMatch.away] = [loserMatch.away, loserMatch.home];
+    const layout = legacy.logical_layout as JsonObject;
+    const root = (layout.branch_alignments as JsonObject[]).find((alignment) => {
+      const range = alignment.rank_range as number[];
+      return range[0] === 1 && range[1] === 16;
+    })!;
+    const loserOrder = [...(root.winner_source_order as string[])];
+    [loserOrder[0], loserOrder[1]] = [loserOrder[1]!, loserOrder[0]!];
+    root.status = "permuted";
+    root.loser_source_order = loserOrder;
+    root.loser_to_winner_permutation = [2, 1, 3, 4, 5, 6, 7, 8];
+    root.diagnostic_code = "OUTCOME_BRANCH_ORDER_DIFFERS";
+    layout.symmetry = "permuted";
+
+    const restored = readTournamentLogicalLayout(legacy);
+
+    expect(restored?.symmetry).toBe("permuted");
+    expect(restored?.branchAlignments.find((alignment) =>
+      alignment.rankRange[0] === 1 && alignment.rankRange[1] === 16
+    )).toMatchObject({
       status: "permuted",
-      loserToWinnerPermutation: [1, 4, 3, 8, 5, 2, 7, 6],
+      loserToWinnerPermutation: [2, 1, 3, 4, 5, 6, 7, 8],
       diagnosticCode: "OUTCOME_BRANCH_ORDER_DIFFERS",
     });
-    expect(root?.winnerSourceOrder).toEqual([
-      "UT-RANK-1-16-M1",
-      "UT-RANK-1-16-M5",
-      "UT-RANK-1-16-M2",
-      "UT-RANK-1-16-M6",
-      "UT-RANK-1-16-M3",
-      "UT-RANK-1-16-M4",
-      "UT-RANK-1-16-M7",
-      "UT-RANK-1-16-M8",
-    ]);
-    expect(root?.loserSourceOrder).toEqual([
-      "UT-RANK-1-16-M1",
-      "UT-RANK-1-16-M6",
-      "UT-RANK-1-16-M2",
-      "UT-RANK-1-16-M8",
-      "UT-RANK-1-16-M3",
-      "UT-RANK-1-16-M5",
-      "UT-RANK-1-16-M7",
-      "UT-RANK-1-16-M4",
-    ]);
   });
 
   it("非2べき乗、null、フィールド欠落を旧形式として扱う", () => {
@@ -98,12 +109,12 @@ describe("トーナメント論理配置契約", () => {
     const invalidPermutation = upperPool(upperSixteenJson);
     const permutationLayout = invalidPermutation.logical_layout as JsonObject;
     const root = (permutationLayout.branch_alignments as JsonObject[])[0]!;
-    root.loser_to_winner_permutation = [1, 2, 3, 4, 5, 6, 7, 8];
+    root.loser_to_winner_permutation = [2, 1, 3, 4, 5, 6, 7, 8];
     expect(() => readTournamentLogicalLayout(invalidPermutation)).toThrow(/置換情報/);
 
     const invalidSymmetry = upperPool(upperSixteenJson);
     const symmetryLayout = invalidSymmetry.logical_layout as JsonObject;
-    symmetryLayout.symmetry = "mirrored";
+    symmetryLayout.symmetry = "permuted";
     expect(() => readTournamentLogicalLayout(invalidSymmetry)).toThrow(/全体の対称性/);
   });
 });

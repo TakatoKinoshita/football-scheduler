@@ -194,12 +194,12 @@
           "round_no": 1,
           "home": {
             "type": "league_rank",
-            "block_id": "G",
+            "block_id": "A",
             "rank": 1
           },
           "away": {
             "type": "league_rank",
-            "block_id": "C",
+            "block_id": "F",
             "rank": 1
           },
           "rank_range": [
@@ -214,12 +214,12 @@
           "round_no": 1,
           "home": {
             "type": "league_rank",
-            "block_id": "A",
+            "block_id": "G",
             "rank": 1
           },
           "away": {
             "type": "league_rank",
-            "block_id": "F",
+            "block_id": "C",
             "rank": 1
           },
           "rank_range": [
@@ -258,7 +258,7 @@
           },
           "away": {
             "type": "winner_of",
-            "match_id": "UT-RANK-1-8-M4"
+            "match_id": "UT-RANK-1-8-M3"
           },
           "rank_range": [
             1,
@@ -276,7 +276,7 @@
           },
           "away": {
             "type": "winner_of",
-            "match_id": "UT-RANK-1-8-M3"
+            "match_id": "UT-RANK-1-8-M4"
           },
           "rank_range": [
             1,
@@ -330,7 +330,7 @@
           },
           "away": {
             "type": "loser_of",
-            "match_id": "UT-RANK-1-8-M4"
+            "match_id": "UT-RANK-1-8-M3"
           },
           "rank_range": [
             5,
@@ -348,7 +348,7 @@
           },
           "away": {
             "type": "loser_of",
-            "match_id": "UT-RANK-1-8-M3"
+            "match_id": "UT-RANK-1-8-M4"
           },
           "rank_range": [
             5,
@@ -472,22 +472,22 @@
           },
           {
             "type": "league_rank",
-            "block_id": "G",
-            "rank": 1
-          },
-          {
-            "type": "league_rank",
-            "block_id": "C",
-            "rank": 1
-          },
-          {
-            "type": "league_rank",
             "block_id": "A",
             "rank": 1
           },
           {
             "type": "league_rank",
             "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
             "rank": 1
           },
           {
@@ -608,15 +608,15 @@
             "status": "mirrored",
             "winner_source_order": [
               "UT-RANK-1-8-M1",
-              "UT-RANK-1-8-M4",
+              "UT-RANK-1-8-M3",
               "UT-RANK-1-8-M2",
-              "UT-RANK-1-8-M3"
+              "UT-RANK-1-8-M4"
             ],
             "loser_source_order": [
               "UT-RANK-1-8-M1",
-              "UT-RANK-1-8-M4",
+              "UT-RANK-1-8-M3",
               "UT-RANK-1-8-M2",
-              "UT-RANK-1-8-M3"
+              "UT-RANK-1-8-M4"
             ],
             "loser_to_winner_permutation": [
               1,

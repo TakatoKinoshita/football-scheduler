@@ -404,6 +404,16 @@ class _MatchAudit:
 
 
 @dataclass(frozen=True)
+class _PlacementNode:
+    """初戦ペアを固定ブラケット位置へ割り当てるための配置木ノード。"""
+
+    block_ids: frozenset[str]
+    opening_pair_index: int | None = None
+    left: _PlacementNode | None = None
+    right: _PlacementNode | None = None
+
+
+@dataclass(frozen=True)
 class _RankSlot:
     block_id: str
     rank: int
@@ -429,6 +439,10 @@ class _BracketBuilder:
         self._id_counts: dict[tuple[str, int, int], int] = {}
 
     def build(self, entries: list[_EntryState]) -> None:
+        if len(entries) >= 2 and len(entries) & (len(entries) - 1) == 0:
+            positioned_entries = self._position_power_of_two_entries(entries)
+            self._build_canonical_power_of_two(positioned_entries, 1, 1)
+            return
         self._build_group(entries, 1, 1)
 
     def finalized_byes(self) -> tuple[ByeAdvance, ...]:
@@ -496,6 +510,93 @@ class _BracketBuilder:
         self._build_group(winners, rank_start, round_no + 1)
         self._build_group(losers, rank_start + half, round_no + 1)
 
+    def _position_power_of_two_entries(self, entries: list[_EntryState]) -> list[_EntryState]:
+        """競技上の最適化を初戦位置へ閉じ込めた固定エントリー順を返す。"""
+
+        count = len(entries)
+        half = count // 2
+        higher_entries = entries[:half]
+        lower_entries = entries[half:]
+        assignment = _best_pair_assignment(
+            higher_entries,
+            lower_entries,
+            f"{self.random_seed}:{self.pool}:RANK:1:{count}:1",
+        )
+        opening_pairs = [
+            (home, lower_entries[lower_index])
+            for home, lower_index in zip(higher_entries, assignment, strict=True)
+        ]
+        nodes = [
+            _PlacementNode(
+                block_ids=home.block_ids | away.block_ids,
+                opening_pair_index=index,
+            )
+            for index, (home, away) in enumerate(opening_pairs)
+        ]
+        positioned_nodes = _position_opening_nodes(
+            nodes,
+            f"{self.random_seed}:{self.pool}:canonical:{count}",
+        )
+        positioned_pairs: list[tuple[_EntryState, _EntryState]] = []
+        for node in positioned_nodes:
+            if node.opening_pair_index is None:
+                raise RuntimeError("初戦配置木の葉に対戦情報がありません")
+            positioned_pairs.append(opening_pairs[node.opening_pair_index])
+        return [home for home, _away in positioned_pairs] + [
+            away for _home, away in positioned_pairs
+        ]
+
+    def _build_canonical_power_of_two(
+        self, entries: list[_EntryState], rank_start: int, round_no: int
+    ) -> None:
+        """勝者側と敗者側に同一の位置対応を使う正規ブラケットを生成する。"""
+
+        count = len(entries)
+        if count == 1:
+            self.placements.append(TournamentPlacement(rank=rank_start, entry=entries[0].ref))
+            return
+        rank_end = rank_start + count - 1
+        label = (
+            "優勝決定戦"
+            if rank_start == 1 and count == 2
+            else f"{rank_start}位決定戦"
+            if count == 2
+            else f"{rank_start}〜{rank_end}位 順位決定"
+        )
+        winners, losers = self._play_fixed_matches(entries, rank_start, rank_end, round_no, label)
+        half = count // 2
+        self._build_canonical_power_of_two(winners, rank_start, round_no + 1)
+        self._build_canonical_power_of_two(losers, rank_start + half, round_no + 1)
+
+    def _play_fixed_matches(
+        self,
+        entries: list[_EntryState],
+        rank_start: int,
+        rank_end: int,
+        round_no: int,
+        label: str,
+    ) -> tuple[list[_EntryState], list[_EntryState]]:
+        """入力の前半と後半を同じ添字で結び、再配置せずに試合を作る。"""
+
+        if len(entries) % 2:
+            raise RuntimeError("対戦生成対象は偶数である必要があります")
+        half = len(entries) // 2
+        winners: list[_EntryState] = []
+        losers: list[_EntryState] = []
+        for index in range(half):
+            winner, loser = self._record_match(
+                entries[index],
+                entries[index + half],
+                rank_start,
+                rank_end,
+                round_no,
+                "RANK",
+                label,
+            )
+            winners.append(winner)
+            losers.append(loser)
+        return winners, losers
+
     def _play_opening_matches(
         self,
         entries: list[_EntryState],
@@ -519,43 +620,11 @@ class _BracketBuilder:
         losers: list[_EntryState] = []
         for home, right_index in zip(left, assignment, strict=True):
             away = right[right_index]
-            match_id = self._next_id(kind, rank_start, rank_end)
-            self.matches.append(
-                TournamentMatch(
-                    id=match_id,
-                    phase=self.phase,
-                    round=label,
-                    round_no=round_no,
-                    home=home.ref,
-                    away=away.ref,
-                    rank_range=(rank_start, rank_end),
-                )
+            winner, loser = self._record_match(
+                home, away, rank_start, rank_end, round_no, kind, label
             )
-            common_blocks = home.block_ids & away.block_ids
-            first_same_block = bool(common_blocks) and not home.has_played and not away.has_played
-            self.audits.append(
-                _MatchAudit(
-                    match_id=match_id,
-                    round_no=round_no,
-                    first_same_block=first_same_block,
-                    possible_same_block=bool(common_blocks),
-                )
-            )
-            possible_blocks = home.block_ids | away.block_ids
-            winners.append(
-                _EntryState(
-                    ref=WinnerOfRef(match_id=match_id),
-                    block_ids=possible_blocks,
-                    has_played=True,
-                )
-            )
-            losers.append(
-                _EntryState(
-                    ref=LoserOfRef(match_id=match_id),
-                    block_ids=possible_blocks,
-                    has_played=True,
-                )
-            )
+            winners.append(winner)
+            losers.append(loser)
         if kind == "RANK" and len(winners) >= 2:
             order = _best_next_round_order(
                 winners,
@@ -564,6 +633,52 @@ class _BracketBuilder:
             winners = [winners[index] for index in order]
             losers = [losers[index] for index in order]
         return winners, losers
+
+    def _record_match(
+        self,
+        home: _EntryState,
+        away: _EntryState,
+        rank_start: int,
+        rank_end: int,
+        round_no: int,
+        kind: str,
+        label: str,
+    ) -> tuple[_EntryState, _EntryState]:
+        match_id = self._next_id(kind, rank_start, rank_end)
+        self.matches.append(
+            TournamentMatch(
+                id=match_id,
+                phase=self.phase,
+                round=label,
+                round_no=round_no,
+                home=home.ref,
+                away=away.ref,
+                rank_range=(rank_start, rank_end),
+            )
+        )
+        common_blocks = home.block_ids & away.block_ids
+        first_same_block = bool(common_blocks) and not home.has_played and not away.has_played
+        self.audits.append(
+            _MatchAudit(
+                match_id=match_id,
+                round_no=round_no,
+                first_same_block=first_same_block,
+                possible_same_block=bool(common_blocks),
+            )
+        )
+        possible_blocks = home.block_ids | away.block_ids
+        return (
+            _EntryState(
+                ref=WinnerOfRef(match_id=match_id),
+                block_ids=possible_blocks,
+                has_played=True,
+            ),
+            _EntryState(
+                ref=LoserOfRef(match_id=match_id),
+                block_ids=possible_blocks,
+                has_played=True,
+            ),
+        )
 
     def _next_id(self, kind: str, rank_start: int, rank_end: int) -> str:
         key = (kind, rank_start, rank_end)
@@ -934,7 +1049,38 @@ def _best_pair_assignment(
     return visit(0, 0)[1]
 
 
-def _best_next_round_order(entries: list[_EntryState], salt: str) -> tuple[int, ...]:
+def _position_opening_nodes(
+    nodes: list[_PlacementNode], salt: str, depth: int = 1
+) -> list[_PlacementNode]:
+    """親の配置を先に決め、各親の左、右の順で初戦ノードを展開する。"""
+
+    if len(nodes) <= 1:
+        return nodes
+    order = _best_next_round_order(nodes, f"{salt}:depth:{depth}")
+    ordered_nodes = [nodes[index] for index in order]
+    half = len(ordered_nodes) // 2
+    parents = [
+        _PlacementNode(
+            block_ids=ordered_nodes[index].block_ids | ordered_nodes[index + half].block_ids,
+            left=ordered_nodes[index],
+            right=ordered_nodes[index + half],
+        )
+        for index in range(half)
+    ]
+    positioned_parents = _position_opening_nodes(parents, salt, depth + 1)
+    left_children: list[_PlacementNode] = []
+    right_children: list[_PlacementNode] = []
+    for parent in positioned_parents:
+        if parent.left is None or parent.right is None:
+            raise RuntimeError("初戦配置木の親子関係が不足しています")
+        left_children.append(parent.left)
+        right_children.append(parent.right)
+    return [*left_children, *right_children]
+
+
+def _best_next_round_order(
+    entries: list[_EntryState] | list[_PlacementNode], salt: str
+) -> tuple[int, ...]:
     """次ラウンドで同一ブロック由来同士が当たる時期を遅らせる並びを返す。"""
 
     size = len(entries)
