@@ -1,0 +1,594 @@
+{
+  "fixture_id": "upper-8",
+  "description": "8チーム上位トーナメント・完全順位決定",
+  "teams": [
+    {
+      "id": "team-01",
+      "name": "青空"
+    },
+    {
+      "id": "team-02",
+      "name": "あおぞら中央"
+    },
+    {
+      "id": "team-03",
+      "name": "アオゾラ中央"
+    },
+    {
+      "id": "team-04",
+      "name": "AOZORA"
+    },
+    {
+      "id": "team-05",
+      "name": "みどり"
+    },
+    {
+      "id": "team-06",
+      "name": "美土里"
+    },
+    {
+      "id": "team-07",
+      "name": "HIGASHINO"
+    },
+    {
+      "id": "team-08",
+      "name": "ミドリ"
+    }
+  ],
+  "tournament_plan": {
+    "schema_version": "0.1.0",
+    "status": "COMPLETE",
+    "participant_resolution": "resolved",
+    "odd_split_policy": "upper",
+    "random_seed": 20260803,
+    "upper": {
+      "pool": "upper",
+      "participant_count": 8,
+      "seeds": [
+        {
+          "seed_no": 1,
+          "team_id": "team-04",
+          "block_id": "D",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-04"
+          }
+        },
+        {
+          "seed_no": 2,
+          "team_id": "team-07",
+          "block_id": "G",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-07"
+          }
+        },
+        {
+          "seed_no": 3,
+          "team_id": "team-01",
+          "block_id": "A",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-01"
+          }
+        },
+        {
+          "seed_no": 4,
+          "team_id": "team-08",
+          "block_id": "H",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-08"
+          }
+        },
+        {
+          "seed_no": 5,
+          "team_id": "team-03",
+          "block_id": "C",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-03"
+          }
+        },
+        {
+          "seed_no": 6,
+          "team_id": "team-06",
+          "block_id": "F",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-06"
+          }
+        },
+        {
+          "seed_no": 7,
+          "team_id": "team-02",
+          "block_id": "B",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-02"
+          }
+        },
+        {
+          "seed_no": 8,
+          "team_id": "team-05",
+          "block_id": "E",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-05"
+          }
+        }
+      ],
+      "matches": [
+        {
+          "id": "UT-RANK-1-8-M1",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M2",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M3",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M4",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-4-M1",
+          "phase": "upper_tournament",
+          "round": "1〜4位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M4"
+          },
+          "rank_range": [
+            1,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-1-4-M2",
+          "phase": "upper_tournament",
+          "round": "1〜4位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M2"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M3"
+          },
+          "rank_range": [
+            1,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-1-2-M1",
+          "phase": "upper_tournament",
+          "round": "優勝決定戦",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-4-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-4-M2"
+          },
+          "rank_range": [
+            1,
+            2
+          ]
+        },
+        {
+          "id": "UT-RANK-3-4-M1",
+          "phase": "upper_tournament",
+          "round": "3位決定戦",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-4-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-4-M2"
+          },
+          "rank_range": [
+            3,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-5-8-M1",
+          "phase": "upper_tournament",
+          "round": "5〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M4"
+          },
+          "rank_range": [
+            5,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-5-8-M2",
+          "phase": "upper_tournament",
+          "round": "5〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M2"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M3"
+          },
+          "rank_range": [
+            5,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-5-6-M1",
+          "phase": "upper_tournament",
+          "round": "5位決定戦",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-8-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-8-M2"
+          },
+          "rank_range": [
+            5,
+            6
+          ]
+        },
+        {
+          "id": "UT-RANK-7-8-M1",
+          "phase": "upper_tournament",
+          "round": "7位決定戦",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-8-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-8-M2"
+          },
+          "rank_range": [
+            7,
+            8
+          ]
+        }
+      ],
+      "byes": [],
+      "placements": [
+        {
+          "rank": 1,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-2-M1"
+          }
+        },
+        {
+          "rank": 2,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-2-M1"
+          }
+        },
+        {
+          "rank": 3,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-3-4-M1"
+          }
+        },
+        {
+          "rank": 4,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-3-4-M1"
+          }
+        },
+        {
+          "rank": 5,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-6-M1"
+          }
+        },
+        {
+          "rank": 6,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-6-M1"
+          }
+        },
+        {
+          "rank": 7,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-7-8-M1"
+          }
+        },
+        {
+          "rank": 8,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-7-8-M1"
+          }
+        }
+      ],
+      "evaluation": {
+        "first_match_same_block_count": 0,
+        "possible_same_block_match_count": 0,
+        "earliest_possible_same_block_round": null
+      }
+    },
+    "lower": {
+      "pool": "lower",
+      "participant_count": 0,
+      "seeds": [],
+      "matches": [],
+      "byes": [],
+      "placements": [],
+      "evaluation": {
+        "first_match_same_block_count": 0,
+        "possible_same_block_match_count": 0,
+        "earliest_possible_same_block_round": null
+      }
+    },
+    "seed_draws": [
+      {
+        "pool": "upper",
+        "block_rank": 1,
+        "candidates": [
+          "team-01",
+          "team-02",
+          "team-03",
+          "team-04",
+          "team-05",
+          "team-06",
+          "team-07",
+          "team-08"
+        ],
+        "decided_order": [
+          "team-04",
+          "team-07",
+          "team-01",
+          "team-08",
+          "team-03",
+          "team-06",
+          "team-02",
+          "team-05"
+        ],
+        "candidate_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          }
+        ],
+        "decided_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          }
+        ],
+        "random_seed": 20260803
+      }
+    ],
+    "warnings": []
+  },
+  "expected": {
+    "upper_participant_count": 8,
+    "upper_match_count": 12,
+    "upper_bye_count": 0,
+    "lower_participant_count": 0,
+    "opening_preliminary_match_ids": [],
+    "opening_byes": []
+  }
+}

@@ -9,6 +9,7 @@
     "dev": "vite",
     "lint": "tsc -b --pretty false",
     "preview": "vite preview",
+    "preview:brackets": "node scripts/render-tournament-bracket-previews.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },

@@ -95,6 +95,45 @@ Turnstileのactionは各`request_kind`と一致する場合だけ受理する。
 `league_plan`へ分けて保存するため、再読込みとJSON入出力でも両者を区別できる。
 チーム追加やブロック数変更では、有効な指定を残して影響分だけ未割当てへ戻す。
 
+## トーナメント表レイアウトのローカル比較
+
+本番画面、API、Turnstileを使わず、上位トーナメント表だけを固定fixtureから画像化できる。
+Web依存関係を準備した後、`web`ディレクトリで次を実行する。
+
+```console
+cd web
+npm run preview:brackets
+```
+
+8チームの完全順位決定表と、上位シードの予備戦免除を含む7チーム表を生成する。
+出力先は実行ごとに作られる`/tmp/football-scheduler-bracket-previews-*`で、生成したPNGの
+絶対パスを標準出力へ表示する。生成物はリポジトリへ保存しない。対象を限定する場合や
+出力先を明示する場合は次のように指定する。
+
+```console
+npm run preview:brackets -- --fixture upper-7-seeded --layout standard
+npm run preview:brackets -- --output-dir /tmp/football-scheduler-bracket-review
+```
+
+ブラウザで比較する場合は`npm run dev`を起動し、表示されたoriginの
+`/bracket-preview.html`を開く。画面の選択欄または`fixture`と`layout`のquery parameterで
+切り替えられる。このページはViteの本番build entryではなく、本番アプリは従来どおり
+引数なしの既定レイアウトを使う。
+
+レイアウト候補は`TournamentBracketLayoutStrategy`を実装し、
+`web/src/tournament-bracket-preview-layouts.ts`へ登録する。比較ページと画像生成コマンドだけが
+この登録を参照するため、候補の追加時に本番画面の呼出し箇所を変更する必要はない。
+
+固定データは`web/src/fixtures/tournament-bracket-preview/`に置く。8チームfixtureは日本語6文字と
+アルファベット9文字の境界名を含み、7チームfixtureは第1シード、3予備戦、予備戦免除の
+進行先を監査値として保持する。両fixtureとも下位トーナメント参加数は0である。本番の
+トーナメント生成器から再生成または差分確認するコマンドは次のとおり。
+
+```console
+uv run python scripts/write_tournament_bracket_preview_fixtures.py
+uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
+```
+
 ## 固定fixtureの実行
 
 小さい疎通確認用fixtureは、次のように実行します。
@@ -120,6 +159,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run pytest
+uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
 uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
 cd web
 npm run lint

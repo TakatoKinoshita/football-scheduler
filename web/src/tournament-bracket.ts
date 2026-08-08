@@ -185,6 +185,11 @@ export interface TournamentBracketModel {
   emptyMessage?: string;
 }
 
+export interface TournamentBracketLayoutStrategy {
+  readonly id: string;
+  build(input: TournamentBracketInput): TournamentBracketModel;
+}
+
 export class TournamentBracketError extends Error {
   constructor(message: string) {
     super(message);
@@ -1058,7 +1063,7 @@ function layoutSheet(
   return sheet;
 }
 
-export function buildTournamentBracketModel(
+function buildStandardTournamentBracketModel(
   input: TournamentBracketInput,
 ): TournamentBracketModel {
   const pool = poolValue(input.plan, input.pool);
@@ -1582,6 +1587,18 @@ export function buildTournamentBracketModel(
     references,
     directPlacements: sheets.flatMap((sheet) => sheet.directPlacements),
   };
+}
+
+export const standardTournamentBracketLayout: TournamentBracketLayoutStrategy = {
+  id: "standard",
+  build: buildStandardTournamentBracketModel,
+};
+
+export function buildTournamentBracketModel(
+  input: TournamentBracketInput,
+  layout: TournamentBracketLayoutStrategy = standardTournamentBracketLayout,
+): TournamentBracketModel {
+  return layout.build(input);
 }
 
 function svgElement<K extends keyof SVGElementTagNameMap>(
