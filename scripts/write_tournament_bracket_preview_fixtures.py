@@ -34,9 +34,22 @@ TEAM_NAMES = (
 )
 
 FIXTURE_METADATA = {
-    7: ("upper-7-seeded", "7チーム上位トーナメント・上位シードの予備戦免除あり"),
-    8: ("upper-8", "8チーム上位トーナメント・完全順位決定"),
-    16: ("upper-16", "16チーム上位トーナメント・完全順位決定"),
+    7: (
+        "upper-7-seeded",
+        "7チーム上位トーナメント・上位シードの予備戦免除あり",
+    ),
+    8: (
+        "upper-8",
+        "8チーム上位トーナメント・完全順位決定",
+    ),
+    9: (
+        "upper-9-seeded",
+        "9チーム上位トーナメント・8チームの負け下がりあり",
+    ),
+    16: (
+        "upper-16",
+        "16チーム上位トーナメント・完全順位決定",
+    ),
 }
 
 
@@ -137,7 +150,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     stale: list[Path] = []
-    for participant_count in (16, 8, 7):
+    for participant_count in (16, 9, 8, 7):
         fixture_id, _ = FIXTURE_METADATA[participant_count]
         path = OUTPUT_DIRECTORY / f"{fixture_id}.json"
         content = _serialized_fixture(participant_count)

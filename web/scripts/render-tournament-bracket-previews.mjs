@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const WEB_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FIXTURE_IDS = ["upper-8", "upper-7-seeded"];
+const FIXTURE_IDS = ["upper-8", "upper-7-seeded", "upper-9-seeded", "upper-16"];
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -98,7 +98,7 @@ async function main() {
       const error = page.locator(".preview-error");
       if (await error.count() > 0) throw new Error(await error.first().innerText());
       const path = join(outputDirectory, `${fixture}-${layout}.png`);
-      await page.locator("#preview-capture").screenshot({ path, animations: "disabled" });
+      await page.locator("#preview-output svg").screenshot({ path, animations: "disabled" });
       console.log(path);
     }
   } finally {

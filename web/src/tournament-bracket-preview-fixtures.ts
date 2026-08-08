@@ -1,5 +1,7 @@
 import upperSevenSeededJson from "./fixtures/tournament-bracket-preview/upper-7-seeded.json";
 import upperEightJson from "./fixtures/tournament-bracket-preview/upper-8.json";
+import upperNineSeededJson from "./fixtures/tournament-bracket-preview/upper-9-seeded.json";
+import upperSixteenJson from "./fixtures/tournament-bracket-preview/upper-16.json";
 import type { JsonObject } from "./types";
 
 export interface TournamentBracketPreviewTeam {
@@ -244,7 +246,7 @@ export function validateTournamentBracketPreviewFixture(
   return { id, description, teams, tournamentPlan, expected };
 }
 
-const fixtures = [upperEightJson, upperSevenSeededJson].map(
+const fixtures = [upperEightJson, upperSevenSeededJson, upperNineSeededJson, upperSixteenJson].map(
   validateTournamentBracketPreviewFixture,
 );
 if (new Set(fixtures.map((fixture) => fixture.id)).size !== fixtures.length) {

@@ -14,7 +14,9 @@ import {
 import {
   tournamentBracketPreviewLayout,
   tournamentBracketPreviewLayouts,
+  tournamentBracketPreviewRenderer,
 } from "./tournament-bracket-preview-layouts";
+import { isTournamentBracketExplorationModel } from "./tournament-bracket-exploration-layouts";
 import type { JsonObject } from "./types";
 
 function rawFixture(id: string): JsonObject {
@@ -53,6 +55,22 @@ function modelFor(id: string) {
       teamNames: new Map(fixture.teams.map((team) => [team.id, team.name])),
     },
     standardTournamentBracketLayout,
+  );
+}
+
+function explorationModelFor(id: string, layoutName: "vertical" | "horizontal") {
+  const fixture = tournamentBracketPreviewFixture(id);
+  const layout = tournamentBracketPreviewLayout(layoutName);
+  if (fixture === undefined || layout === undefined) {
+    throw new Error(`fixtureまたはレイアウトがありません: ${id}/${layoutName}`);
+  }
+  return buildTournamentBracketModel(
+    {
+      plan: fixture.tournamentPlan,
+      pool: "upper",
+      teamNames: new Map(fixture.teams.map((team) => [team.id, team.name])),
+    },
+    layout,
   );
 }
 
@@ -97,6 +115,18 @@ describe("トーナメント表ローカルプレビュー", () => {
     expect(modelFor(fixture!.id).nodes).toHaveLength(9);
   });
 
+  it("9・16チームの比較fixtureを登録する", () => {
+    expect(tournamentBracketPreviewFixture("upper-9-seeded")?.expected).toMatchObject({
+      upperParticipantCount: 9,
+      upperMatchCount: 13,
+    });
+    expect(tournamentBracketPreviewFixture("upper-16")?.expected).toMatchObject({
+      upperParticipantCount: 16,
+      upperMatchCount: 32,
+      upperByeCount: 0,
+    });
+  });
+
   it("同じfixtureとレイアウトから同じモデルを再現する", () => {
     for (const fixture of tournamentBracketPreviewFixtures) {
       expect(modelFor(fixture.id)).toEqual(modelFor(fixture.id));
@@ -127,7 +157,37 @@ describe("トーナメント表ローカルプレビュー", () => {
   it("プレビュー用レイアウト名を本番表示とは独立して解決する", () => {
     expect(tournamentBracketPreviewLayout("standard")).toBe(standardTournamentBracketLayout);
     expect(tournamentBracketPreviewLayout("unknown")).toBeUndefined();
-    expect(Object.keys(tournamentBracketPreviewLayouts)).toEqual(["standard"]);
+    expect(Object.keys(tournamentBracketPreviewLayouts)).toEqual([
+      "standard",
+      "vertical",
+      "horizontal",
+    ]);
+    expect(tournamentBracketPreviewRenderer("vertical")).toBeDefined();
+    expect(tournamentBracketPreviewRenderer("horizontal")).toBeDefined();
+    expect(tournamentBracketPreviewRenderer("unknown")).toBeUndefined();
+  });
+
+  it("8・16チームの垂直版と水平版を範囲内へ決定的に配置する", () => {
+    for (const [fixtureId, participantCount] of [["upper-8", 8], ["upper-16", 16]] as const) {
+      for (const layoutName of ["vertical", "horizontal"] as const) {
+        const model = explorationModelFor(fixtureId, layoutName);
+        expect(model).toEqual(explorationModelFor(fixtureId, layoutName));
+        expect(isTournamentBracketExplorationModel(model)).toBe(true);
+        if (!isTournamentBracketExplorationModel(model)) continue;
+
+        const geometry = model.explorationGeometry;
+        expect(geometry.orientation).toBe(layoutName);
+        expect(geometry.slots).toHaveLength(participantCount);
+        expect(geometry.segments.length).toBeGreaterThan(0);
+        for (const point of geometry.segments.flatMap((segment) => [segment.start, segment.end])) {
+          expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true);
+          expect(point.x).toBeGreaterThanOrEqual(0);
+          expect(point.x).toBeLessThanOrEqual(geometry.width);
+          expect(point.y).toBeGreaterThanOrEqual(0);
+          expect(point.y).toBeLessThanOrEqual(geometry.height);
+        }
+      }
+    }
   });
 
   it("注入したレイアウト戦略だけを呼び出す", () => {
