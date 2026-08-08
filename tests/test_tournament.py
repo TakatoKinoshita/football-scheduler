@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -84,7 +87,7 @@ def _request(
 
 @pytest.mark.parametrize(
     ("participant_count", "expected_matches"),
-    [(2, 1), (4, 4), (8, 12)],
+    [(2, 1), (4, 4), (8, 12), (16, 32)],
 )
 def test_power_of_two_complete_placement_tables(
     participant_count: int, expected_matches: int
@@ -97,6 +100,75 @@ def test_power_of_two_complete_placement_tables(
         range(1, participant_count + 1)
     )
     assert result.upper.byes == ()
+
+
+@pytest.mark.parametrize("participant_count", [2, 4, 8, 16])
+def test_power_of_two_tables_include_complete_logical_layout(
+    participant_count: int,
+) -> None:
+    pool = generate_tournament_plan(_request((participant_count * 2,), with_standings=False)).upper
+
+    layout = pool.logical_layout
+    assert layout is not None
+    assert layout.layout_version == "1"
+    assert {position.match_id for position in layout.match_positions} == {
+        match.id for match in pool.matches
+    }
+    assert len(layout.opening_entry_order) == participant_count
+    assert set(layout.opening_entry_order) == {seed.entry for seed in pool.seeds}
+    assert len(layout.branch_alignments) == participant_count // 2 - 1
+    for rank_range in {position.rank_range for position in layout.match_positions}:
+        orders = sorted(
+            position.order
+            for position in layout.match_positions
+            if position.rank_range == rank_range
+        )
+        assert orders == list(range(1, len(orders) + 1))
+
+
+@pytest.mark.parametrize("participant_count", [3, 5, 6, 7, 9, 10])
+def test_non_power_of_two_tables_do_not_publish_logical_layout(
+    participant_count: int,
+) -> None:
+    pool = generate_tournament_plan(_request((participant_count * 2,), with_standings=False)).upper
+
+    assert pool.logical_layout is None
+
+
+def test_sixteen_team_layout_reports_known_outcome_branch_permutation() -> None:
+    pool = generate_tournament_plan(_request((2,) * 16, seed=20260803, with_standings=False)).upper
+    layout = pool.logical_layout
+    assert layout is not None
+    opening_matches = [match for match in pool.matches if match.rank_range == (1, 16)]
+    opening_labels = {match.id: f"O{index}" for index, match in enumerate(opening_matches, 1)}
+    root = next(
+        alignment for alignment in layout.branch_alignments if alignment.rank_range == (1, 16)
+    )
+
+    assert [opening_labels[match_id] for match_id in root.winner_source_order] == [
+        "O1",
+        "O5",
+        "O2",
+        "O6",
+        "O3",
+        "O4",
+        "O7",
+        "O8",
+    ]
+    assert [opening_labels[match_id] for match_id in root.loser_source_order] == [
+        "O1",
+        "O6",
+        "O2",
+        "O8",
+        "O3",
+        "O5",
+        "O7",
+        "O4",
+    ]
+    assert root.loser_to_winner_permutation == (1, 4, 3, 8, 5, 2, 7, 6)
+    assert root.status == "permuted"
+    assert root.diagnostic_code == "OUTCOME_BRANCH_ORDER_DIFFERS"
+    assert layout.symmetry == "permuted"
 
 
 @pytest.mark.parametrize(
@@ -235,6 +307,7 @@ def test_resolving_rank_slots_does_not_change_bracket_structure() -> None:
         assert provisional_pool.byes == resolved_pool.byes
         assert provisional_pool.placements == resolved_pool.placements
         assert provisional_pool.evaluation == resolved_pool.evaluation
+        assert provisional_pool.logical_layout == resolved_pool.logical_layout
     assert [draw.decided_rank_refs for draw in provisional.seed_draws] == [
         draw.decided_rank_refs for draw in resolved.seed_draws
     ]
@@ -295,6 +368,49 @@ def test_generated_json_round_trip_is_stable() -> None:
     restored = TournamentPlan.model_validate_json(result.model_dump_json())
 
     assert restored == result
+
+
+def test_legacy_and_null_logical_layouts_are_accepted() -> None:
+    result = generate_tournament_plan(_request((4, 4, 4, 4), with_standings=False))
+    legacy = result.model_dump(mode="json")
+    for pool_name in ("upper", "lower"):
+        legacy[pool_name].pop("logical_layout")
+
+    restored_legacy = TournamentPlan.model_validate(legacy)
+    null_layout = result.model_dump(mode="json")
+    null_layout["upper"]["logical_layout"] = None
+
+    assert restored_legacy.upper.logical_layout is None
+    assert restored_legacy.lower.logical_layout is None
+    assert TournamentPlan.model_validate(null_layout).upper.logical_layout is None
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda layout: layout["match_positions"].pop(),
+        lambda layout: layout["match_positions"].append(layout["match_positions"][0]),
+        lambda layout: layout["branch_alignments"][0]["winner_source_order"].__setitem__(
+            0, "UNKNOWN"
+        ),
+        lambda layout: layout["branch_alignments"][0].update(
+            {"loser_to_winner_permutation": [1, 2, 3, 4]}
+        ),
+        lambda layout: layout.update({"symmetry": "mirrored"}),
+    ],
+)
+def test_invalid_logical_layout_contract_is_rejected(
+    mutate: Callable[[dict[str, Any]], object],
+) -> None:
+    document = generate_tournament_plan(
+        _request((2,) * 16, seed=20260803, with_standings=False)
+    ).model_dump(mode="json")
+    layout = document["upper"]["logical_layout"]
+    assert isinstance(layout, dict)
+    mutate(layout)
+
+    with pytest.raises(ValidationError):
+        TournamentPlan.model_validate(document)
 
 
 @pytest.mark.parametrize("participant_count", range(2, 8))

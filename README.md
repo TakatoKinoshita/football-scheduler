@@ -105,7 +105,7 @@ cd web
 npm run preview:brackets
 ```
 
-8チームの完全順位決定表と、上位シードの予備戦免除を含む7チーム表を生成する。
+画像化の対象は8チームの完全順位決定表と、上位シードの予備戦免除を含む7チーム表である。表示処理が利用する順序情報は[トーナメント論理配置契約](docs/tournament-logical-layout.md)を参照する。
 出力先は実行ごとに作られる`/tmp/football-scheduler-bracket-previews-*`で、生成したPNGの
 絶対パスを標準出力へ表示する。生成物はリポジトリへ保存しない。対象を限定する場合や
 出力先を明示する場合は次のように指定する。
@@ -126,7 +126,8 @@ npm run preview:brackets -- --output-dir /tmp/football-scheduler-bracket-review
 
 固定データは`web/src/fixtures/tournament-bracket-preview/`に置く。8チームfixtureは日本語6文字と
 アルファベット9文字の境界名を含み、7チームfixtureは第1シード、3予備戦、予備戦免除の
-進行先を監査値として保持する。両fixtureとも下位トーナメント参加数は0である。本番の
+進行先を監査値として保持する。16チームfixtureは論理配置の順序差を確認する診断用で、#52で
+描画対応するまで比較ページには登録しない。各fixtureの下位トーナメント参加数は0である。本番の
 トーナメント生成器から再生成または差分確認するコマンドは次のとおり。
 
 ```console

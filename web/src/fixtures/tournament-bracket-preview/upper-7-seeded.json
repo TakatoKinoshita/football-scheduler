@@ -392,7 +392,8 @@
         "first_match_same_block_count": 0,
         "possible_same_block_match_count": 0,
         "earliest_possible_same_block_round": null
-      }
+      },
+      "logical_layout": null
     },
     "lower": {
       "pool": "lower",
@@ -405,7 +406,8 @@
         "first_match_same_block_count": 0,
         "possible_same_block_match_count": 0,
         "earliest_possible_same_block_round": null
-      }
+      },
+      "logical_layout": null
     },
     "seed_draws": [
       {

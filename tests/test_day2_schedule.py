@@ -275,6 +275,7 @@ def test_only_existing_tournament_final_is_last(odd_split_policy: str, expected_
 def test_invalid_tournament_final_definition_is_rejected() -> None:
     request, _tournament = _request((4, 4))
     payload = request.model_dump(mode="json")
+    payload["tournament_plan"]["upper"]["logical_layout"] = None
     upper_matches = payload["tournament_plan"]["upper"]["matches"]
     final = next(match for match in upper_matches if match["rank_range"] == [1, 2])
     final["rank_range"] = [1, 3]

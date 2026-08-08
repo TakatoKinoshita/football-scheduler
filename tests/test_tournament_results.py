@@ -254,6 +254,7 @@ def test_provisional_plan_is_rejected() -> None:
 def test_cycle_in_match_references_is_rejected() -> None:
     plan = _plan((1, 1))
     plan_data = plan.model_dump(mode="json")
+    plan_data["upper"]["logical_layout"] = None
     first_match = plan_data["upper"]["matches"][0]
     first_match["home"] = {"type": "winner_of", "match_id": first_match["id"]}
     cyclic_plan = TournamentPlan.model_validate(plan_data)

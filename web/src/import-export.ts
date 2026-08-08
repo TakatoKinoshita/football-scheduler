@@ -19,6 +19,10 @@ import {
   analyzeDay2FinalPlacement,
   Day2FinalPlacementError,
 } from "./day2-finals";
+import {
+  readTournamentLogicalLayout,
+  TournamentLogicalLayoutError,
+} from "./tournament-logical-layout";
 
 export const MAX_JSON_BYTES = 1_000_000;
 export const LIMITS = {
@@ -1554,6 +1558,15 @@ function validateTournamentPool(
     visited.add(matchId);
   };
   for (const matchId of matchIds) visit(matchId);
+
+  try {
+    readTournamentLogicalLayout(pool);
+  } catch (error) {
+    if (error instanceof TournamentLogicalLayoutError) {
+      throw new ImportValidationError("INVALID_DOCUMENT", error.message);
+    }
+    throw error;
+  }
 
   const byes = arrayValue(pool.byes, "不戦通過記録", LIMITS.teams);
   if (byes.length !== expectedTournamentByeCount(participantCount)) {

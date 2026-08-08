@@ -23,7 +23,21 @@ TEAM_NAMES = (
     "美土里",
     "HIGASHINO",
     "ミドリ",
+    "KITAURA",
+    "北浦",
+    "きたうら",
+    "キタウラ",
+    "SHIRAKAWA",
+    "白川",
+    "しらかわ",
+    "シラカワ",
 )
+
+FIXTURE_METADATA = {
+    7: ("upper-7-seeded", "7チーム上位トーナメント・上位シードの予備戦免除あり"),
+    8: ("upper-8", "8チーム上位トーナメント・完全順位決定"),
+    16: ("upper-16", "16チーム上位トーナメント・完全順位決定"),
+}
 
 
 def _fixture(participant_count: int) -> dict[str, Any]:
@@ -93,14 +107,10 @@ def _fixture(participant_count: int) -> dict[str, Any]:
         for match in upper.matches
         if match.round == "予備戦" and match.rank_range == (1, participant_count)
     ]
-    fixture_id = "upper-7-seeded" if participant_count == 7 else "upper-8"
+    fixture_id, description = FIXTURE_METADATA[participant_count]
     return {
         "fixture_id": fixture_id,
-        "description": (
-            "7チーム上位トーナメント・上位シードの予備戦免除あり"
-            if participant_count == 7
-            else "8チーム上位トーナメント・完全順位決定"
-        ),
+        "description": description,
         "teams": teams,
         "tournament_plan": plan.model_dump(mode="json"),
         "expected": {
@@ -127,8 +137,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     stale: list[Path] = []
-    for participant_count in (8, 7):
-        fixture_id = "upper-7-seeded" if participant_count == 7 else "upper-8"
+    for participant_count in (16, 8, 7):
+        fixture_id, _ = FIXTURE_METADATA[participant_count]
         path = OUTPUT_DIRECTORY / f"{fixture_id}.json"
         content = _serialized_fixture(participant_count)
         if args.check:

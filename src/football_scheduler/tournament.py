@@ -128,6 +128,73 @@ class TournamentMatch(ContractModel):
     rank_range: tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
 
 
+class TournamentLogicalMatchPosition(ContractModel):
+    """同一順位帯の中で表示に用いる安定した試合順。"""
+
+    match_id: Identifier
+    rank_range: tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
+    order: Annotated[int, Field(gt=0)]
+
+
+class TournamentBranchAlignment(ContractModel):
+    """同じ試合群から進む勝者側・敗者側の論理順の対応。"""
+
+    rank_range: tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
+    status: Literal["mirrored", "permuted"]
+    winner_source_order: tuple[Identifier, ...]
+    loser_source_order: tuple[Identifier, ...]
+    loser_to_winner_permutation: tuple[Annotated[int, Field(gt=0)], ...]
+    diagnostic_code: Literal["OUTCOME_BRANCH_ORDER_DIFFERS"] | None = None
+
+    @model_validator(mode="after")
+    def validate_permutation(self) -> Self:
+        winner_count = len(self.winner_source_order)
+        if winner_count < 2 or len(set(self.winner_source_order)) != winner_count:
+            raise ValueError("勝者側の論理順に不足または重複があります")
+        if (
+            len(self.loser_source_order) != winner_count
+            or len(set(self.loser_source_order)) != winner_count
+            or set(self.loser_source_order) != set(self.winner_source_order)
+        ):
+            raise ValueError("敗者側の論理順が勝者側の試合集合と一致しません")
+        winner_positions = {
+            match_id: index for index, match_id in enumerate(self.winner_source_order, 1)
+        }
+        expected_permutation = tuple(
+            winner_positions[match_id] for match_id in self.loser_source_order
+        )
+        if self.loser_to_winner_permutation != expected_permutation:
+            raise ValueError("勝敗側の論理順と置換情報が一致しません")
+        mirrored = expected_permutation == tuple(range(1, winner_count + 1))
+        if mirrored != (self.status == "mirrored"):
+            raise ValueError("勝敗側の論理順と対称性の状態が一致しません")
+        expected_diagnostic = None if mirrored else "OUTCOME_BRANCH_ORDER_DIFFERS"
+        if self.diagnostic_code != expected_diagnostic:
+            raise ValueError("勝敗側の対称性と診断コードが一致しません")
+        return self
+
+
+class TournamentLogicalLayout(ContractModel):
+    """座標へ依存しないトーナメント表の表示順契約。"""
+
+    layout_version: Literal["1"] = "1"
+    symmetry: Literal["mirrored", "permuted"]
+    opening_entry_order: tuple[TournamentEntry, ...]
+    match_positions: tuple[TournamentLogicalMatchPosition, ...]
+    branch_alignments: tuple[TournamentBranchAlignment, ...]
+
+    @model_validator(mode="after")
+    def validate_symmetry(self) -> Self:
+        expected = (
+            "permuted"
+            if any(alignment.status == "permuted" for alignment in self.branch_alignments)
+            else "mirrored"
+        )
+        if self.symmetry != expected:
+            raise ValueError("分岐ごとの状態とトーナメント全体の対称性が一致しません")
+        return self
+
+
 class ByeAdvance(ContractModel):
     entry: TournamentEntry
     result: Literal["advance_by_bye"] = "advance_by_bye"
@@ -153,6 +220,99 @@ class TournamentPoolPlan(ContractModel):
     byes: tuple[ByeAdvance, ...]
     placements: tuple[TournamentPlacement, ...]
     evaluation: TournamentEvaluation
+    logical_layout: TournamentLogicalLayout | None = None
+
+    @model_validator(mode="after")
+    def validate_logical_layout(self) -> Self:
+        layout = self.logical_layout
+        if layout is None:
+            return self
+        if self.participant_count < 2 or self.participant_count & (self.participant_count - 1):
+            raise ValueError("論理配置は2のべき乗の参加数にだけ指定できます")
+
+        match_by_id = {match.id: match for match in self.matches}
+        if len(match_by_id) != len(self.matches):
+            raise ValueError("論理配置の検証対象となる試合IDが重複しています")
+        position_by_id = {position.match_id: position for position in layout.match_positions}
+        if len(position_by_id) != len(layout.match_positions) or set(position_by_id) != set(
+            match_by_id
+        ):
+            raise ValueError("論理配置の試合位置に不足、重複または未知の参照があります")
+
+        positions_by_range: dict[tuple[int, int], list[TournamentLogicalMatchPosition]] = {}
+        for position in layout.match_positions:
+            match = match_by_id[position.match_id]
+            if position.rank_range != match.rank_range:
+                raise ValueError("論理配置の順位帯が試合と一致しません")
+            positions_by_range.setdefault(position.rank_range, []).append(position)
+        for positions in positions_by_range.values():
+            orders = sorted(position.order for position in positions)
+            if orders != list(range(1, len(positions) + 1)):
+                raise ValueError("同一順位帯の論理順に不足または重複があります")
+
+        def ordered_matches(rank_range: tuple[int, int]) -> list[TournamentMatch]:
+            return [
+                match_by_id[position.match_id]
+                for position in sorted(
+                    positions_by_range.get(rank_range, []), key=lambda item: item.order
+                )
+            ]
+
+        root_range = (1, self.participant_count)
+        expected_opening_entries = tuple(
+            entry for match in ordered_matches(root_range) for entry in (match.home, match.away)
+        )
+        if layout.opening_entry_order != expected_opening_entries:
+            raise ValueError("初戦参加枠の論理順が試合位置と一致しません")
+        if len(set(layout.opening_entry_order)) != self.participant_count:
+            raise ValueError("初戦参加枠の論理順に不足または重複があります")
+
+        alignment_by_range = {
+            alignment.rank_range: alignment for alignment in layout.branch_alignments
+        }
+        if len(alignment_by_range) != len(layout.branch_alignments):
+            raise ValueError("勝敗分岐の論理対応に順位帯の重複があります")
+        expected_ranges = {
+            rank_range
+            for rank_range in positions_by_range
+            if rank_range[1] - rank_range[0] + 1 >= 4
+        }
+        if set(alignment_by_range) != expected_ranges:
+            raise ValueError("勝敗分岐の論理対応に不足または未知の順位帯があります")
+
+        for rank_range, alignment in alignment_by_range.items():
+            rank_start, rank_end = rank_range
+            half = (rank_end - rank_start + 1) // 2
+            source_ids = frozenset(match.id for match in ordered_matches(rank_range))
+
+            def source_order(
+                child_range: tuple[int, int],
+                reference_type: type[WinnerOfRef] | type[LoserOfRef],
+                allowed_source_ids: frozenset[str],
+            ) -> tuple[str, ...]:
+                result: list[str] = []
+                for match in ordered_matches(child_range):
+                    for entry in (match.home, match.away):
+                        if (
+                            not isinstance(entry, reference_type)
+                            or entry.match_id not in allowed_source_ids
+                        ):
+                            raise ValueError("勝敗分岐が親順位帯の試合を正しく参照していません")
+                        result.append(entry.match_id)
+                return tuple(result)
+
+            expected_winner_order = source_order(
+                (rank_start, rank_start + half - 1), WinnerOfRef, source_ids
+            )
+            expected_loser_order = source_order(
+                (rank_start + half, rank_end), LoserOfRef, source_ids
+            )
+            if (
+                alignment.winner_source_order != expected_winner_order
+                or alignment.loser_source_order != expected_loser_order
+            ):
+                raise ValueError("勝敗分岐の論理順が実際の試合参照と一致しません")
+        return self
 
 
 class TournamentWarning(ContractModel):
@@ -605,6 +765,7 @@ def _generate_pool(
         for seed in seeds
     ]
     builder.build(entries)
+    matches = tuple(builder.matches)
     first_conflicts = tuple(audit.match_id for audit in builder.audits if audit.first_same_block)
     possible_conflicts = [audit for audit in builder.audits if audit.possible_same_block]
     evaluation = TournamentEvaluation(
@@ -628,12 +789,105 @@ def _generate_pool(
         pool=pool,
         participant_count=len(seeds),
         seeds=seeds,
-        matches=tuple(builder.matches),
+        matches=matches,
         byes=builder.finalized_byes(),
         placements=tuple(sorted(builder.placements, key=lambda placement: placement.rank)),
         evaluation=evaluation,
+        logical_layout=_build_logical_layout(matches, len(seeds)),
     )
     return plan, warnings
+
+
+def _build_logical_layout(
+    matches: tuple[TournamentMatch, ...], participant_count: int
+) -> TournamentLogicalLayout | None:
+    """既存の組合せを変えず、2のべき乗の表から表示順だけを導出する。"""
+
+    if participant_count < 2 or participant_count & (participant_count - 1):
+        return None
+
+    range_counts: dict[tuple[int, int], int] = {}
+    match_positions: list[TournamentLogicalMatchPosition] = []
+    for match in matches:
+        order = range_counts.get(match.rank_range, 0) + 1
+        range_counts[match.rank_range] = order
+        match_positions.append(
+            TournamentLogicalMatchPosition(
+                match_id=match.id,
+                rank_range=match.rank_range,
+                order=order,
+            )
+        )
+    position_by_id = {position.match_id: position for position in match_positions}
+
+    def ordered_matches(rank_range: tuple[int, int]) -> list[TournamentMatch]:
+        return sorted(
+            (match for match in matches if match.rank_range == rank_range),
+            key=lambda match: position_by_id[match.id].order,
+        )
+
+    root_range = (1, participant_count)
+    opening_entry_order = tuple(
+        entry for match in ordered_matches(root_range) for entry in (match.home, match.away)
+    )
+
+    branch_alignments: list[TournamentBranchAlignment] = []
+    seen_ranges: set[tuple[int, int]] = set()
+    for match in matches:
+        rank_range = match.rank_range
+        if rank_range in seen_ranges or rank_range[1] - rank_range[0] + 1 < 4:
+            continue
+        seen_ranges.add(rank_range)
+        rank_start, rank_end = rank_range
+        half = (rank_end - rank_start + 1) // 2
+        source_ids = frozenset(source.id for source in ordered_matches(rank_range))
+
+        def source_order(
+            child_range: tuple[int, int],
+            reference_type: type[WinnerOfRef] | type[LoserOfRef],
+            allowed_source_ids: frozenset[str],
+        ) -> tuple[str, ...]:
+            result: list[str] = []
+            for child in ordered_matches(child_range):
+                for entry in (child.home, child.away):
+                    if (
+                        not isinstance(entry, reference_type)
+                        or entry.match_id not in allowed_source_ids
+                    ):
+                        raise RuntimeError("完全順位決定表の勝敗参照から論理順を導出できません")
+                    result.append(entry.match_id)
+            return tuple(result)
+
+        winner_source_order = source_order(
+            (rank_start, rank_start + half - 1), WinnerOfRef, source_ids
+        )
+        loser_source_order = source_order((rank_start + half, rank_end), LoserOfRef, source_ids)
+        winner_positions = {
+            match_id: index for index, match_id in enumerate(winner_source_order, 1)
+        }
+        permutation = tuple(winner_positions[match_id] for match_id in loser_source_order)
+        mirrored = permutation == tuple(range(1, len(permutation) + 1))
+        branch_alignments.append(
+            TournamentBranchAlignment(
+                rank_range=rank_range,
+                status="mirrored" if mirrored else "permuted",
+                winner_source_order=winner_source_order,
+                loser_source_order=loser_source_order,
+                loser_to_winner_permutation=permutation,
+                diagnostic_code=None if mirrored else "OUTCOME_BRANCH_ORDER_DIFFERS",
+            )
+        )
+
+    return TournamentLogicalLayout(
+        symmetry=(
+            "permuted"
+            if any(alignment.status == "permuted" for alignment in branch_alignments)
+            else "mirrored"
+        ),
+        opening_entry_order=opening_entry_order,
+        match_positions=tuple(match_positions),
+        branch_alignments=tuple(branch_alignments),
+    )
 
 
 def _best_pair_assignment(

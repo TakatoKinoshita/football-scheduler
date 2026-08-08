@@ -1,0 +1,1783 @@
+{
+  "fixture_id": "upper-16",
+  "description": "16チーム上位トーナメント・完全順位決定",
+  "teams": [
+    {
+      "id": "team-01",
+      "name": "青空"
+    },
+    {
+      "id": "team-02",
+      "name": "あおぞら中央"
+    },
+    {
+      "id": "team-03",
+      "name": "アオゾラ中央"
+    },
+    {
+      "id": "team-04",
+      "name": "AOZORA"
+    },
+    {
+      "id": "team-05",
+      "name": "みどり"
+    },
+    {
+      "id": "team-06",
+      "name": "美土里"
+    },
+    {
+      "id": "team-07",
+      "name": "HIGASHINO"
+    },
+    {
+      "id": "team-08",
+      "name": "ミドリ"
+    },
+    {
+      "id": "team-09",
+      "name": "KITAURA"
+    },
+    {
+      "id": "team-10",
+      "name": "北浦"
+    },
+    {
+      "id": "team-11",
+      "name": "きたうら"
+    },
+    {
+      "id": "team-12",
+      "name": "キタウラ"
+    },
+    {
+      "id": "team-13",
+      "name": "SHIRAKAWA"
+    },
+    {
+      "id": "team-14",
+      "name": "白川"
+    },
+    {
+      "id": "team-15",
+      "name": "しらかわ"
+    },
+    {
+      "id": "team-16",
+      "name": "シラカワ"
+    }
+  ],
+  "tournament_plan": {
+    "schema_version": "0.1.0",
+    "status": "COMPLETE",
+    "participant_resolution": "resolved",
+    "odd_split_policy": "upper",
+    "random_seed": 20260803,
+    "upper": {
+      "pool": "upper",
+      "participant_count": 16,
+      "seeds": [
+        {
+          "seed_no": 1,
+          "team_id": "team-04",
+          "block_id": "D",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-04"
+          }
+        },
+        {
+          "seed_no": 2,
+          "team_id": "team-15",
+          "block_id": "O",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "O",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-15"
+          }
+        },
+        {
+          "seed_no": 3,
+          "team_id": "team-16",
+          "block_id": "P",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "P",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-16"
+          }
+        },
+        {
+          "seed_no": 4,
+          "team_id": "team-11",
+          "block_id": "K",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "K",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-11"
+          }
+        },
+        {
+          "seed_no": 5,
+          "team_id": "team-07",
+          "block_id": "G",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-07"
+          }
+        },
+        {
+          "seed_no": 6,
+          "team_id": "team-13",
+          "block_id": "M",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "M",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-13"
+          }
+        },
+        {
+          "seed_no": 7,
+          "team_id": "team-01",
+          "block_id": "A",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-01"
+          }
+        },
+        {
+          "seed_no": 8,
+          "team_id": "team-08",
+          "block_id": "H",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-08"
+          }
+        },
+        {
+          "seed_no": 9,
+          "team_id": "team-03",
+          "block_id": "C",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-03"
+          }
+        },
+        {
+          "seed_no": 10,
+          "team_id": "team-12",
+          "block_id": "L",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "L",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-12"
+          }
+        },
+        {
+          "seed_no": 11,
+          "team_id": "team-09",
+          "block_id": "I",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "I",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-09"
+          }
+        },
+        {
+          "seed_no": 12,
+          "team_id": "team-14",
+          "block_id": "N",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "N",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-14"
+          }
+        },
+        {
+          "seed_no": 13,
+          "team_id": "team-06",
+          "block_id": "F",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-06"
+          }
+        },
+        {
+          "seed_no": 14,
+          "team_id": "team-10",
+          "block_id": "J",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "J",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-10"
+          }
+        },
+        {
+          "seed_no": 15,
+          "team_id": "team-02",
+          "block_id": "B",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-02"
+          }
+        },
+        {
+          "seed_no": 16,
+          "team_id": "team-05",
+          "block_id": "E",
+          "block_rank": 1,
+          "entry": {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          "team": {
+            "type": "concrete_team",
+            "team_id": "team-05"
+          }
+        }
+      ],
+      "matches": [
+        {
+          "id": "UT-RANK-1-16-M1",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "J",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M2",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "O",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "L",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M3",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "P",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "N",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M4",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "K",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M5",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M6",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "M",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M7",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "I",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-16-M8",
+          "phase": "upper_tournament",
+          "round": "1〜16位 順位決定",
+          "round_no": 1,
+          "home": {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          "away": {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          "rank_range": [
+            1,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M1",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M5"
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M2",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M2"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M6"
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M3",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M3"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M4"
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-8-M4",
+          "phase": "upper_tournament",
+          "round": "1〜8位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M7"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-16-M8"
+          },
+          "rank_range": [
+            1,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-1-4-M1",
+          "phase": "upper_tournament",
+          "round": "1〜4位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M4"
+          },
+          "rank_range": [
+            1,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-1-4-M2",
+          "phase": "upper_tournament",
+          "round": "1〜4位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M3"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-8-M2"
+          },
+          "rank_range": [
+            1,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-1-2-M1",
+          "phase": "upper_tournament",
+          "round": "優勝決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-4-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-4-M2"
+          },
+          "rank_range": [
+            1,
+            2
+          ]
+        },
+        {
+          "id": "UT-RANK-3-4-M1",
+          "phase": "upper_tournament",
+          "round": "3位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-4-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-4-M2"
+          },
+          "rank_range": [
+            3,
+            4
+          ]
+        },
+        {
+          "id": "UT-RANK-5-8-M1",
+          "phase": "upper_tournament",
+          "round": "5〜8位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M4"
+          },
+          "rank_range": [
+            5,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-5-8-M2",
+          "phase": "upper_tournament",
+          "round": "5〜8位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M3"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-8-M2"
+          },
+          "rank_range": [
+            5,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-5-6-M1",
+          "phase": "upper_tournament",
+          "round": "5位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-8-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-8-M2"
+          },
+          "rank_range": [
+            5,
+            6
+          ]
+        },
+        {
+          "id": "UT-RANK-7-8-M1",
+          "phase": "upper_tournament",
+          "round": "7位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-8-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-8-M2"
+          },
+          "rank_range": [
+            7,
+            8
+          ]
+        },
+        {
+          "id": "UT-RANK-9-16-M1",
+          "phase": "upper_tournament",
+          "round": "9〜16位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M6"
+          },
+          "rank_range": [
+            9,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-9-16-M2",
+          "phase": "upper_tournament",
+          "round": "9〜16位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M2"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M8"
+          },
+          "rank_range": [
+            9,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-9-16-M3",
+          "phase": "upper_tournament",
+          "round": "9〜16位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M3"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M5"
+          },
+          "rank_range": [
+            9,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-9-16-M4",
+          "phase": "upper_tournament",
+          "round": "9〜16位 順位決定",
+          "round_no": 2,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M7"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-16-M4"
+          },
+          "rank_range": [
+            9,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-9-12-M1",
+          "phase": "upper_tournament",
+          "round": "9〜12位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-16-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-16-M4"
+          },
+          "rank_range": [
+            9,
+            12
+          ]
+        },
+        {
+          "id": "UT-RANK-9-12-M2",
+          "phase": "upper_tournament",
+          "round": "9〜12位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-16-M3"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-16-M2"
+          },
+          "rank_range": [
+            9,
+            12
+          ]
+        },
+        {
+          "id": "UT-RANK-9-10-M1",
+          "phase": "upper_tournament",
+          "round": "9位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-12-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-12-M2"
+          },
+          "rank_range": [
+            9,
+            10
+          ]
+        },
+        {
+          "id": "UT-RANK-11-12-M1",
+          "phase": "upper_tournament",
+          "round": "11位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-12-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-12-M2"
+          },
+          "rank_range": [
+            11,
+            12
+          ]
+        },
+        {
+          "id": "UT-RANK-13-16-M1",
+          "phase": "upper_tournament",
+          "round": "13〜16位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-16-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-16-M2"
+          },
+          "rank_range": [
+            13,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-13-16-M2",
+          "phase": "upper_tournament",
+          "round": "13〜16位 順位決定",
+          "round_no": 3,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-16-M3"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-16-M4"
+          },
+          "rank_range": [
+            13,
+            16
+          ]
+        },
+        {
+          "id": "UT-RANK-13-14-M1",
+          "phase": "upper_tournament",
+          "round": "13位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-13-16-M1"
+          },
+          "away": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-13-16-M2"
+          },
+          "rank_range": [
+            13,
+            14
+          ]
+        },
+        {
+          "id": "UT-RANK-15-16-M1",
+          "phase": "upper_tournament",
+          "round": "15位決定戦",
+          "round_no": 4,
+          "home": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-13-16-M1"
+          },
+          "away": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-13-16-M2"
+          },
+          "rank_range": [
+            15,
+            16
+          ]
+        }
+      ],
+      "byes": [],
+      "placements": [
+        {
+          "rank": 1,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-1-2-M1"
+          }
+        },
+        {
+          "rank": 2,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-1-2-M1"
+          }
+        },
+        {
+          "rank": 3,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-3-4-M1"
+          }
+        },
+        {
+          "rank": 4,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-3-4-M1"
+          }
+        },
+        {
+          "rank": 5,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-5-6-M1"
+          }
+        },
+        {
+          "rank": 6,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-5-6-M1"
+          }
+        },
+        {
+          "rank": 7,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-7-8-M1"
+          }
+        },
+        {
+          "rank": 8,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-7-8-M1"
+          }
+        },
+        {
+          "rank": 9,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-9-10-M1"
+          }
+        },
+        {
+          "rank": 10,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-9-10-M1"
+          }
+        },
+        {
+          "rank": 11,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-11-12-M1"
+          }
+        },
+        {
+          "rank": 12,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-11-12-M1"
+          }
+        },
+        {
+          "rank": 13,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-13-14-M1"
+          }
+        },
+        {
+          "rank": 14,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-13-14-M1"
+          }
+        },
+        {
+          "rank": 15,
+          "entry": {
+            "type": "winner_of",
+            "match_id": "UT-RANK-15-16-M1"
+          }
+        },
+        {
+          "rank": 16,
+          "entry": {
+            "type": "loser_of",
+            "match_id": "UT-RANK-15-16-M1"
+          }
+        }
+      ],
+      "evaluation": {
+        "first_match_same_block_count": 0,
+        "possible_same_block_match_count": 0,
+        "earliest_possible_same_block_round": null
+      },
+      "logical_layout": {
+        "layout_version": "1",
+        "symmetry": "permuted",
+        "opening_entry_order": [
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "J",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "O",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "L",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "P",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "N",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "K",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "M",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "I",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          }
+        ],
+        "match_positions": [
+          {
+            "match_id": "UT-RANK-1-16-M1",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-1-16-M2",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-1-16-M3",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 3
+          },
+          {
+            "match_id": "UT-RANK-1-16-M4",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 4
+          },
+          {
+            "match_id": "UT-RANK-1-16-M5",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 5
+          },
+          {
+            "match_id": "UT-RANK-1-16-M6",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 6
+          },
+          {
+            "match_id": "UT-RANK-1-16-M7",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 7
+          },
+          {
+            "match_id": "UT-RANK-1-16-M8",
+            "rank_range": [
+              1,
+              16
+            ],
+            "order": 8
+          },
+          {
+            "match_id": "UT-RANK-1-8-M1",
+            "rank_range": [
+              1,
+              8
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-1-8-M2",
+            "rank_range": [
+              1,
+              8
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-1-8-M3",
+            "rank_range": [
+              1,
+              8
+            ],
+            "order": 3
+          },
+          {
+            "match_id": "UT-RANK-1-8-M4",
+            "rank_range": [
+              1,
+              8
+            ],
+            "order": 4
+          },
+          {
+            "match_id": "UT-RANK-1-4-M1",
+            "rank_range": [
+              1,
+              4
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-1-4-M2",
+            "rank_range": [
+              1,
+              4
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-1-2-M1",
+            "rank_range": [
+              1,
+              2
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-3-4-M1",
+            "rank_range": [
+              3,
+              4
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-5-8-M1",
+            "rank_range": [
+              5,
+              8
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-5-8-M2",
+            "rank_range": [
+              5,
+              8
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-5-6-M1",
+            "rank_range": [
+              5,
+              6
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-7-8-M1",
+            "rank_range": [
+              7,
+              8
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-9-16-M1",
+            "rank_range": [
+              9,
+              16
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-9-16-M2",
+            "rank_range": [
+              9,
+              16
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-9-16-M3",
+            "rank_range": [
+              9,
+              16
+            ],
+            "order": 3
+          },
+          {
+            "match_id": "UT-RANK-9-16-M4",
+            "rank_range": [
+              9,
+              16
+            ],
+            "order": 4
+          },
+          {
+            "match_id": "UT-RANK-9-12-M1",
+            "rank_range": [
+              9,
+              12
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-9-12-M2",
+            "rank_range": [
+              9,
+              12
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-9-10-M1",
+            "rank_range": [
+              9,
+              10
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-11-12-M1",
+            "rank_range": [
+              11,
+              12
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-13-16-M1",
+            "rank_range": [
+              13,
+              16
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-13-16-M2",
+            "rank_range": [
+              13,
+              16
+            ],
+            "order": 2
+          },
+          {
+            "match_id": "UT-RANK-13-14-M1",
+            "rank_range": [
+              13,
+              14
+            ],
+            "order": 1
+          },
+          {
+            "match_id": "UT-RANK-15-16-M1",
+            "rank_range": [
+              15,
+              16
+            ],
+            "order": 1
+          }
+        ],
+        "branch_alignments": [
+          {
+            "rank_range": [
+              1,
+              16
+            ],
+            "status": "permuted",
+            "winner_source_order": [
+              "UT-RANK-1-16-M1",
+              "UT-RANK-1-16-M5",
+              "UT-RANK-1-16-M2",
+              "UT-RANK-1-16-M6",
+              "UT-RANK-1-16-M3",
+              "UT-RANK-1-16-M4",
+              "UT-RANK-1-16-M7",
+              "UT-RANK-1-16-M8"
+            ],
+            "loser_source_order": [
+              "UT-RANK-1-16-M1",
+              "UT-RANK-1-16-M6",
+              "UT-RANK-1-16-M2",
+              "UT-RANK-1-16-M8",
+              "UT-RANK-1-16-M3",
+              "UT-RANK-1-16-M5",
+              "UT-RANK-1-16-M7",
+              "UT-RANK-1-16-M4"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              4,
+              3,
+              8,
+              5,
+              2,
+              7,
+              6
+            ],
+            "diagnostic_code": "OUTCOME_BRANCH_ORDER_DIFFERS"
+          },
+          {
+            "rank_range": [
+              1,
+              8
+            ],
+            "status": "mirrored",
+            "winner_source_order": [
+              "UT-RANK-1-8-M1",
+              "UT-RANK-1-8-M4",
+              "UT-RANK-1-8-M3",
+              "UT-RANK-1-8-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-1-8-M1",
+              "UT-RANK-1-8-M4",
+              "UT-RANK-1-8-M3",
+              "UT-RANK-1-8-M2"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "diagnostic_code": null
+          },
+          {
+            "rank_range": [
+              1,
+              4
+            ],
+            "status": "mirrored",
+            "winner_source_order": [
+              "UT-RANK-1-4-M1",
+              "UT-RANK-1-4-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-1-4-M1",
+              "UT-RANK-1-4-M2"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              2
+            ],
+            "diagnostic_code": null
+          },
+          {
+            "rank_range": [
+              5,
+              8
+            ],
+            "status": "mirrored",
+            "winner_source_order": [
+              "UT-RANK-5-8-M1",
+              "UT-RANK-5-8-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-5-8-M1",
+              "UT-RANK-5-8-M2"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              2
+            ],
+            "diagnostic_code": null
+          },
+          {
+            "rank_range": [
+              9,
+              16
+            ],
+            "status": "permuted",
+            "winner_source_order": [
+              "UT-RANK-9-16-M1",
+              "UT-RANK-9-16-M4",
+              "UT-RANK-9-16-M3",
+              "UT-RANK-9-16-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-9-16-M1",
+              "UT-RANK-9-16-M2",
+              "UT-RANK-9-16-M3",
+              "UT-RANK-9-16-M4"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              4,
+              3,
+              2
+            ],
+            "diagnostic_code": "OUTCOME_BRANCH_ORDER_DIFFERS"
+          },
+          {
+            "rank_range": [
+              9,
+              12
+            ],
+            "status": "mirrored",
+            "winner_source_order": [
+              "UT-RANK-9-12-M1",
+              "UT-RANK-9-12-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-9-12-M1",
+              "UT-RANK-9-12-M2"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              2
+            ],
+            "diagnostic_code": null
+          },
+          {
+            "rank_range": [
+              13,
+              16
+            ],
+            "status": "mirrored",
+            "winner_source_order": [
+              "UT-RANK-13-16-M1",
+              "UT-RANK-13-16-M2"
+            ],
+            "loser_source_order": [
+              "UT-RANK-13-16-M1",
+              "UT-RANK-13-16-M2"
+            ],
+            "loser_to_winner_permutation": [
+              1,
+              2
+            ],
+            "diagnostic_code": null
+          }
+        ]
+      }
+    },
+    "lower": {
+      "pool": "lower",
+      "participant_count": 0,
+      "seeds": [],
+      "matches": [],
+      "byes": [],
+      "placements": [],
+      "evaluation": {
+        "first_match_same_block_count": 0,
+        "possible_same_block_match_count": 0,
+        "earliest_possible_same_block_round": null
+      },
+      "logical_layout": null
+    },
+    "seed_draws": [
+      {
+        "pool": "upper",
+        "block_rank": 1,
+        "candidates": [
+          "team-01",
+          "team-02",
+          "team-03",
+          "team-04",
+          "team-05",
+          "team-06",
+          "team-07",
+          "team-08",
+          "team-09",
+          "team-10",
+          "team-11",
+          "team-12",
+          "team-13",
+          "team-14",
+          "team-15",
+          "team-16"
+        ],
+        "decided_order": [
+          "team-04",
+          "team-15",
+          "team-16",
+          "team-11",
+          "team-07",
+          "team-13",
+          "team-01",
+          "team-08",
+          "team-03",
+          "team-12",
+          "team-09",
+          "team-14",
+          "team-06",
+          "team-10",
+          "team-02",
+          "team-05"
+        ],
+        "candidate_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "I",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "J",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "K",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "L",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "M",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "N",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "O",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "P",
+            "rank": 1
+          }
+        ],
+        "decided_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "O",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "P",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "K",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "G",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "M",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "H",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "L",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "I",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "N",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "F",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "J",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "E",
+            "rank": 1
+          }
+        ],
+        "random_seed": 20260803
+      }
+    ],
+    "warnings": []
+  },
+  "expected": {
+    "upper_participant_count": 16,
+    "upper_match_count": 32,
+    "upper_bye_count": 0,
+    "lower_participant_count": 0,
+    "opening_preliminary_match_ids": [],
+    "opening_byes": []
+  }
+}

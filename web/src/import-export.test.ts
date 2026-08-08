@@ -720,6 +720,18 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("不正なトーナメント論理配置をインポート時に拒否する", () => {
+    const document = rankedDocument();
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = completedTournamentPlan();
+    (plan.upper as typeof plan.upper & { logical_layout: unknown }).logical_layout = {
+      layout_version: "1",
+    };
+    result.tournament_plan = plan;
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/2のべき乗/);
+  });
+
   it("存在しないリーグ順位を参照するトーナメントを拒否する", () => {
     const document = rankedDocument();
     const result = document.tournament.result as Record<string, unknown>;
