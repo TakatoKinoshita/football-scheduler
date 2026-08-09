@@ -5,6 +5,7 @@ import {
   API_PATH,
   calculateTournamentStandings,
   createDay2,
+  createSchedule,
   generateDay2Schedule,
   generateSchedule,
   generateTournamentPlan,
@@ -144,6 +145,26 @@ describe("日程生成API", () => {
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get("x-turnstile-token")).toBe("single-use-token");
     expect(headers.get("x-turnstile-action")).toBe("create_day2");
+  });
+
+  it("両日一括作成をcreate_schedule actionで1回送る", async () => {
+    const response = {
+      schema_version: "0.2.0",
+      status: "OPTIMAL",
+      generation_scope: "all",
+      tournament_result: { status: "OPTIMAL", slots: [] },
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(response), { status: 200 }),
+    );
+    const input = { request_kind: "schedule_creation", generation_scope: "all" };
+
+    await expect(createSchedule(input, "single-use-token", fetchMock)).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-turnstile-token")).toBe("single-use-token");
+    expect(headers.get("x-turnstile-action")).toBe("create_schedule");
   });
 
   it("最終順位確定も同じ保護されたAPIへ送る", async () => {
