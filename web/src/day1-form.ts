@@ -416,8 +416,15 @@ const API_FIELD_MAP: Array<
   ["day.game_duration_minutes", "game-duration", 2, "試合時間"],
   ["day.margin_minutes", "margin-minutes", 2, "試合間隔"],
   ["day.max_sections", "max-sections", 2, "最大セクション数"],
+  ["day2.start_time", "day2-start-time", 2, "2日目の開始時刻"],
+  ["day2.game_duration_minutes", "day2-game-duration", 2, "2日目の試合時間"],
+  ["day2.margin_minutes", "day2-margin-minutes", 2, "2日目の試合間隔"],
+  ["day2.end_time", "day2-end-time", 2, "2日目の終了時刻"],
+  ["day2.max_sections", "day2-max-sections", 2, "2日目の最大セクション数"],
+  ["day2.breaks", "day2-breaks", 2, "2日目の休憩"],
   ["referees.organizer_capacity", "organizer-capacity", 2, "主催者審判能力"],
   ["referees.team_referees_required_after_first", "team-referees", 2, "チーム審判"],
+  ["referees.day2_fallback", "day2-fallback", 2, "2日目の審判フォールバック"],
   ["random_seed", "random-seed", 2, "抽選番号"],
 ];
 

@@ -380,4 +380,56 @@ describe("1日目リーグ入力", () => {
       },
     ]);
   });
+
+  it("統合APIの2日目設定field詳細をタブ2の入力へ対応付ける", () => {
+    expect(
+      issuesFromApiDetails({
+        errors: [
+          { field: "day2.start_time", type: "time_parsing" },
+          { field: "day2.game_duration_minutes", type: "greater_than" },
+          { field: "day2.margin_minutes", type: "greater_than_equal" },
+          { field: "day2.end_time", type: "time_parsing" },
+          { field: "day2.max_sections", type: "greater_than_equal" },
+          { field: "day2.breaks.0.duration_minutes", type: "greater_than" },
+          { field: "referees.day2_fallback", type: "literal_error" },
+        ],
+      }),
+    ).toEqual([
+      {
+        field: "day2-start-time",
+        step: 2,
+        message: "2日目の開始時刻の入力値を確認してください。",
+      },
+      {
+        field: "day2-game-duration",
+        step: 2,
+        message: "2日目の試合時間の入力値を確認してください。",
+      },
+      {
+        field: "day2-margin-minutes",
+        step: 2,
+        message: "2日目の試合間隔の入力値を確認してください。",
+      },
+      {
+        field: "day2-end-time",
+        step: 2,
+        message: "2日目の終了時刻の入力値を確認してください。",
+      },
+      {
+        field: "day2-max-sections",
+        step: 2,
+        message: "2日目の最大セクション数の入力値を確認してください。",
+      },
+      {
+        field: "day2-breaks",
+        step: 2,
+        message: "2日目の休憩の入力値を確認してください。",
+      },
+      {
+        field: "day2-fallback",
+        step: 2,
+        message: "2日目の審判フォールバックの入力値を確認してください。",
+      },
+    ]);
+  });
 });
