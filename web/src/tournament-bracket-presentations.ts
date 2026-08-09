@@ -11,7 +11,7 @@ import {
   verticalTournamentBracketLayout,
 } from "./tournament-bracket-exploration-layouts";
 import { readTournamentLogicalLayout } from "./tournament-logical-layout";
-import type { JsonObject } from "./types";
+import { placementTournamentPool, type JsonObject } from "./types";
 
 export type TournamentBracketRenderer = (
   model: TournamentBracketModel,
@@ -58,10 +58,7 @@ export const tournamentBracketPresentations = {
 } as const satisfies Readonly<Record<string, TournamentBracketPresentation>>;
 
 function poolObject(input: TournamentBracketInput): JsonObject | undefined {
-  const value = input.plan[input.pool];
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as JsonObject
-    : undefined;
+  return placementTournamentPool(input.plan, input.pool)?.data;
 }
 
 function resolveStorage(

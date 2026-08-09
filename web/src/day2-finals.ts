@@ -1,4 +1,4 @@
-import type { JsonObject } from "./types";
+import { placementTournamentPools, type JsonObject } from "./types";
 
 export class Day2FinalPlacementError extends Error {
   constructor(message: string) {
@@ -7,8 +7,18 @@ export class Day2FinalPlacementError extends Error {
   }
 }
 
+export interface PoolFinalPlacement {
+  poolId: string;
+  matchId: string;
+  section: number;
+  gap: number;
+}
+
 export interface Day2FinalPlacementAnalysis {
   usedSections: number;
+  finals: readonly PoolFinalPlacement[];
+  primaryFinalId?: string;
+  primaryFinalSection?: number;
   upperFinalId?: string;
   lowerFinalId?: string;
   upperFinalSection?: number;
@@ -30,61 +40,91 @@ function objects(value: unknown): JsonObject[] {
     : [];
 }
 
-function isFinal(match: JsonObject): boolean {
-  return Array.isArray(match.rank_range)
-    && match.rank_range.length === 2
-    && match.rank_range[0] === 1
-    && match.rank_range[1] === 2;
+function rankRange(value: unknown): [number, number] | undefined {
+  return Array.isArray(value)
+      && value.length === 2
+      && value.every((item) => Number.isInteger(item) && Number(item) > 0)
+    ? [Number(value[0]), Number(value[1])]
+    : undefined;
 }
 
-function finalIds(matches: JsonObject[]): { upper: string[]; lower: string[] } {
-  const result = { upper: [] as string[], lower: [] as string[] };
-  for (const match of matches) {
-    if (!isFinal(match) || typeof match.id !== "string") continue;
-    if (match.phase === "upper_tournament") result.upper.push(match.id);
-    if (match.phase === "lower_tournament") result.lower.push(match.id);
-  }
-  result.upper.sort();
-  result.lower.sort();
-  return result;
+function finalRange(pool: JsonObject): [number, number] | undefined {
+  const overall = rankRange(pool.overall_rank_range);
+  if (overall !== undefined) return [overall[0], overall[0] + 1];
+  return [1, 2];
 }
 
-function plannedFinalIds(plan: JsonObject | undefined): {
-  upper: string[];
-  lower: string[];
-  expectedUpper: number | undefined;
-  expectedLower: number | undefined;
-} | undefined {
-  if (plan === undefined) return undefined;
-  const upper = plan.upper;
-  const lower = plan.lower;
-  if (
-    typeof upper !== "object" || upper === null || Array.isArray(upper)
-    || typeof lower !== "object" || lower === null || Array.isArray(lower)
-  ) {
-    return undefined;
+function sameRange(value: unknown, expected: readonly [number, number]): boolean {
+  const actual = rankRange(value);
+  return actual?.[0] === expected[0] && actual[1] === expected[1];
+}
+
+function plannedFinalId(pool: JsonObject): string | undefined {
+  const expected = finalRange(pool);
+  if (expected === undefined) return undefined;
+  const ids = objects(pool.matches)
+    .filter((match) => sameRange(match.rank_range, expected) && typeof match.id === "string")
+    .map((match) => String(match.id));
+  return ids.length === 1 ? ids[0] : undefined;
+}
+
+function scheduledFinalIds(
+  matches: readonly JsonObject[],
+  poolId: string,
+  legacyField: "upper" | "lower" | undefined,
+  expectedRange: readonly [number, number],
+): string[] {
+  return matches
+    .filter((match) => {
+      if (typeof match.id !== "string") return false;
+      if (legacyField !== undefined) {
+        const expectedPhase = legacyField === "upper" ? "upper_tournament" : "lower_tournament";
+        return match.phase === expectedPhase && sameRange(match.rank_range, expectedRange);
+      }
+      return match.phase === "placement_tournament"
+        && match.pool_id === poolId
+        && match.final === true
+        && sameRange(match.rank_range, expectedRange);
+    })
+    .map((match) => String(match.id))
+    .sort();
+}
+
+function sameAudit(
+  metrics: JsonObject,
+  finals: readonly PoolFinalPlacement[],
+): { present: boolean; matches: boolean } {
+  if (Array.isArray(metrics.placement_tournament_finals)) {
+    const audit = objects(metrics.placement_tournament_finals);
+    const matches = audit.length === finals.length && finals.every((final, index) => {
+      const item = audit[index];
+      return item?.pool_id === final.poolId
+        && item.section_no === final.section
+        && item.final_section_gap === final.gap;
+    });
+    const gaps = finals.slice(1).map((final) => final.gap);
+    return {
+      present: true,
+      matches: matches
+        && metrics.non_primary_final_max_gap === Math.max(0, ...gaps)
+        && metrics.non_primary_final_sum_gap === gaps.reduce((sum, gap) => sum + gap, 0),
+    };
   }
-  const upperParticipantCount = (upper as JsonObject).participant_count;
-  const lowerParticipantCount = (lower as JsonObject).participant_count;
+  const legacyFields = [
+    "upper_tournament_final_section",
+    "lower_tournament_final_section",
+    "lower_tournament_final_section_gap",
+  ];
+  const present = legacyFields.some((field) => Object.hasOwn(metrics, field));
+  if (!present) return { present: false, matches: true };
+  const upper = finals.find((final) => final.poolId === "upper");
+  const lower = finals.find((final) => final.poolId === "lower");
   return {
-    upper: finalIds(objects((upper as JsonObject).matches)).upper,
-    lower: finalIds(objects((lower as JsonObject).matches)).lower,
-    expectedUpper: typeof upperParticipantCount === "number"
-      ? Number(upperParticipantCount >= 2)
-      : undefined,
-    expectedLower: typeof lowerParticipantCount === "number"
-      ? Number(lowerParticipantCount >= 2)
-      : undefined,
+    present: true,
+    matches: metrics.upper_tournament_final_section === (upper?.section ?? null)
+      && metrics.lower_tournament_final_section === (lower?.section ?? null)
+      && metrics.lower_tournament_final_section_gap === (lower?.gap ?? null),
   };
-}
-
-function sameIds(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function metricValue(metrics: JsonObject, field: string): number | undefined {
-  const value = metrics[field];
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
 export function analyzeDay2FinalPlacement(
@@ -92,99 +132,78 @@ export function analyzeDay2FinalPlacement(
   tournamentPlan?: JsonObject,
 ): Day2FinalPlacementAnalysis {
   const matches = objects(schedule.tournament_matches);
-  const finals = finalIds(matches);
-  const planned = plannedFinalIds(tournamentPlan);
-  if (
-    finals.upper.length > 1
-    || finals.lower.length > 1
-    || (planned !== undefined
-      && (
-        !sameIds(finals.upper, planned.upper)
-        || !sameIds(finals.lower, planned.lower)
-        || (planned.expectedUpper !== undefined && planned.upper.length !== planned.expectedUpper)
-        || (planned.expectedLower !== undefined && planned.lower.length !== planned.expectedLower)
-      ))
-  ) {
+  const allPools = tournamentPlan === undefined ? [] : placementTournamentPools(tournamentPlan);
+  if (allPools.length === 0) {
     throw new Day2FinalPlacementError(
-      "2日目日程の決勝定義がトーナメント表と一致しません。日程を再作成してください。",
+      "2日目日程の順位帯を読み取れません。日程を再作成してください。",
     );
   }
-  for (const match of matches) {
-    if (
-      (match.phase === "upper_tournament" || match.phase === "lower_tournament")
-      && typeof match.final === "boolean"
-      && match.final !== isFinal(match)
-    ) {
-      throw new Day2FinalPlacementError(
-        "2日目日程の決勝注記が順位範囲と一致しません。日程を再作成してください。",
-      );
-    }
-  }
-
+  const pools = allPools.filter(
+      (pool) => Number(pool.data.participant_count) >= 2,
+    );
   const positions = new Map<string, number>();
   let usedSections = 0;
   for (const slot of objects(schedule.slots)) {
-    if (typeof slot.match_id !== "string" || typeof slot.section_no !== "number") continue;
-    positions.set(slot.match_id, slot.section_no);
-    usedSections = Math.max(usedSections, slot.section_no);
+    if (typeof slot.match_id !== "string" || !Number.isInteger(slot.section_no)) continue;
+    positions.set(slot.match_id, Number(slot.section_no));
+    usedSections = Math.max(usedSections, Number(slot.section_no));
   }
-  const upperFinalId = finals.upper[0];
-  const lowerFinalId = finals.lower[0];
-  const upperFinalSection = upperFinalId === undefined ? undefined : positions.get(upperFinalId);
-  const lowerFinalSection = lowerFinalId === undefined ? undefined : positions.get(lowerFinalId);
-  if (
-    (upperFinalId !== undefined && upperFinalSection === undefined)
-    || (lowerFinalId !== undefined && lowerFinalSection === undefined)
-  ) {
-    throw new Day2FinalPlacementError(
-      "2日目日程に決勝の配置がありません。日程を再作成してください。",
-    );
-  }
-  const primaryFinalSection = upperFinalSection ?? lowerFinalSection;
-  const primaryFinalIsLast = primaryFinalSection === undefined || primaryFinalSection === usedSections;
-  const lowerFinalSectionGap = lowerFinalSection === undefined
-    ? undefined
-    : usedSections - lowerFinalSection;
 
-  const metrics = (
-    typeof schedule.metrics === "object"
+  const finals: PoolFinalPlacement[] = [];
+  for (const pool of pools) {
+    const expectedRange = finalRange(pool.data);
+    const plannedId = plannedFinalId(pool.data);
+    if (expectedRange === undefined || plannedId === undefined) {
+      throw new Day2FinalPlacementError(
+        "トーナメント表の決勝定義を読み取れません。トーナメント表を再作成してください。",
+      );
+    }
+    const scheduledIds = scheduledFinalIds(matches, pool.poolId, pool.legacyField, expectedRange);
+    if (scheduledIds.length !== 1 || scheduledIds[0] !== plannedId) {
+      throw new Day2FinalPlacementError(
+        "2日目日程の決勝定義がトーナメント表と一致しません。日程を再作成してください。",
+      );
+    }
+    const section = positions.get(plannedId);
+    if (section === undefined) {
+      throw new Day2FinalPlacementError(
+        "2日目日程に決勝の配置がありません。日程を再作成してください。",
+      );
+    }
+    finals.push({ poolId: pool.poolId, matchId: plannedId, section, gap: usedSections - section });
+  }
+
+  const primary = finals[0];
+  const metrics = typeof schedule.metrics === "object"
       && schedule.metrics !== null
       && !Array.isArray(schedule.metrics)
-  ) ? schedule.metrics as JsonObject : {};
-  const auditFields = [
-    "upper_tournament_final_section",
-    "lower_tournament_final_section",
-    "lower_tournament_final_section_gap",
-  ];
-  const hasFinalPlacementAudit = auditFields.some((field) =>
-    Object.prototype.hasOwnProperty.call(metrics, field)
-  );
-  const expectedUpper = upperFinalSection;
-  const expectedLower = lowerFinalSection;
-  const expectedGap = lowerFinalSectionGap;
-  const finalPlacementAuditMatches = !hasFinalPlacementAudit || (
-    auditFields.every((field) => Object.prototype.hasOwnProperty.call(metrics, field))
-    && metricValue(metrics, "upper_tournament_final_section") === expectedUpper
-    && metricValue(metrics, "lower_tournament_final_section") === expectedLower
-    && metricValue(metrics, "lower_tournament_final_section_gap") === expectedGap
-  );
-
+    ? schedule.metrics as JsonObject
+    : {};
+  const audit = sameAudit(metrics, finals);
+  const legacy = allPools.every((pool) => pool.legacyField !== undefined);
+  const upperFinal = finals.find((final) => final.poolId === "upper");
+  const lowerFinal = finals.find((final) => final.poolId === "lower");
   return {
     usedSections,
-    ...(upperFinalId === undefined ? {} : { upperFinalId }),
-    ...(lowerFinalId === undefined ? {} : { lowerFinalId }),
-    ...(upperFinalSection === undefined ? {} : { upperFinalSection }),
-    ...(lowerFinalSection === undefined ? {} : { lowerFinalSection }),
-    ...(lowerFinalSectionGap === undefined ? {} : { lowerFinalSectionGap }),
-    primaryFinalIsLast,
-    bothFinalsShareLastSection:
-      upperFinalSection !== undefined
-      && lowerFinalSection !== undefined
-      && upperFinalSection === usedSections
-      && lowerFinalSection === usedSections,
-    hasFinalPlacementAudit,
-    finalPlacementAuditMatches,
-    legacyRuleViolation: !hasFinalPlacementAudit && !primaryFinalIsLast,
+    finals,
+    ...(primary === undefined ? {} : {
+      primaryFinalId: primary.matchId,
+      primaryFinalSection: primary.section,
+    }),
+    ...(legacy && upperFinal !== undefined ? {
+      upperFinalId: upperFinal.matchId,
+      upperFinalSection: upperFinal.section,
+    } : {}),
+    ...(legacy && lowerFinal !== undefined ? {
+      lowerFinalId: lowerFinal.matchId,
+      lowerFinalSection: lowerFinal.section,
+      lowerFinalSectionGap: lowerFinal.gap,
+    } : {}),
+    primaryFinalIsLast: primary === undefined || primary.section === usedSections,
+    bothFinalsShareLastSection: finals.length === 2 && finals.every((final) => final.section === usedSections),
+    hasFinalPlacementAudit: audit.present,
+    finalPlacementAuditMatches: audit.matches,
+    legacyRuleViolation: legacy && !audit.present && primary?.section !== usedSections,
   };
 }
 
@@ -195,7 +214,7 @@ export function assertNewDay2FinalPlacement(
   const analysis = analyzeDay2FinalPlacement(schedule, tournamentPlan);
   if (!analysis.primaryFinalIsLast) {
     throw new Day2FinalPlacementError(
-      "作成された2日目日程で決勝が最終セクションにありません。保存せず、日程を再作成してください。",
+      "作成された2日目日程で最高順位帯の決勝が最終セクションにありません。保存せず、日程を再作成してください。",
     );
   }
   if (!analysis.hasFinalPlacementAudit || !analysis.finalPlacementAuditMatches) {

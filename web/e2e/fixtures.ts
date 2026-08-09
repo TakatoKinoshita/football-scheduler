@@ -11,57 +11,130 @@ type PreviewFixture = {
   tournament_plan: Record<string, unknown>;
 };
 
-function lowerTournamentValue(value: unknown): unknown {
+function placementTournamentValue(value: unknown, poolIndex: number): unknown {
   if (typeof value === "string") {
-    if (value === "upper") return "lower";
-    if (value === "upper_tournament") return "lower_tournament";
-    if (value.startsWith("UT-")) return `LT-${value.slice(3)}`;
-    if (value.startsWith("team-")) return `lower-${value}`;
+    if (value === "upper") return `placement-${String(poolIndex)}`;
+    if (value === "upper_tournament") return "placement_tournament";
+    if (value.startsWith("UT-")) return `PT-${String(poolIndex)}-${value.slice(3)}`;
+    if (value.startsWith("team-") && poolIndex > 1) {
+      return `placement-${String(poolIndex)}-${value}`;
+    }
     return value;
   }
-  if (Array.isArray(value)) return value.map(lowerTournamentValue);
+  if (Array.isArray(value)) {
+    return value.map((child) => placementTournamentValue(child, poolIndex));
+  }
   if (value !== null && typeof value === "object") {
     const mapped = Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [key, lowerTournamentValue(child)]),
+      Object.entries(value).map(([key, child]) => [
+        key,
+        placementTournamentValue(child, poolIndex),
+      ]),
     );
-    if (mapped.block_rank === 1) mapped.block_rank = 2;
-    if (mapped.type === "league_rank" && mapped.rank === 1) mapped.rank = 2;
+    if (mapped.block_rank === 1) mapped.block_rank = poolIndex;
+    if (mapped.type === "league_rank" && mapped.rank === 1) mapped.rank = poolIndex;
     return mapped;
   }
   return value;
 }
 
+function currentPlacementPool(
+  value: unknown,
+  poolIndex: number,
+  participantCount: number,
+): Record<string, unknown> {
+  const pool = structuredClone(value) as Record<string, unknown>;
+  const poolId = `placement-${String(poolIndex)}`;
+  const overallStart = (poolIndex - 1) * participantCount + 1;
+  const offsetRanges = (child: unknown): unknown => {
+    if (Array.isArray(child)) return child.map(offsetRanges);
+    if (child === null || typeof child !== "object") return child;
+    const mapped = Object.fromEntries(
+      Object.entries(child).map(([key, nested]) => [key, offsetRanges(nested)]),
+    );
+    if (
+      Array.isArray(mapped.rank_range)
+      && mapped.rank_range.length === 2
+      && mapped.rank_range.every((rank) => Number.isInteger(rank))
+    ) {
+      mapped.rank_range = mapped.rank_range.map((rank) => Number(rank) + overallStart - 1);
+    }
+    return mapped;
+  };
+  const converted = offsetRanges(pool) as Record<string, unknown>;
+  const matches = (converted.matches as Array<Record<string, unknown>>).map((match) => ({
+    ...match,
+    phase: "placement_tournament",
+    pool_id: poolId,
+  }));
+  const placements = (pool.placements as Array<Record<string, unknown>>).map((placement) => ({
+    ...placement,
+    pool_rank: Number(placement.rank),
+    rank: overallStart + Number(placement.rank) - 1,
+  }));
+  delete converted.pool;
+  delete converted.byes;
+  return {
+    ...converted,
+    pool_id: poolId,
+    pool_index: poolIndex,
+    display_name: `第${String(poolIndex)}順位帯`,
+    pool_rank_range: [1, participantCount],
+    overall_rank_range: [overallStart, overallStart + participantCount - 1],
+    matches,
+    placements,
+  };
+}
+
 export function horizontalBracketTournamentFixture(
   participantCount: 8 | 16,
-  options: { withTournamentResults?: boolean } = {},
+  options: { withTournamentResults?: boolean; tournamentCount?: 2 | 3 | 4 } = {},
 ) {
   const preview = structuredClone(
     participantCount === 8 ? upperEightPreviewJson : upperSixteenPreviewJson,
   ) as PreviewFixture;
-  const plan = preview.tournament_plan;
-  plan.schema_version = "0.2.0";
-  const currentPlan = plan as unknown as Record<string, unknown>;
-  currentPlan.format = "placement_tournament";
-  currentPlan.tournament_count = 2;
-  delete currentPlan.odd_split_policy;
-  const upperSeedDraws = structuredClone(plan.seed_draws) as unknown[];
-  plan.lower = lowerTournamentValue(plan.upper);
-  plan.seed_draws = [
-    ...upperSeedDraws,
-    ...upperSeedDraws.map(lowerTournamentValue),
-  ];
-  const teams = [
-    ...structuredClone(preview.teams),
-    ...preview.teams.map((team) => ({ id: `lower-${team.id}`, name: team.name })),
-  ];
-  const upper = plan.upper as {
+  const legacyPlan = preview.tournament_plan;
+  const tournamentCount = options.tournamentCount ?? 2;
+  const legacyUpper = legacyPlan.upper;
+  const legacyPools = Array.from({ length: tournamentCount }, (_, index) =>
+    placementTournamentValue(legacyUpper, index + 1)
+  );
+  const upperSeedDraws = structuredClone(legacyPlan.seed_draws) as Array<Record<string, unknown>>;
+  const plan = {
+    schema_version: "0.2.0",
+    format: "placement_tournament",
+    tournament_count: tournamentCount,
+    status: legacyPlan.status,
+    participant_resolution: legacyPlan.participant_resolution,
+    random_seed: legacyPlan.random_seed,
+    pools: legacyPools.map((pool, index) =>
+      currentPlacementPool(pool, index + 1, participantCount)
+    ),
+    seed_draws: legacyPools.flatMap((_pool, index) =>
+      upperSeedDraws.map((draw) => ({
+        ...(placementTournamentValue(draw, index + 1) as Record<string, unknown>),
+        pool_id: `placement-${String(index + 1)}`,
+        pool: undefined,
+      }))
+    ),
+    warnings: legacyPlan.warnings,
+  };
+  const teams = Array.from({ length: tournamentCount }, (_, index) =>
+    preview.teams.map((team) => ({
+      id: String(placementTournamentValue(team.id, index + 1)),
+      name: team.name,
+    }))
+  ).flat();
+  const upper = plan.pools[0] as unknown as {
     seeds: Array<{ block_id: string; team_id: string }>;
   };
   const seedByBlock = new Map(upper.seeds.map((seed) => [seed.block_id, seed.team_id]));
   const blocks = [...seedByBlock].sort(([left], [right]) => left.localeCompare(right)).map(
     ([blockId, teamId]) => ({
       id: blockId,
-      team_ids: [teamId, `lower-${teamId}`],
+      team_ids: Array.from({ length: tournamentCount }, (_, index) =>
+        String(placementTournamentValue(teamId, index + 1))
+      ),
     }),
   );
   const leagueMatches = blocks.map((block) => ({
@@ -92,38 +165,23 @@ export function horizontalBracketTournamentFixture(
     match_end_time: `${String(10 + index).padStart(2, "0")}:05`,
     break_after_minutes: 0,
   }));
-  const standings = blocks.flatMap((block) => [
-    {
+  const standings = blocks.flatMap((block) =>
+    block.team_ids.map((teamId, index) => ({
       block_id: block.id,
-      rank: 1,
-      team_id: block.team_ids[0],
-      played: 1,
-      wins: 1,
+      rank: index + 1,
+      team_id: teamId,
+      played: tournamentCount - 1,
+      wins: tournamentCount - index - 1,
       draws: 0,
-      losses: 0,
-      goals_for: 1,
-      goals_against: 0,
-      goal_difference: 1,
-      points: 3,
+      losses: index,
+      goals_for: tournamentCount - index - 1,
+      goals_against: index,
+      goal_difference: tournamentCount - index * 2 - 1,
+      points: 3 * (tournamentCount - index - 1),
       tie_break: "勝点",
       head_to_head: null,
-    },
-    {
-      block_id: block.id,
-      rank: 2,
-      team_id: block.team_ids[1],
-      played: 1,
-      wins: 0,
-      draws: 0,
-      losses: 1,
-      goals_for: 0,
-      goals_against: 1,
-      goal_difference: -1,
-      points: 0,
-      tie_break: "勝点",
-      head_to_head: null,
-    },
-  ]);
+    }))
+  );
   const document = {
     documentType: "football-scheduler-tournament",
     schemaVersion: "0.2.0",
@@ -139,7 +197,7 @@ export function horizontalBracketTournamentFixture(
           block_count: blocks.length,
           assignment_mode: "random",
         },
-        final_stage: { format: "placement_tournament", tournament_count: 2 },
+        final_stage: { format: "placement_tournament", tournament_count: tournamentCount },
         day: {
           id: "day1",
           start_time: "09:30",
@@ -207,8 +265,8 @@ export function horizontalBracketTournamentFixture(
     },
   };
   if (options.withTournamentResults === true) {
-    const pools = [plan.upper, plan.lower] as Array<{
-      pool: "upper" | "lower";
+    const pools = plan.pools as Array<{
+      pool_id: string;
       participant_count: number;
       seeds: Array<Record<string, unknown>>;
       matches: Array<Record<string, unknown>>;
@@ -276,15 +334,13 @@ export function horizontalBracketTournamentFixture(
         decision: penaltyShootout ? "penalty_shootout" : "regular_time",
       });
     }
-    const upperCount = pools[0]!.participant_count;
     const finalStandings = pools.flatMap((pool) => {
-      const offset = pool.pool === "upper" ? 0 : upperCount;
       return [...pool.placements]
         .sort((left, right) => Number(left.rank) - Number(right.rank))
         .map((placement) => ({
-          rank: offset + Number(placement.rank),
-          pool: pool.pool,
-          pool_rank: Number(placement.rank),
+          rank: Number(placement.rank),
+          pool_id: pool.pool_id,
+          pool_rank: Number(placement.pool_rank),
           team_id: entryTeam(placement.entry)!,
           entry: placement.entry,
         }));
@@ -346,6 +402,52 @@ export const scheduleResult = {
   },
 };
 
+export const minimumSameRankScheduleResult = {
+  ...scheduleResult,
+  league_plan: {
+    ...scheduleResult.league_plan,
+    blocks: [
+      { id: "A", team_ids: ["team-01", "team-02"] },
+      { id: "B", team_ids: ["team-03", "team-04"] },
+    ],
+    logical_rounds: [
+      { block_id: "A", round_no: 1, match_ids: ["LG-A-M1"] },
+      { block_id: "B", round_no: 1, match_ids: ["LG-B-M1"] },
+    ],
+    matches: [
+      scheduleResult.league_plan.matches[0],
+      {
+        id: "LG-B-M1",
+        phase: "league",
+        round: "Bブロック 第1ラウンド",
+        possible_home_team_ids: ["team-03"],
+        possible_away_team_ids: ["team-04"],
+        prerequisite_match_ids: [],
+        organizer_referee_required: false,
+      },
+    ],
+  },
+  slots: [
+    scheduleResult.slots[0],
+    {
+      day_id: "day1",
+      section_no: 2,
+      court_id: "court-a",
+      match_id: "LG-B-M1",
+      referee_assignment: { kind: "team", team_id: "team-01" },
+    },
+  ],
+  metrics: {
+    ...scheduleResult.metrics,
+    used_sections: 2,
+  },
+  validation: {
+    valid: true,
+    diagnostics: [],
+    summary: { checked_match_count: 2, checked_slot_count: 2, error_count: 0 },
+  },
+};
+
 export const standingsResult = {
   schema_version: "0.2.0",
   status: "COMPLETE",
@@ -388,115 +490,6 @@ const emptyTournamentEvaluation = {
   first_match_same_block_count: 0,
   possible_same_block_match_count: 0,
   earliest_possible_same_block_round: null,
-};
-
-export const tournamentPlanResult = {
-  schema_version: "0.2.0",
-  format: "placement_tournament",
-  tournament_count: 2,
-  status: "COMPLETE",
-  participant_resolution: "resolved",
-  random_seed: 20260803,
-  upper: {
-    pool: "upper",
-    participant_count: 1,
-    seeds: [
-      {
-        seed_no: 1,
-        team_id: "team-01",
-        block_id: "A",
-        block_rank: 1,
-        entry: { type: "league_rank", block_id: "A", rank: 1 },
-        team: { type: "concrete_team", team_id: "team-01" },
-      },
-    ],
-    matches: [],
-    byes: [],
-    placements: [
-      { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 1 } },
-    ],
-    evaluation: emptyTournamentEvaluation,
-  },
-  lower: {
-    pool: "lower",
-    participant_count: 1,
-    seeds: [
-      {
-        seed_no: 1,
-        team_id: "team-02",
-        block_id: "A",
-        block_rank: 2,
-        entry: { type: "league_rank", block_id: "A", rank: 2 },
-        team: { type: "concrete_team", team_id: "team-02" },
-      },
-    ],
-    matches: [],
-    byes: [],
-    placements: [
-      { rank: 1, entry: { type: "league_rank", block_id: "A", rank: 2 } },
-    ],
-    evaluation: emptyTournamentEvaluation,
-  },
-  seed_draws: [],
-  warnings: [],
-};
-
-export const provisionalTournamentPlanResult = {
-  ...tournamentPlanResult,
-  participant_resolution: "provisional",
-  upper: {
-    ...tournamentPlanResult.upper,
-    seeds: tournamentPlanResult.upper.seeds.map((seed) => ({
-      ...seed,
-      team_id: null,
-      team: null,
-    })),
-  },
-  lower: {
-    ...tournamentPlanResult.lower,
-    seeds: tournamentPlanResult.lower.seeds.map((seed) => ({
-      ...seed,
-      team_id: null,
-      team: null,
-    })),
-  },
-};
-
-export const day2ScheduleResult = {
-  schema_version: "0.2.0",
-  schedule_scope: "day2_tournament",
-  participant_resolution: "resolved",
-  status: "OPTIMAL",
-  tournament_matches: [],
-  slots: [],
-  section_timings: [],
-  expected_end_time: null,
-  team_schedules: [],
-  metrics: {
-    random_seed: 20260803,
-    max_time_seconds: 30,
-    ortools_version: "test",
-    wall_time_seconds: 0,
-    used_sections: 0,
-    objective_value: 0,
-    best_objective_bound: 0,
-    organizer_referee_count: 0,
-    tournament_team_referee_count: 0,
-    tournament_referee_fallback_count: 0,
-    upper_tournament_final_section: null,
-    lower_tournament_final_section: null,
-    lower_tournament_final_section_gap: null,
-    optimized_objectives: ["used_sections"],
-    optimality_proven: true,
-  },
-  diagnostics: [],
-  validation: { valid: true, issues: [], summary: {} },
-  integrated_validation: { valid: true, issues: [], summary: {} },
-};
-
-export const provisionalDay2ScheduleResult = {
-  ...day2ScheduleResult,
-  participant_resolution: "provisional",
 };
 
 const scheduleViewTeams = [
@@ -577,9 +570,11 @@ const rankRef = (blockId: string, rank: number) => ({
 const winnerOf = (matchId: string) => ({ type: "winner_of", match_id: matchId });
 const loserOf = (matchId: string) => ({ type: "loser_of", match_id: matchId });
 
-function scheduleViewPool(pool: "upper" | "lower") {
-  const prefix = pool === "upper" ? "UT" : "LT";
-  const blockRank = pool === "upper" ? 1 : 2;
+function scheduleViewPool(poolIndex: 1 | 2) {
+  const poolId = `placement-${String(poolIndex)}`;
+  const prefix = poolIndex === 1 ? "PT-1" : "PT-2";
+  const blockRank = poolIndex;
+  const overallStart = (poolIndex - 1) * 4 + 1;
   const seeds = ["A", "B", "C", "D"].map((blockId, index) => ({
     seed_no: index + 1,
     team_id: null,
@@ -591,52 +586,59 @@ function scheduleViewPool(pool: "upper" | "lower") {
   const matches = [
     {
       id: `${prefix}-SF1`,
-      phase: `${pool}_tournament`,
+      phase: "placement_tournament",
+      pool_id: poolId,
       round: "準決勝",
       round_no: 1,
       home: rankRef("A", blockRank),
       away: rankRef("D", blockRank),
-      rank_range: [1, 4],
+      rank_range: [overallStart, overallStart + 3],
     },
     {
       id: `${prefix}-SF2`,
-      phase: `${pool}_tournament`,
+      phase: "placement_tournament",
+      pool_id: poolId,
       round: "準決勝",
       round_no: 1,
       home: rankRef("B", blockRank),
       away: rankRef("C", blockRank),
-      rank_range: [1, 4],
+      rank_range: [overallStart, overallStart + 3],
     },
     {
       id: `${prefix}-FINAL`,
-      phase: `${pool}_tournament`,
+      phase: "placement_tournament",
+      pool_id: poolId,
       round: "決勝",
       round_no: 2,
       home: winnerOf(`${prefix}-SF1`),
       away: winnerOf(`${prefix}-SF2`),
-      rank_range: [1, 2],
+      rank_range: [overallStart, overallStart + 1],
     },
     {
       id: `${prefix}-PLACE3`,
-      phase: `${pool}_tournament`,
+      phase: "placement_tournament",
+      pool_id: poolId,
       round: "3位決定戦",
       round_no: 2,
       home: loserOf(`${prefix}-SF1`),
       away: loserOf(`${prefix}-SF2`),
-      rank_range: [3, 4],
+      rank_range: [overallStart + 2, overallStart + 3],
     },
   ];
   return {
-    pool,
+    pool_id: poolId,
+    pool_index: poolIndex,
+    display_name: `第${String(poolIndex)}順位帯`,
     participant_count: 4,
+    pool_rank_range: [1, 4],
+    overall_rank_range: [overallStart, overallStart + 3],
     seeds,
     matches,
-    byes: [],
     placements: [
-      { rank: 1, entry: winnerOf(`${prefix}-FINAL`) },
-      { rank: 2, entry: loserOf(`${prefix}-FINAL`) },
-      { rank: 3, entry: winnerOf(`${prefix}-PLACE3`) },
-      { rank: 4, entry: loserOf(`${prefix}-PLACE3`) },
+      { rank: overallStart, pool_rank: 1, entry: winnerOf(`${prefix}-FINAL`) },
+      { rank: overallStart + 1, pool_rank: 2, entry: loserOf(`${prefix}-FINAL`) },
+      { rank: overallStart + 2, pool_rank: 3, entry: winnerOf(`${prefix}-PLACE3`) },
+      { rank: overallStart + 3, pool_rank: 4, entry: loserOf(`${prefix}-PLACE3`) },
     ],
     evaluation: emptyTournamentEvaluation,
   };
@@ -649,37 +651,34 @@ export const scheduleViewTournamentPlanResult = {
   status: "COMPLETE",
   participant_resolution: "provisional",
   random_seed: 20260803,
-  upper: scheduleViewPool("upper"),
-  lower: scheduleViewPool("lower"),
+  pools: [scheduleViewPool(1), scheduleViewPool(2)],
   seed_draws: [
-    { pool: "upper", block_rank: 1, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), random_seed: 20260803 },
-    { pool: "lower", block_rank: 2, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), random_seed: 20260803 },
+    { pool_id: "placement-1", block_rank: 1, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 1)), random_seed: 20260803 },
+    { pool_id: "placement-2", block_rank: 2, candidates: [], decided_order: [], candidate_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), decided_rank_refs: ["A", "B", "C", "D"].map((id) => rankRef(id, 2)), random_seed: 20260803 },
   ],
   warnings: [],
 };
 
 const scheduleViewTournamentMatches = [
-  ...scheduleViewTournamentPlanResult.upper.matches,
-  ...scheduleViewTournamentPlanResult.lower.matches,
+  ...scheduleViewTournamentPlanResult.pools.flatMap((pool) => pool.matches),
 ].map((match) => ({
   ...match,
-  possible_rank_refs: [rankRef("A", match.phase === "upper_tournament" ? 1 : 2)],
+  possible_rank_refs: [rankRef("A", match.pool_id === "placement-1" ? 1 : 2)],
   possible_team_ids: [],
   prerequisite_match_ids: [],
-  preliminary: false,
-  final: match.id.endsWith("FINAL"),
+  final: match.id.endsWith("-FINAL"),
 }));
 
 const scheduleViewDay2Slots = [
-  { day_id: "day2", section_no: 1, court_id: "court-a", match_id: "UT-SF1", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
-  { day_id: "day2", section_no: 1, court_id: "court-b", match_id: "UT-SF2", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 1, court_id: "court-a", match_id: "PT-1-SF1", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 1, court_id: "court-b", match_id: "PT-1-SF2", referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] } },
   { day_id: "day2", section_no: 2, court_id: "court-a", match_id: null, referee_assignment: null },
-  { day_id: "day2", section_no: 2, court_id: "court-b", match_id: "LT-SF1", referee_assignment: { kind: "team", source_match_id: "UT-SF2" } },
-  { day_id: "day2", section_no: 3, court_id: "court-a", match_id: "UT-PLACE3", referee_assignment: { kind: "team", source_match_id: "UT-SF1" } },
-  { day_id: "day2", section_no: 3, court_id: "court-b", match_id: "LT-SF2", referee_assignment: { kind: "team", source_match_id: "LT-SF1" } },
-  { day_id: "day2", section_no: 4, court_id: "court-a", match_id: "UT-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
-  { day_id: "day2", section_no: 4, court_id: "court-b", match_id: "LT-PLACE3", referee_assignment: { kind: "team", source_match_id: "LT-SF2" } },
-  { day_id: "day2", section_no: 5, court_id: "court-a", match_id: "LT-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 2, court_id: "court-b", match_id: "PT-2-SF1", referee_assignment: { kind: "team", source_match_id: "PT-1-SF2" } },
+  { day_id: "day2", section_no: 3, court_id: "court-a", match_id: "PT-1-PLACE3", referee_assignment: { kind: "team", source_match_id: "PT-1-SF1" } },
+  { day_id: "day2", section_no: 3, court_id: "court-b", match_id: "PT-2-SF2", referee_assignment: { kind: "team", source_match_id: "PT-2-SF1" } },
+  { day_id: "day2", section_no: 4, court_id: "court-a", match_id: "PT-2-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
+  { day_id: "day2", section_no: 4, court_id: "court-b", match_id: "PT-2-PLACE3", referee_assignment: { kind: "team", source_match_id: "PT-2-SF2" } },
+  { day_id: "day2", section_no: 5, court_id: "court-a", match_id: "PT-1-FINAL", referee_assignment: { kind: "organizer", organizer_reason: "tournament_final", fallback_reasons: [] } },
   { day_id: "day2", section_no: 5, court_id: "court-b", match_id: null, referee_assignment: null },
 ];
 
@@ -723,6 +722,12 @@ export const scheduleViewDay2ScheduleResult = {
     tournament_team_referee_count: 4,
     tournament_referee_fallback_count: 0,
     unused_slot_count: 2,
+    placement_tournament_finals: [
+      { pool_id: "placement-1", section_no: 5, final_section_gap: 0 },
+      { pool_id: "placement-2", section_no: 4, final_section_gap: 1 },
+    ],
+    non_primary_final_max_gap: 1,
+    non_primary_final_sum_gap: 1,
     optimized_objectives: ["used_sections"],
     optimality_proven: true,
   },
@@ -805,8 +810,7 @@ export function tournamentResultsFixture() {
     ]),
   );
   const plan = structuredClone(result.tournament_plan) as Record<string, unknown>;
-  for (const poolName of ["upper", "lower"]) {
-    const pool = plan[poolName] as Record<string, unknown>;
+  for (const pool of plan.pools as Array<Record<string, unknown>>) {
     for (const seed of pool.seeds as Array<Record<string, unknown>>) {
       const teamId = teamsByRank.get(`${String(seed.block_id)}:${String(seed.block_rank)}`)!;
       seed.team_id = teamId;
@@ -844,6 +848,20 @@ export function tournamentResultsFixture() {
   result.integrated_validation = schedule.integrated_validation;
   return document;
 }
+
+const resolvedScheduleViewFixture = tournamentResultsFixture();
+export const tournamentPlanResult = structuredClone(
+  resolvedScheduleViewFixture.tournament.result.tournament_plan,
+) as Record<string, unknown>;
+export const provisionalTournamentPlanResult = structuredClone(
+  scheduleViewTournamentPlanResult,
+) as Record<string, unknown>;
+export const day2ScheduleResult = structuredClone(
+  resolvedScheduleViewFixture.tournament.result.day2_schedule,
+) as Record<string, unknown>;
+export const provisionalDay2ScheduleResult = structuredClone(
+  scheduleViewDay2ScheduleResult,
+) as Record<string, unknown>;
 
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {

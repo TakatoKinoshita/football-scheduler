@@ -453,8 +453,21 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
 }) => {
   await mockExternalServices(page);
   await openApp(page);
+  const source = tournamentFixture({ withResult: true }) as ReturnType<
+    typeof tournamentFixture
+  > & { tournament: { result: unknown } };
+  source.tournament.input.teams.push(
+    { id: "team-03", name: "中央キッカーズ" },
+    { id: "team-04", name: "海浜ユナイテッド" },
+  );
+  source.tournament.input.courts.push({ id: "court-b", name: "Bコート" });
+  source.tournament.input.league.block_count = 2;
+  source.tournament.result = generatedRolePathResult({
+    teams: source.tournament.input.teams,
+    courts: source.tournament.input.courts,
+  });
   const customized = JSON.parse(
-    JSON.stringify(tournamentFixture({ withResult: true }))
+    JSON.stringify(source)
       .replaceAll("team-01", "blue-team")
       .replaceAll("team-02", "green-team")
       .replaceAll("court-a", "main-pitch"),
@@ -469,19 +482,22 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(customized.tournament.result),
+      body: JSON.stringify(generatedRolePathResult(request)),
     });
   });
 
   await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
   await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
-  await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
 
-  expect(request).toMatchObject({
-    teams: [{ id: "blue-team" }, { id: "green-team" }],
-    courts: [{ id: "main-pitch" }],
-    day: { game_duration_minutes: 40 },
-  });
+  expect(request).toMatchObject({ day: { game_duration_minutes: 40 } });
+  expect(request?.teams).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "blue-team" }),
+    expect.objectContaining({ id: "green-team" }),
+  ]));
+  expect(request?.courts).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "main-pitch" }),
+  ]));
 });
 
 test("生成直前の無効入力ではAPIを呼ばず安全確認を維持する", async ({ page }) => {

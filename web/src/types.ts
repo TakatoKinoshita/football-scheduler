@@ -7,6 +7,55 @@ export type SchemaVersion = (typeof SUPPORTED_SCHEMA_VERSIONS)[number];
 
 export type JsonObject = Record<string, unknown>;
 
+export interface PlacementTournamentPool {
+  poolId: string;
+  poolIndex: number;
+  displayName: string;
+  data: JsonObject;
+  legacyField?: "upper" | "lower";
+}
+
+function jsonObject(value: unknown): JsonObject | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as JsonObject
+    : undefined;
+}
+
+/** schema 0.2 の順位帯を順序どおり返し、0.1 は閲覧用に上下を正規化する。 */
+export function placementTournamentPools(plan: JsonObject): PlacementTournamentPool[] {
+  if (Array.isArray(plan.pools)) {
+    return plan.pools
+      .map((value) => jsonObject(value))
+      .filter((value): value is JsonObject => value !== undefined)
+      .map((data, index) => ({
+        poolId: typeof data.pool_id === "string" ? data.pool_id : `placement-${String(index + 1)}`,
+        poolIndex: typeof data.pool_index === "number" ? data.pool_index : index + 1,
+        displayName: typeof data.display_name === "string"
+          ? data.display_name
+          : `第${String(index + 1)}順位決定トーナメント`,
+        data,
+      }))
+      .sort((left, right) => left.poolIndex - right.poolIndex);
+  }
+  return (["upper", "lower"] as const).flatMap((field, index) => {
+    const data = jsonObject(plan[field]);
+    return data === undefined ? [] : [{
+      poolId: field,
+      poolIndex: index + 1,
+      displayName: field === "upper" ? "上位トーナメント" : "下位トーナメント",
+      data,
+      legacyField: field,
+    }];
+  });
+}
+
+export function placementTournamentPool(
+  plan: JsonObject,
+  poolId: string,
+): PlacementTournamentPool | undefined {
+  return placementTournamentPools(plan).find((pool) => pool.poolId === poolId);
+}
+
 export interface TournamentDocument {
   documentType: typeof DOCUMENT_TYPE;
   schemaVersion: SchemaVersion;

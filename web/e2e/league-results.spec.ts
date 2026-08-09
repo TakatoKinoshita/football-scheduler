@@ -5,9 +5,11 @@ import {
   provisionalDay2ScheduleResult,
   provisionalTournamentPlanResult,
   scheduleResult,
+  scheduleViewTournamentFixture,
   standingsResult,
   tournamentFixture,
   tournamentPlanResult,
+  tournamentResultsFixture,
 } from "./fixtures";
 import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
 
@@ -36,8 +38,51 @@ async function enterOnlyResult(page: import("@playwright/test").Page): Promise<v
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
+function placementDocument(options: {
+  resolved?: boolean;
+  includePlan?: boolean;
+  includeSchedule?: boolean;
+}) {
+  const document = options.resolved === true
+    ? tournamentResultsFixture()
+    : scheduleViewTournamentFixture();
+  const result = document.tournament.result as Record<string, unknown>;
+  delete result.tournament_results;
+  delete result.final_standings;
+  if (options.resolved !== true) {
+    delete result.league_results;
+    delete result.league_standings;
+  }
+  if (options.includePlan !== true) delete result.tournament_plan;
+  if (options.includeSchedule !== true) {
+    delete result.day2_schedule;
+    delete result.integrated_validation;
+  }
+  return document;
+}
+
+function placementStandingsResult(): Record<string, unknown> {
+  const result = tournamentResultsFixture().tournament.result as Record<string, unknown>;
+  return structuredClone(result.league_standings) as Record<string, unknown>;
+}
+
+async function enterPlacementLeagueResults(
+  page: import("@playwright/test").Page,
+): Promise<void> {
+  const rows = page.getByRole("table", { name: "1日目の試合結果入力" }).locator("tbody tr");
+  await expect(rows).toHaveCount(4);
+  for (let index = 0; index < 4; index += 1) {
+    const inputs = rows.nth(index).locator("input");
+    await inputs.nth(0).fill("1");
+    await inputs.nth(1).fill("0");
+  }
+  await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
+}
+
 test("順位未確定でも1回の操作で仮トーナメントと仮日程を作成・復元する", async ({ page }) => {
-  await openGeneratedLeague(page);
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, placementDocument({}));
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
@@ -69,7 +114,7 @@ test("順位未確定でも1回の操作で仮トーナメントと仮日程を�
   expect(requests[0]).not.toHaveProperty("tournament_plan");
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#tournament-plan-view .tournament-bracket figcaption").first())
-    .toHaveText("上位トーナメント表（仮）");
+    .toHaveText("第1順位帯表（仮）");
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
   await page.emulateMedia({ media: "print" });
@@ -118,37 +163,13 @@ test("最終試合の入力直後に順位を確定し、変更時は確定順�
 test("順位確定時に仮トーナメントと仮日程の構造を保ったままチーム名を反映する", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  await importDocument(page, {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      input: {
-        ...base.tournament.input,
-        day2: {
-          id: "day2",
-          start_time: "09:30",
-          game_duration_minutes: 35,
-          margin_minutes: 10,
-          max_sections: null,
-          end_time: null,
-          breaks: [],
-        },
-      },
-      result: {
-        ...scheduleResult,
-        tournament_plan: provisionalTournamentPlanResult,
-        day2_schedule: provisionalDay2ScheduleResult,
-        integrated_validation: provisionalDay2ScheduleResult.integrated_validation,
-      },
-    },
-  });
+  await importDocument(page, placementDocument({ includePlan: true, includeSchedule: true }));
   await page.unroute(GENERATE_API);
   await page.route(GENERATE_API, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(standingsResult),
+      body: JSON.stringify(placementStandingsResult()),
     });
   });
 
@@ -157,7 +178,7 @@ test("順位確定時に仮トーナメントと仮日程の構造を保った�
   await expect(page.locator("#tournament-plan-view")).not.toContainText("青空FC");
   await expect(page.locator("#day2-schedule-view")).toContainText("【仮】");
   await page.locator('.step[data-step="4"]').click();
-  await enterOnlyResult(page);
+  await enterPlacementLeagueResults(page);
   await page.getByRole("button", { name: "順位を確定する" }).click();
   await page.locator('.step[data-step="5"]').click();
 
@@ -207,30 +228,7 @@ test("確定順位から2日目を作成し、得点変更時は仮表と仮日�
   await mockExternalServices(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  await importDocument(page, {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      input: {
-        ...base.tournament.input,
-        day2: {
-          id: "day2",
-          start_time: "09:30",
-          game_duration_minutes: 35,
-          margin_minutes: 10,
-          max_sections: null,
-          end_time: null,
-          breaks: [],
-        },
-      },
-      result: {
-        ...scheduleResult,
-        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
-        league_standings: standingsResult,
-      },
-    },
-  });
+  await importDocument(page, placementDocument({ resolved: true }));
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
@@ -249,7 +247,7 @@ test("確定順位から2日目を作成し、得点変更時は仮表と仮日�
   await page.getByRole("button", { name: "2日目を作成する" }).click();
 
   await expect(page.locator("#day2-schedule-view")).toBeVisible();
-  await expect(page.locator("#tournament-plan-view")).toContainText("上位トーナメント");
+  await expect(page.locator("#tournament-plan-view")).toContainText("第1順位帯");
   await expect(page.locator("#tournament-plan-view")).toContainText("青空FC");
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({
@@ -274,17 +272,7 @@ test("既存の仮トーナメントだけを持つデータから2日目全体�
 }) => {
   await mockExternalServices(page);
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  await importDocument(page, {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      result: {
-        ...scheduleResult,
-        tournament_plan: provisionalTournamentPlanResult,
-      },
-    },
-  });
+  await importDocument(page, placementDocument({ includePlan: true }));
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
@@ -322,31 +310,7 @@ for (const failedStage of ["tournament_plan", "day2_schedule", "integrated_valid
   }) => {
     await mockExternalServices(page);
     await openApp(page);
-    const base = tournamentFixture({ withResult: true });
-    await importDocument(page, {
-      ...base,
-      tournament: {
-        ...base.tournament,
-        input: {
-          ...base.tournament.input,
-          day2: {
-            id: "day2",
-            start_time: "09:30",
-            game_duration_minutes: 35,
-            margin_minutes: 10,
-            max_sections: null,
-            end_time: null,
-            breaks: [],
-          },
-        },
-        result: {
-          ...scheduleResult,
-          tournament_plan: provisionalTournamentPlanResult,
-          day2_schedule: provisionalDay2ScheduleResult,
-          integrated_validation: provisionalDay2ScheduleResult.integrated_validation,
-        },
-      },
-    });
+    await importDocument(page, placementDocument({ includePlan: true, includeSchedule: true }));
     await page.unroute(GENERATE_API);
     const requests: Array<{ kind: unknown; token: string | undefined }> = [];
     await page.route(GENERATE_API, async (route) => {
@@ -401,31 +365,7 @@ for (const failedStage of ["tournament_plan", "day2_schedule", "integrated_valid
 test("複合応答に表または日程が欠ける場合は保存しない", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  await importDocument(page, {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      input: {
-        ...base.tournament.input,
-        day2: {
-          id: "day2",
-          start_time: "09:30",
-          game_duration_minutes: 35,
-          margin_minutes: 10,
-          max_sections: null,
-          end_time: null,
-          breaks: [],
-        },
-      },
-      result: {
-        ...scheduleResult,
-        tournament_plan: provisionalTournamentPlanResult,
-        day2_schedule: provisionalDay2ScheduleResult,
-        integrated_validation: provisionalDay2ScheduleResult.integrated_validation,
-      },
-    },
-  });
+  await importDocument(page, placementDocument({ includePlan: true, includeSchedule: true }));
   await page.unroute(GENERATE_API);
   await page.route(GENERATE_API, async (route) => {
     await route.fulfill({
@@ -449,19 +389,7 @@ test("1日目と2日目をモバイルで分け、日別に印刷表示できる
   await mockExternalServices(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  const document = {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      result: {
-        ...scheduleResult,
-        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
-        league_standings: standingsResult,
-        tournament_plan: tournamentPlanResult,
-      },
-    },
-  };
+  const document = placementDocument({ resolved: true, includePlan: true });
   await importDocument(page, document);
 
   await expect(page.locator('[data-panel="5"]')).toBeVisible();
@@ -489,19 +417,7 @@ test("トーナメント表から2日目日程を作成し、設定変更時は2
   await mockExternalServices(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openApp(page);
-  const base = tournamentFixture({ withResult: true });
-  await importDocument(page, {
-    ...base,
-    tournament: {
-      ...base.tournament,
-      result: {
-        ...scheduleResult,
-        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
-        league_standings: standingsResult,
-        tournament_plan: tournamentPlanResult,
-      },
-    },
-  });
+  await importDocument(page, placementDocument({ resolved: true, includePlan: true }));
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {

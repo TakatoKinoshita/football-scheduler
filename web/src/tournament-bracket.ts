@@ -1,4 +1,4 @@
-import type { JsonObject } from "./types";
+import { placementTournamentPool, type JsonObject } from "./types";
 import {
   resolveTournamentProgress,
   type TournamentMatchProgress,
@@ -284,9 +284,9 @@ function nonNegativeInteger(value: unknown): number | undefined {
 }
 
 function poolValue(plan: JsonObject, pool: TournamentPoolName): JsonObject {
-  const value = objectValue(plan[pool]);
+  const value = placementTournamentPool(plan, pool)?.data;
   if (value === undefined) {
-    throw new TournamentBracketError("トーナメントの上下区分を読み取れませんでした。");
+    throw new TournamentBracketError("トーナメントの順位帯を読み取れませんでした。");
   }
   return value;
 }
@@ -441,7 +441,7 @@ function finalTeamByPoolRank(
 ): Map<number, string> {
   const result = new Map<number, string>();
   for (const standing of objectArray(finalStandings?.standings)) {
-    if (standing.pool !== pool) continue;
+    if ((standing.pool_id ?? standing.pool) !== pool) continue;
     const rank = positiveInteger(standing.pool_rank);
     const teamId = identifier(standing.team_id);
     if (rank !== undefined && teamId !== undefined) result.set(rank, teamId);
@@ -1095,6 +1095,10 @@ function buildStandardTournamentBracketModel(
   if (participantCount === undefined || participantCount > 32) {
     throw new TournamentBracketError("トーナメント参加数を読み取れませんでした。");
   }
+  const overallStart = Array.isArray(pool.overall_rank_range)
+    ? positiveInteger(pool.overall_rank_range[0])
+    : undefined;
+  const rankOffset = overallStart === undefined ? 0 : overallStart - 1;
   const provisional = input.plan.participant_resolution === "provisional";
   const parsedMatches: ParsedMatch[] = [];
   const matchById = new Map<string, ParsedMatch>();
@@ -1102,8 +1106,10 @@ function buildStandardTournamentBracketModel(
     const id = identifier(raw.id);
     const roundNo = positiveInteger(raw.round_no);
     const rankRange = Array.isArray(raw.rank_range) ? raw.rank_range : [];
-    const rangeStart = positiveInteger(rankRange[0]);
-    const rangeEnd = positiveInteger(rankRange[1]);
+    const rawRangeStart = positiveInteger(rankRange[0]);
+    const rawRangeEnd = positiveInteger(rankRange[1]);
+    const rangeStart = rawRangeStart === undefined ? undefined : rawRangeStart - rankOffset;
+    const rangeEnd = rawRangeEnd === undefined ? undefined : rawRangeEnd - rankOffset;
     if (
       id === undefined ||
       roundNo === undefined ||
@@ -1271,31 +1277,21 @@ function buildStandardTournamentBracketModel(
   };
 
   const byeEntryKeys = new Set<string>();
+  // schema 0.1 の閲覧互換用。schema 0.2 の新規表には不戦通過は存在しない。
   for (const bye of objectArray(pool.byes)) {
-    const nextMatchId = identifier(bye.next_match_id);
-    if (nextMatchId === undefined || !matchById.has(nextMatchId)) {
-      throw new TournamentBracketError("不戦通過の進行先を読み取れませんでした。");
-    }
     const entry = validateEntry(bye.entry);
-    const nextMatch = matchById.get(nextMatchId)!;
-    const key = entryKey(entry);
-    const sides = (["home", "away"] as const).filter(
-      (side) => entryKey(nextMatch.raw[side]) === key,
-    );
-    if (sides.length !== 1) {
-      throw new TournamentBracketError("不戦通過の参加枠と進行先が一致しません。");
-    }
-    byeEntryKeys.add(key);
+    byeEntryKeys.add(entryKey(entry));
   }
 
   const finalTeams = finalTeamByPoolRank(input.finalStandings, input.pool);
-  const upperCount = nonNegativeInteger(objectValue(input.plan.upper)?.participant_count) ?? 0;
-  const overallRank = (poolRank: number): number =>
-    input.pool === "upper" ? poolRank : upperCount + poolRank;
+  const upperCount = nonNegativeInteger(placementTournamentPool(input.plan, "upper")?.data.participant_count) ?? 0;
+  const overallRank = (poolRank: number): number => overallStart === undefined
+    ? (input.pool === "upper" ? poolRank : upperCount + poolRank)
+    : overallStart + poolRank - 1;
   const placements: PlacementRecord[] = [];
   const placementRanks = new Set<number>();
   for (const placement of objectArray(pool.placements)) {
-    const poolRank = positiveInteger(placement.rank);
+    const poolRank = positiveInteger(placement.pool_rank ?? placement.rank);
     if (poolRank === undefined || poolRank > participantCount || placementRanks.has(poolRank)) {
       throw new TournamentBracketError("最終順位を読み取れませんでした。");
     }
@@ -1309,7 +1305,7 @@ function buildStandardTournamentBracketModel(
     const teamId = confirmedTeamId ?? teamForEntry(entry);
     placements.push({
       poolRank,
-      rank: overallRank(poolRank),
+      rank: positiveInteger(placement.rank) ?? overallRank(poolRank),
       entry,
       ...(reference === undefined ? {} : { reference }),
       ...(teamId === undefined ? {} : { teamId }),

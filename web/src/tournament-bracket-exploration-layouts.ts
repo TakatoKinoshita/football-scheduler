@@ -12,7 +12,7 @@ import {
   type TournamentLogicalLayout,
   type TournamentLogicalMatchPosition,
 } from "./tournament-logical-layout";
-import type { JsonObject } from "./types";
+import { placementTournamentPool, type JsonObject } from "./types";
 
 export type TournamentBracketExplorationOrientation = "vertical" | "horizontal";
 
@@ -298,15 +298,22 @@ function reference(value: unknown): EntryReference | undefined {
 }
 
 function parsedMatches(plan: JsonObject, poolName: string): ParsedMatch[] {
-  const pool = objectValue(plan[poolName], "トーナメントを読み取れませんでした。");
+  const pool = objectValue(
+    placementTournamentPool(plan, poolName)?.data,
+    "トーナメントを読み取れませんでした。",
+  );
+  const overallStart = Array.isArray(pool.overall_rank_range)
+    ? positiveInteger(pool.overall_rank_range[0], "大会全体順位を読み取れませんでした。")
+    : 1;
+  const rankOffset = overallStart - 1;
   return arrayValue(pool.matches, "トーナメント試合を読み取れませんでした。").map(
     (match, inputIndex) => {
       const range = Array.isArray(match.rank_range) ? match.rank_range : [];
       return {
         id: textValue(match.id, "試合IDを読み取れませんでした。"),
         roundNo: positiveInteger(match.round_no, "試合段階を読み取れませんでした。"),
-        rangeStart: positiveInteger(range[0], "順位帯を読み取れませんでした。"),
-        rangeEnd: positiveInteger(range[1], "順位帯を読み取れませんでした。"),
+        rangeStart: positiveInteger(range[0], "順位帯を読み取れませんでした。") - rankOffset,
+        rangeEnd: positiveInteger(range[1], "順位帯を読み取れませんでした。") - rankOffset,
         home: objectValue(match.home, "ホーム参加枠を読み取れませんでした。"),
         away: objectValue(match.away, "アウェイ参加枠を読み取れませんでした。"),
         inputIndex,
@@ -534,7 +541,10 @@ function explorationBaseModel(
   logicalOpeningEntries?: readonly JsonObject[],
 ): TournamentBracketModel {
   const semanticModel = standardTournamentBracketLayout.build(input);
-  const pool = objectValue(input.plan[input.pool], "トーナメントを読み取れませんでした。");
+  const pool = objectValue(
+    placementTournamentPool(input.plan, input.pool)?.data,
+    "トーナメントを読み取れませんでした。",
+  );
   const participantCount = positiveInteger(
     pool.participant_count,
     "トーナメント参加数を読み取れませんでした。",
@@ -544,7 +554,7 @@ function explorationBaseModel(
   }
 
   const byeKeys = new Set(
-    arrayValue(pool.byes, "不戦通過を読み取れませんでした。").map((bye) => entryKey(bye.entry)),
+    arrayValue(pool.byes ?? [], "不戦通過を読み取れませんでした。").map((bye) => entryKey(bye.entry)),
   );
   const openingEntries = logicalOpeningEntries ?? orderedWinnerLeaves(matches, participantCount);
   const slots = openingEntries.map((entry, index) => {
@@ -756,7 +766,10 @@ function buildExplorationModel(
   orientation: TournamentBracketExplorationOrientation,
 ): TournamentBracketExplorationModel {
   const matches = parsedMatches(input.plan, input.pool);
-  const pool = objectValue(input.plan[input.pool], "トーナメントを読み取れませんでした。");
+  const pool = objectValue(
+    placementTournamentPool(input.plan, input.pool)?.data,
+    "トーナメントを読み取れませんでした。",
+  );
   const logicalLayout = readTournamentLogicalLayout(pool);
   const logicalIndex = logicalLayout === undefined
     ? undefined

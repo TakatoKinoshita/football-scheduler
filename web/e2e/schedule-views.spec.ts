@@ -192,12 +192,12 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   const legacyFinalWarning = page.locator(
     "#day2-schedule-view .legacy-schedule-warning",
   );
-  await expect(legacyFinalWarning).toContainText("決勝より後に別の試合");
+  await expect(legacyFinalWarning).toHaveCount(0);
 
   const brackets = page.locator("#tournament-plan-view .tournament-bracket");
   await expect(brackets).toHaveCount(2);
   const upperBracket = page.locator(
-    '#tournament-plan-view .tournament-bracket[data-pool="upper"]',
+    '#tournament-plan-view .tournament-bracket[data-pool="placement-1"]',
   );
   await expect(upperBracket).toBeVisible();
   await expect(upperBracket.locator(".tournament-bracket-sheet")).toHaveCount(1);
@@ -206,7 +206,7 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(upperBracket.locator(".bracket-connector")).toHaveCount(4);
   await expect(upperBracket.locator("path").first()).not.toHaveAttribute("d", /[CQ]/);
   await expect(page.locator("#tournament-plan-view .tournament-bracket figcaption").first())
-    .toHaveText("上位トーナメント表（仮）");
+    .toHaveText("第1順位帯表（仮）");
   await expect(page.getByRole("button", { name: "トーナメント表だけ印刷" })).toBeEnabled();
   await expect(page.locator("#tournament-plan-view table")).toHaveCount(0);
   await expect(page.locator("#tournament-plan-view .seed-list")).toHaveCount(0);
@@ -217,12 +217,12 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   const courtView = page.locator('#day2-schedule-view [data-schedule-view="court"]');
   await expect(courtView).toBeVisible();
   const courtA = courtView.locator('.court-schedule-card[data-court-id="court-a"]');
-  await expect(courtA.locator('.match-display-number[data-match-id="UT-SF1"]')).toHaveText("A①");
-  await expect(courtA.locator('.match-display-number[data-match-id="UT-PLACE3"]')).toHaveText("A②");
+  await expect(courtA.locator('.match-display-number[data-match-id="PT-1-SF1"]')).toHaveText("A①");
+  await expect(courtA.locator('.match-display-number[data-match-id="PT-1-PLACE3"]')).toHaveText("A②");
   await expect(courtA).toContainText("A①の勝者");
-  await expect(courtA).not.toContainText("UT-SF1の勝者");
+  await expect(courtA).not.toContainText("PT-1-SF1の勝者");
   const semifinalNode = upperBracket.locator(
-    '.bracket-match-node[data-match-id="UT-SF1"]',
+    '.bracket-match-node[data-match-id="PT-1-SF1"]',
   );
   await expect(semifinalNode).toContainText("A①");
   await expect(semifinalNode).toContainText("09:30〜10:05 Aコート");
@@ -239,9 +239,7 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await page.reload();
   await expect(page.locator("#day2-schedule-view-toggle").getByLabel("時間順")).toBeChecked();
   await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
-  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toContainText(
-    "決勝より後に別の試合",
-  );
+  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#day1-results-panel")).toBeHidden();
@@ -249,25 +247,16 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator("#day2-schedule-view-toggle")).toBeHidden();
   await expect(page.locator('#day2-schedule-view [data-schedule-view="time"]')).toBeVisible();
   await expect(page.locator('#day2-schedule-view [data-schedule-view="court"]')).toBeHidden();
-  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toBeVisible();
+  await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 });
 
 test("現行日程は内部の決勝配置値を隠し、利用者向けの注意だけを印刷にも載せる", async ({ page }) => {
   const fixture = structuredClone(scheduleViewTournamentFixture());
   const result = fixture.tournament.result as Record<string, unknown>;
   const schedule = result.day2_schedule as Record<string, unknown>;
-  const slots = schedule.slots as Array<Record<string, unknown>>;
-  const upperFinal = slots.find((slot) => slot.match_id === "UT-FINAL")!;
-  const lowerFinal = slots.find((slot) => slot.match_id === "LT-FINAL")!;
-  upperFinal.match_id = "LT-FINAL";
-  lowerFinal.match_id = "UT-FINAL";
-  const metrics = schedule.metrics as Record<string, unknown>;
-  metrics.upper_tournament_final_section = 5;
-  metrics.lower_tournament_final_section = 4;
-  metrics.lower_tournament_final_section_gap = 1;
   schedule.diagnostics = [{
-    code: "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION",
-    message: "コート数と主催者審判能力の範囲では、下位決勝は第4セクションが最も遅い配置です。",
+    code: "OPTIMALITY_NOT_PROVEN",
+    message: "コート数と主催者審判能力の範囲では、第2順位帯の決勝は第4セクションが最も遅い配置です。",
     details: { reason_codes: ["court_capacity"] },
   }];
 
@@ -277,11 +266,11 @@ test("現行日程は内部の決勝配置値を隠し、利用者向けの注�
 
   const day2View = page.locator("#day2-schedule-view");
   await expect(day2View).not.toContainText("決勝配置：");
-  await expect(day2View).toContainText("下位決勝は第4セクションが最も遅い配置");
+  await expect(day2View).toContainText("第2順位帯の決勝は第4セクションが最も遅い配置");
   await expect(day2View.locator(".legacy-schedule-warning")).toHaveCount(0);
 
   await page.emulateMedia({ media: "print" });
-  await expect(day2View.getByText(/下位決勝は第4セクションが最も遅い配置/)).toBeVisible();
+  await expect(day2View.getByText(/第2順位帯の決勝は第4セクションが最も遅い配置/)).toBeVisible();
 });
 
 test("決勝が最終でない新しいAPI応答を保存しない", async ({ page }) => {
@@ -291,10 +280,18 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   delete result.integrated_validation;
   const invalidResponse = structuredClone(scheduleViewDay2ScheduleResult) as Record<string, unknown>;
   const tournamentPlan = result.tournament_plan;
+  const slots = invalidResponse.slots as Array<Record<string, unknown>>;
+  const primary = slots.find((slot) => slot.match_id === "PT-1-FINAL")!;
+  const secondary = slots.find((slot) => slot.match_id === "PT-2-FINAL")!;
+  primary.match_id = "PT-2-FINAL";
+  secondary.match_id = "PT-1-FINAL";
   const metrics = invalidResponse.metrics as Record<string, unknown>;
-  metrics.upper_tournament_final_section = 4;
-  metrics.lower_tournament_final_section = 5;
-  metrics.lower_tournament_final_section_gap = 0;
+  metrics.placement_tournament_finals = [
+    { pool_id: "placement-1", section_no: 4, final_section_gap: 1 },
+    { pool_id: "placement-2", section_no: 5, final_section_gap: 0 },
+  ];
+  metrics.non_primary_final_max_gap = 0;
+  metrics.non_primary_final_sum_gap = 0;
 
   await mockExternalServices(page);
   await openApp(page);
@@ -321,7 +318,7 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
 });
 
-test("標準ブラケットだけを上位・下位のA4横ページとして印刷できる", async ({ page }) => {
+test("標準ブラケットだけを順位帯ごとのA4横ページとして印刷できる", async ({ page }) => {
   await openScheduleViewFixture(page);
   await page.evaluate(() => {
     window.print = () => {
@@ -365,8 +362,8 @@ test("mirroredな8チームは上下とも本番水平版となり、A4縦と局
   await expect(brackets).toHaveCount(2);
   await expect(brackets.nth(0)).toHaveAttribute("data-layout", "horizontal");
   await expect(brackets.nth(1)).toHaveAttribute("data-layout", "horizontal");
-  await expect(brackets.nth(0).locator("figcaption")).toHaveText("上位トーナメント表");
-  await expect(brackets.nth(1).locator("figcaption")).toHaveText("下位トーナメント表");
+  await expect(brackets.nth(0).locator("figcaption")).toHaveText("第1順位帯表");
+  await expect(brackets.nth(1).locator("figcaption")).toHaveText("第2順位帯表");
   await expect(brackets.nth(0).locator(".bracket-line-legend")).toContainText("実線：勝者");
   await expect(brackets.nth(0).locator("svg title").first()).toContainText("水平版");
   await expect(brackets.nth(0).locator("svg desc")).toContainText("完全な対戦・結果・順位情報");
@@ -375,7 +372,7 @@ test("mirroredな8チームは上下とも本番水平版となり、A4縦と局
   await expect(accessibleMatch.locator("title")).toHaveText(/対/u);
 
   const visibleDiagramText = (await brackets.nth(0).locator("svg text").allTextContents()).join(" ");
-  expect(visibleDiagramText).not.toMatch(/UT-/u);
+  expect(visibleDiagramText).not.toMatch(/PT-1-/u);
   expect(visibleDiagramText).not.toMatch(/\d{2}:\d{2}/u);
   await expect(page.locator("#tournament-plan-view table")).toHaveCount(0);
   const placementGuides = page.locator("#tournament-plan-view .result-disclosure");
@@ -450,10 +447,10 @@ test("水平・垂直の共有選択を端末に保存し、再描画・JSON・�
     "#tournament-plan-view .tournament-bracket.exploration.vertical",
   )).toHaveCount(2);
   await expect(page.locator(
-    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="upper"]',
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="placement-1"]',
   )).toHaveCount(1);
   await expect(page.locator(
-    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="lower"]',
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="placement-2"]',
   )).toHaveCount(1);
   expect(await page.evaluate(() =>
     localStorage.getItem("football-scheduler:tournament-bracket-view:v1")
@@ -514,18 +511,18 @@ test("対応・非対応プールを個別に判定し、全プール非対応�
   await mockExternalServices(page);
   await openApp(page);
   const mixed = horizontalBracketTournamentFixture(8);
-  const lower = mixed.tournament.result.tournament_plan.lower as Record<string, unknown>;
-  delete lower.logical_layout;
+  const pools = mixed.tournament.result.tournament_plan.pools;
+  delete pools[1]!.logical_layout;
   await importDocument(page, mixed);
 
   const toggle = page.locator("#tournament-bracket-view-toggle");
   await expect(toggle).toBeEnabled();
   await toggle.getByLabel("垂直版").check();
   await expect(page.locator(
-    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="upper"]',
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="placement-1"]',
   )).toHaveCount(1);
   await expect(page.locator(
-    '#tournament-plan-view .tournament-bracket[data-pool="lower"]:not(.exploration)',
+    '#tournament-plan-view .tournament-bracket[data-pool="placement-2"]:not(.exploration)',
   )).toHaveCount(1);
   await expect(page.locator(
     "#tournament-plan-view .tournament-pool .tournament-bracket-fallback",
@@ -543,19 +540,19 @@ test("対応・非対応プールを個別に判定し、全プール非対応�
   ).first()).toContainText("参加数");
 });
 
-test("mirroredな16チームは上位・下位を独立に本番水平版へ選択する", async ({
+test("mirroredな16チームは順位帯ごとに本番水平版へ選択する", async ({
   page,
 }) => {
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, horizontalBracketTournamentFixture(16));
   const horizontal = page.locator(
-    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="upper"]',
+    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="placement-1"]',
   );
   await expect(horizontal).toHaveCount(1);
   await expect(horizontal).toHaveAttribute("data-participant-count", "16");
   await expect(page.locator(
-    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="lower"]',
+    '#tournament-plan-view .tournament-bracket.exploration.horizontal[data-pool="placement-2"]',
   )).toHaveCount(1);
 });
 
@@ -564,7 +561,7 @@ test("2日目設定を変更すると日程とブラケットの派生番号を�
 }) => {
   await openScheduleViewFixture(page);
   const semifinal = page.locator(
-    '#tournament-plan-view .bracket-match-node[data-match-id="UT-SF1"]',
+    '#tournament-plan-view .bracket-match-node[data-match-id="PT-1-SF1"]',
   );
   await expect(semifinal).toContainText("A①");
 
@@ -572,7 +569,7 @@ test("2日目設定を変更すると日程とブラケットの派生番号を�
   await page.locator("#day2-margin-minutes").blur();
 
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
-  await expect(semifinal).toContainText("UT-SF1");
+  await expect(semifinal).toContainText("PT-1-SF1");
   await expect(semifinal).not.toContainText("A①");
   await expect(page.locator("#day2-status")).toContainText("以前の日程を取り消しました");
 });
@@ -626,7 +623,7 @@ for (const viewport of [
       }));
       expect(localDimensions.scrollWidth).toBeGreaterThanOrEqual(localDimensions.clientWidth);
       const bracket = page.locator(
-        '#tournament-plan-view .tournament-bracket[data-pool="upper"] .tournament-bracket-scroll',
+        '#tournament-plan-view .tournament-bracket[data-pool="placement-1"] .tournament-bracket-scroll',
       );
       const bracketDimensions = await bracket.evaluate((element) => ({
         clientWidth: element.clientWidth,

@@ -104,14 +104,17 @@ function sameOrder(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
-function parseMatches(pool: JsonObject): ParsedMatch[] {
+function parseMatches(pool: JsonObject, rankOffset: number): ParsedMatch[] {
   return objectArray(pool.matches, "論理配置の検証対象となる試合を読み取れませんでした。").map(
-    (match) => ({
-      id: textValue(match.id, "試合IDを読み取れませんでした。"),
-      rankRange: rankRange(match.rank_range, "試合の順位帯を読み取れませんでした。"),
-      home: objectValue(match.home, "ホーム参加枠を読み取れませんでした。"),
-      away: objectValue(match.away, "アウェイ参加枠を読み取れませんでした。"),
-    }),
+    (match) => {
+      const matchRange = rankRange(match.rank_range, "試合の順位帯を読み取れませんでした。");
+      return {
+        id: textValue(match.id, "試合IDを読み取れませんでした。"),
+        rankRange: [matchRange[0] - rankOffset, matchRange[1] - rankOffset],
+        home: objectValue(match.home, "ホーム参加枠を読み取れませんでした。"),
+        away: objectValue(match.away, "アウェイ参加枠を読み取れませんでした。"),
+      };
+    },
   );
 }
 
@@ -134,7 +137,15 @@ export function readTournamentLogicalLayout(
     throw new TournamentLogicalLayoutError("トーナメント全体の対称性を読み取れませんでした。");
   }
 
-  const matches = parseMatches(pool);
+  const overallRange = pool.overall_rank_range === undefined
+    ? undefined
+    : rankRange(pool.overall_rank_range, "大会全体順位帯を読み取れませんでした。");
+  const rankOffset = overallRange === undefined ? 0 : overallRange[0] - 1;
+  const localRange = (value: unknown, message: string): readonly [number, number] => {
+    const parsed = rankRange(value, message);
+    return [parsed[0] - rankOffset, parsed[1] - rankOffset];
+  };
+  const matches = parseMatches(pool, rankOffset);
   const matchById = new Map(matches.map((match) => [match.id, match]));
   if (matchById.size !== matches.length) {
     throw new TournamentLogicalLayoutError("論理配置の検証対象となる試合IDが重複しています。");
@@ -144,7 +155,7 @@ export function readTournamentLogicalLayout(
     "論理配置の試合位置を読み取れませんでした。",
   ).map((position): TournamentLogicalMatchPosition => ({
     matchId: textValue(position.match_id, "論理配置の試合IDを読み取れませんでした。"),
-    rankRange: rankRange(position.rank_range, "論理配置の順位帯を読み取れませんでした。"),
+    rankRange: localRange(position.rank_range, "論理配置の順位帯を読み取れませんでした。"),
     order: positiveInteger(position.order, "論理配置の試合順を読み取れませんでした。"),
   }));
   const positionById = new Map(matchPositions.map((position) => [position.matchId, position]));
@@ -198,7 +209,7 @@ export function readTournamentLogicalLayout(
     raw.branch_alignments,
     "勝敗分岐の論理対応を読み取れませんでした。",
   ).map((alignment): TournamentBranchAlignment => {
-    const alignmentRange = rankRange(
+    const alignmentRange = localRange(
       alignment.rank_range,
       "勝敗分岐の順位帯を読み取れませんでした。",
     );

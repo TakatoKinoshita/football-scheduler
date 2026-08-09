@@ -843,10 +843,16 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
-  it("決勝が最終でない旧ルールの2日目日程を監査値なしなら復元する", () => {
+  it("現行2日目日程は決勝配置の監査値がなければ拒否する", () => {
     const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    const metrics = schedule.metrics as Record<string, unknown>;
+    delete metrics.placement_tournament_finals;
+    delete metrics.non_primary_final_max_gap;
+    delete metrics.non_primary_final_sum_gap;
 
-    expect(parseTournamentJson(JSON.stringify(document))).toEqual(document);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/決勝配置/);
   });
 
   it("現行監査値のある2日目日程で決勝が最終でなければ拒否する", () => {
@@ -854,11 +860,19 @@ describe("大会JSONの入出力", () => {
     const result = document.tournament.result as Record<string, unknown>;
     const schedule = result.day2_schedule as Record<string, unknown>;
     const metrics = schedule.metrics as Record<string, unknown>;
-    metrics.upper_tournament_final_section = 4;
-    metrics.lower_tournament_final_section = 5;
-    metrics.lower_tournament_final_section_gap = 0;
+    const slots = schedule.slots as Array<Record<string, unknown>>;
+    const primary = slots.find((slot) => slot.match_id === "PT-1-FINAL")!;
+    const secondary = slots.find((slot) => slot.match_id === "PT-2-FINAL")!;
+    primary.match_id = "PT-2-FINAL";
+    secondary.match_id = "PT-1-FINAL";
+    metrics.placement_tournament_finals = [
+      { pool_id: "placement-1", section_no: 4, final_section_gap: 1 },
+      { pool_id: "placement-2", section_no: 5, final_section_gap: 0 },
+    ];
+    metrics.non_primary_final_max_gap = 0;
+    metrics.non_primary_final_sum_gap = 0;
 
-    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/現行ルール/);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/最高順位帯の決勝/);
   });
 
   it("2日目日程の決勝配置と現行監査値の不一致を拒否する", () => {
@@ -866,11 +880,12 @@ describe("大会JSONの入出力", () => {
     const result = document.tournament.result as Record<string, unknown>;
     const schedule = result.day2_schedule as Record<string, unknown>;
     const metrics = schedule.metrics as Record<string, unknown>;
-    metrics.upper_tournament_final_section = 5;
-    metrics.lower_tournament_final_section = 5;
-    metrics.lower_tournament_final_section_gap = 0;
+    metrics.placement_tournament_finals = [
+      { pool_id: "placement-1", section_no: 4, final_section_gap: 1 },
+      { pool_id: "placement-2", section_no: 4, final_section_gap: 1 },
+    ];
 
-    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/監査値/);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/決勝配置/);
   });
 
   it("2日目試合結果と総合最終順位を同じ内容で復元する", () => {

@@ -78,6 +78,8 @@ import {
   SCHEMA_VERSION,
   cloneDocument,
   createTournamentDocument,
+  placementTournamentPool,
+  placementTournamentPools,
   type JsonObject,
   type TournamentDocument,
 } from "./types";
@@ -1782,7 +1784,7 @@ function renderTournamentPlan(
   appendTextElement(
     section,
     "p",
-    "不戦通過は試合数に含めず、各トーナメントの1位から最下位までを決める表です。",
+    "各順位帯の1位から最下位までを決める完全順位決定表です。",
     "muted",
   );
   const rankedTeams = new Map(
@@ -1805,18 +1807,14 @@ function renderTournamentPlan(
   const renderBrackets: Array<() => void> = [];
   let selectablePoolCount = 0;
 
-  for (const [field, heading] of [
-    ["upper", "上位トーナメント"],
-    ["lower", "下位トーナメント"],
-  ] as const) {
-    const pool = asObject(plan[field]);
-    if (pool === undefined) continue;
+  for (const poolInfo of placementTournamentPools(plan)) {
+    const { poolId: field, displayName: heading, data: pool, legacyField } = poolInfo;
     const poolSection = window.document.createElement("section");
     poolSection.className = "tournament-pool tournament-bracket-page";
     appendTextElement(
       poolSection,
       "h4",
-      `${heading}（${String(pool.participant_count ?? 0)}チーム）`,
+      `${heading}（総合${Array.isArray(pool.overall_rank_range) ? `${String(pool.overall_rank_range[0])}〜${String(pool.overall_rank_range[1])}位・` : ""}${String(pool.participant_count ?? 0)}チーム）`,
     );
 
     if (tournamentBracketVisible) {
@@ -1882,7 +1880,9 @@ function renderTournamentPlan(
       appendTextElement(
         placements,
         "li",
-        `${String(overallTournamentRank(plan, field, Number(placement.rank)))}位：${tournamentEntryLabel(placement.entry, rankedTeams, teamNames, displayNumberByMatchId)}`,
+        `${String(legacyField === undefined
+          ? placement.rank
+          : overallTournamentRank(plan, field, Number(placement.rank)))}位：${tournamentEntryLabel(placement.entry, rankedTeams, teamNames, displayNumberByMatchId)}`,
       );
     }
     placementDisclosure.append(placements);
@@ -1982,14 +1982,11 @@ function renderDay2Schedule(
     );
   }
   for (const diagnostic of asObjectArray(schedule.diagnostics)) {
-    if (
-      diagnostic.code === "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION"
-      || diagnostic.code === "LOWER_TOURNAMENT_FINAL_PLACEMENT_NOT_PROVEN"
-    ) {
+    if (diagnostic.code === "OPTIMALITY_NOT_PROVEN") {
       appendTextElement(
         section,
         "p",
-        String(diagnostic.message ?? "下位決勝は最終セクションより前に配置されています。"),
+        String(diagnostic.message ?? "決勝配置を含む最適化の一部は未証明です。"),
         "notice",
       );
     }
@@ -2037,7 +2034,9 @@ function renderDay2Schedule(
       if (reasons.length > 0) referee += `（${reasons.join("、")}）`;
     }
     return {
-      phase: match?.phase === "upper_tournament" ? "上位" : "下位",
+      phase: typeof match?.pool_id === "string"
+        ? (placementTournamentPool(plan, match.pool_id)?.displayName ?? match.pool_id)
+        : match?.phase === "upper_tournament" ? "上位" : "下位",
       matchup: `${tournamentEntryLabel(match?.home, rankedTeams, teamNames, schedulePresentation.displayNumberByMatchId)} 対 ${tournamentEntryLabel(match?.away, rankedTeams, teamNames, schedulePresentation.displayNumberByMatchId)}`,
       referee,
     };
@@ -2169,7 +2168,13 @@ function renderFinalStandings(
   )) {
     const row = window.document.createElement("tr");
     appendTextElement(row, "td", `${String(standing.rank)}位`);
-    appendTextElement(row, "td", standing.pool === "upper" ? "上位" : "下位");
+    const poolId = String(standing.pool_id ?? standing.pool ?? "");
+    appendTextElement(
+      row,
+      "td",
+      placementTournamentPool(asObject(documentState.tournament.result?.tournament_plan) ?? {}, poolId)
+        ?.displayName ?? (poolId === "upper" ? "上位" : poolId === "lower" ? "下位" : poolId),
+    );
     appendTextElement(
       row,
       "td",
@@ -2813,6 +2818,22 @@ function renderFinalStageControls(): void {
   const blockCount = blockCountInput.value === "" ? undefined : Number(blockCountInput.value);
   const format = finalStageFormatInput.value;
   tournamentCountField.hidden = format !== "placement_tournament";
+  const supportedCounts = new Map<number, readonly string[]>([
+    [8, ["2"]],
+    [16, ["2"]],
+    [24, ["3"]],
+    [32, ["2", "4"]],
+  ]).get(teamCount) ?? [];
+  for (const option of tournamentCountInput.options) {
+    if (option.value !== "") option.disabled = !supportedCounts.includes(option.value);
+  }
+  if (
+    format === "placement_tournament"
+    && tournamentCountInput.value !== ""
+    && !supportedCounts.includes(tournamentCountInput.value)
+  ) {
+    tournamentCountInput.value = "";
+  }
   sameRankUnevenPolicyField.hidden =
     format !== "same_rank_league" ||
     blockCount === undefined ||

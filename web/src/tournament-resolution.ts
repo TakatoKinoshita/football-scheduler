@@ -1,4 +1,4 @@
-import type { JsonObject } from "./types";
+import { placementTournamentPools, type JsonObject } from "./types";
 
 export type ParticipantResolution = "provisional" | "resolved";
 
@@ -15,9 +15,7 @@ function asObjects(value: unknown): JsonObject[] {
 }
 
 function pools(plan: JsonObject): JsonObject[] {
-  return [asObject(plan.upper), asObject(plan.lower)].filter(
-    (pool): pool is JsonObject => pool !== undefined,
-  );
+  return placementTournamentPools(plan).map((pool) => pool.data);
 }
 
 function seeds(plan: JsonObject): JsonObject[] {
