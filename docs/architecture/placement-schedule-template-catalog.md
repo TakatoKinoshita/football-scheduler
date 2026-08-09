@@ -88,6 +88,9 @@ CP-SATの`INFEASIBLE`として証明できる。
 
 モデル規模を抑えるため、strictは全コートの審判候補を対称に扱うモデル、organizerは入力コート順の
 フォールバック選択まで表現するモデルを使い分ける。いずれも同じ審判規則を強化も緩和もしない。
+strictのhorizon下限では、決勝の最速sectionまでは第1sectionで開いたコートだけを使用でき、その後も
+1sectionに主催者能力数までの決勝でしか新しいコートを開けない、という楽観的な最大配置数も使う。
+これは実行可能配置を除外せず、明らかに容量不足の短いhorizonだけを探索前に証明する。
 
 日程規則、canonical位置、template format、固定するOR-Tools条件を変えた場合は、rulesetまたは
 format versionを更新し、全shardを新規生成する。旧checkpointや一部shardを新rulesetへ混在させない。

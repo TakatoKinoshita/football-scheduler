@@ -130,9 +130,18 @@ class StabilizedPlacementTemplateSolver:
         slot_bound = 1 + math.ceil(max(0, match_count - first_section_capacity) / key.court_count)
         dependency_depth = key.pool_size.bit_length() - 1
         dependency_bound = dependency_depth * 2 - 1
+        referee_capacity_bound = 0
+        if key.day2_fallback is Day2Fallback.STRICT:
+            referee_capacity_bound = _strict_referee_capacity_lower_horizon(
+                match_count=match_count,
+                court_count=key.court_count,
+                organizer_capacity=key.organizer_capacity,
+                final_count=key.pool_count,
+                earliest_final_section=dependency_bound,
+            )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(
-            lower_horizon=max(slot_bound, dependency_bound),
+            lower_horizon=max(slot_bound, dependency_bound, referee_capacity_bound),
             upper_horizon=match_count,
         )
 
@@ -235,6 +244,34 @@ class StabilizedPlacementTemplateSolver:
         )
         self._requests[key.catalog_id] = request
         return request
+
+
+def _strict_referee_capacity_lower_horizon(
+    *,
+    match_count: int,
+    court_count: int,
+    organizer_capacity: int,
+    final_count: int,
+    earliest_final_section: int,
+) -> int:
+    """strictで各sectionに置ける試合数の楽観上限からhorizon下限を返す。"""
+
+    active_courts = min(court_count, organizer_capacity)
+    unopened_by_final = final_count
+    capacity = 0
+    horizon = 0
+    while capacity < match_count:
+        horizon += 1
+        if horizon >= earliest_final_section and unopened_by_final > 0:
+            newly_opened = min(
+                organizer_capacity,
+                unopened_by_final,
+                court_count - active_courts,
+            )
+            active_courts += newly_opened
+            unopened_by_final -= newly_opened
+        capacity += active_courts
+    return horizon
 
 
 def topology_keys(topology: Topology) -> tuple[PlacementTemplateKey, ...]:

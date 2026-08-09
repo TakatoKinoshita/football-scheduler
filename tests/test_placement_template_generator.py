@@ -26,6 +26,7 @@ from football_scheduler.placement_template_generator import (
     StabilizedPlacementTemplateSolver,
     UnprovenPlacementTemplateError,
     _source_proves_target_primary,
+    _strict_referee_capacity_lower_horizon,
     check_catalog,
     generate_template_entry,
     generate_topology_shard,
@@ -193,6 +194,30 @@ def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() 
             7,
         )
         is False
+    )
+
+
+@pytest.mark.parametrize(
+    ("pool_count", "pool_size", "expected"),
+    ((3, 8, 20), (2, 16, 35)),
+)
+def test_strict_capacity_bound_delays_new_courts_until_finals(
+    pool_count: int,
+    pool_size: int,
+    expected: int,
+) -> None:
+    match_count = pool_count * pool_size * (pool_size.bit_length() - 1) // 2
+    earliest_final = (pool_size.bit_length() - 1) * 2 - 1
+
+    assert (
+        _strict_referee_capacity_lower_horizon(
+            match_count=match_count,
+            court_count=2,
+            organizer_capacity=1,
+            final_count=pool_count,
+            earliest_final_section=earliest_final,
+        )
+        == expected
     )
 
 
