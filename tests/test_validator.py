@@ -18,7 +18,7 @@ def winner(match_id: str) -> dict[str, str]:
 @pytest.fixture
 def valid_document() -> dict[str, object]:
     return {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "config": {
             "teams": [{"id": team_id} for team_id in ("A", "B", "C", "D", "E")],
             "courts": [
@@ -314,7 +314,7 @@ def _provisional_day2_document() -> dict[str, object]:
                     "margin_minutes": 10,
                 }
             },
-            "referees": {"organizer_capacity": 1, "tournament_fallback": "organizer"},
+            "referees": {"organizer_capacity": 1, "day2_fallback": "organizer"},
         },
         "league_plan": {"blocks": [{"id": "A", "team_ids": ["T1", "T2"]}]},
         "tournament_plan": {

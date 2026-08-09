@@ -141,7 +141,7 @@ def run_benchmark(
     billed = [int(run["report"]["billed_duration_ms"]) for run in runs]
     hashes = [str(run["determinism_hash"]) for run in runs]
     return {
-        "benchmark_schema_version": "0.1.0",
+        "benchmark_schema_version": "0.2.0",
         "measured_service": "AWS Lambda",
         "region": region,
         "function_name": function_name,

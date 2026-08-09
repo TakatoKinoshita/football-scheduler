@@ -7,13 +7,18 @@ import {
   serializeTournamentJson,
 } from "./import-export";
 import { scheduleViewTournamentFixture } from "../e2e/fixtures";
-import { createTournamentDocument } from "./types";
+import {
+  LEGACY_SCHEMA_VERSION,
+  SCHEMA_VERSION,
+  createTournamentDocument,
+} from "./types";
 
 function validDocument() {
   const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+  document.schemaVersion = LEGACY_SCHEMA_VERSION;
   document.tournament.name = "地区大会";
   document.tournament.input = {
-    schema_version: "0.1.0",
+    schema_version: LEGACY_SCHEMA_VERSION,
     teams: [
       { id: "team-01", name: "青" },
       { id: "team-02", name: "赤" },
@@ -33,6 +38,12 @@ function validDocument() {
 
 function rankedDocument() {
   const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+  document.schemaVersion = LEGACY_SCHEMA_VERSION;
+  document.tournament.input.schema_version = LEGACY_SCHEMA_VERSION;
+  (document.tournament.input.league as Record<string, unknown>).odd_split_policy = "upper";
+  const referees = document.tournament.input.referees as Record<string, unknown>;
+  referees.tournament_fallback = referees.day2_fallback;
+  delete referees.day2_fallback;
   document.tournament.name = "順位確定大会";
   document.tournament.input.teams = [
     { id: "team-01", name: "青" },
@@ -251,9 +262,32 @@ function provisionalDay2Document() {
 }
 
 describe("大会JSONの入出力", () => {
-  it("書き出した文書を同じ内容で読み込む", () => {
-    const document = validDocument();
+  it("schema 0.2.0文書を書き出して同じ内容で読み込む", () => {
+    const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "strict_same_rank",
+    };
+
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("schema 0.1.0文書を閲覧・印刷用として内容を変えずに読み込む", () => {
+    const document = validDocument();
+
+    const parsed = parseTournamentJson(serializeTournamentJson(document));
+
+    expect(parsed).toEqual(document);
+    expect(parsed.schemaVersion).toBe(LEGACY_SCHEMA_VERSION);
   });
 
   it("従来のinput.matches形式でも1日目スロットを復元する", () => {
@@ -434,10 +468,43 @@ describe("大会JSONの入出力", () => {
     document.schemaVersion = "9.9.9";
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrowError(
       new ImportValidationError(
-        "UNSUPPORTED_SCHEMA_VERSION",
+        "SCHEMA_VERSION_UNSUPPORTED",
         "このファイルの版「9.9.9」には対応していません。アプリを更新してから再度お試しください。",
       ),
     );
+  });
+
+  it("文書と生成入力のschema versionが一致しないファイルを拒否する", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "版不一致大会";
+    document.tournament.input.schema_version = LEGACY_SCHEMA_VERSION;
+
+    let thrown: unknown;
+    try {
+      parseTournamentJson(JSON.stringify(document));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ImportValidationError);
+    expect(thrown).toMatchObject({ code: "SCHEMA_VERSION_UNSUPPORTED" });
+    expect((thrown as Error).message).toContain("一致しません");
+  });
+
+  it("生成結果の途中に異なるschema versionが混在するファイルを拒否する", () => {
+    const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const leaguePlan = result.league_plan as Record<string, unknown>;
+    leaguePlan.schema_version = LEGACY_SCHEMA_VERSION;
+
+    let thrown: unknown;
+    try {
+      parseTournamentJson(JSON.stringify(document));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ImportValidationError);
+    expect(thrown).toMatchObject({ code: "SCHEMA_VERSION_UNSUPPORTED" });
+    expect((thrown as Error).message).toContain("異なる版");
   });
 
   it("壊れたJSONを利用者向けメッセージで拒否する", () => {

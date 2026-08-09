@@ -85,7 +85,6 @@ def _request(
     fallback: str = "organizer",
     max_sections: int | None = 40,
     organizer_capacity: int | None = None,
-    odd_split_policy: str = "upper",
     resolved: bool = True,
     team_prefix: str = "T",
 ) -> tuple[Day2ScheduleRequest, TournamentPlan]:
@@ -95,7 +94,7 @@ def _request(
             "request_kind": "tournament_plan",
             "league_plan": league_plan.model_dump(mode="json"),
             **({"league_standings": standings.model_dump(mode="json")} if resolved else {}),
-            "odd_split_policy": odd_split_policy,
+            "final_stage": {"format": "placement_tournament", "tournament_count": 2},
             "random_seed": 17,
         }
     )
@@ -128,7 +127,7 @@ def _request(
                 "organizer_capacity": (
                     courts if organizer_capacity is None else organizer_capacity
                 ),
-                "tournament_fallback": fallback,
+                "day2_fallback": fallback,
             },
             "random_seed": 17,
             "solver": {"max_time_seconds": 10},
@@ -253,23 +252,18 @@ def test_lower_final_is_latest_feasible_when_finals_cannot_share_last_section(
     assert expected_reason_text in warning.message
 
 
-@pytest.mark.parametrize(
-    ("odd_split_policy", "expected_phase"),
-    [("upper", "upper_tournament"), ("lower", "lower_tournament")],
-)
-def test_only_existing_tournament_final_is_last(odd_split_policy: str, expected_phase: str) -> None:
+def test_only_existing_tournament_final_is_last() -> None:
     request, _tournament = _request(
         (3,),
         courts=1,
-        odd_split_policy=odd_split_policy,
     )
 
     result = generate_day2_schedule(request)
 
     upper, lower, last = _final_sections(result)
     assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
-    assert (upper if expected_phase == "upper_tournament" else lower) == last
-    assert (lower if expected_phase == "upper_tournament" else upper) is None
+    assert upper == last
+    assert lower is None
 
 
 def test_invalid_tournament_final_definition_is_rejected() -> None:

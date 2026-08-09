@@ -31,7 +31,7 @@ class TournamentMatchResultInput(ContractModel):
 
 
 class TournamentResultsRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["tournament_results"]
     tournament_plan: TournamentPlan
     results: tuple[TournamentMatchResultInput, ...]
@@ -60,7 +60,7 @@ class FinalStanding(ContractModel):
 
 
 class TournamentStandings(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     status: Literal["COMPLETE"] = "COMPLETE"
     match_results: tuple[TournamentMatchResult, ...]
     standings: tuple[FinalStanding, ...]

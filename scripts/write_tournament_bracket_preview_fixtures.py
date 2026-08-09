@@ -95,7 +95,7 @@ def _fixture(participant_count: int) -> dict[str, Any]:
             "request_kind": "tournament_plan",
             "league_plan": league_plan.model_dump(mode="json"),
             "league_standings": standings.model_dump(mode="json"),
-            "odd_split_policy": "upper",
+            "final_stage": {"format": "placement_tournament", "tournament_count": 2},
             "random_seed": RANDOM_SEED,
         }
     )

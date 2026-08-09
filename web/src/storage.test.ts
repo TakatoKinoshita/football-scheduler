@@ -2,7 +2,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AutosaveController, TournamentStorage } from "./storage";
-import { createTournamentDocument } from "./types";
+import { LEGACY_SCHEMA_VERSION, createTournamentDocument } from "./types";
 
 describe("ブラウザ内保存", () => {
   let storage: TournamentStorage;
@@ -16,6 +16,17 @@ describe("ブラウザ内保存", () => {
     document.tournament.name = "自動保存大会";
     await storage.saveDraft(document);
     expect((await storage.loadLatest())?.tournament.name).toBe("自動保存大会");
+  });
+
+  it("閲覧専用のschema 0.1.0文書も内容を変えずに復元する", async () => {
+    const document = createTournamentDocument();
+    document.schemaVersion = LEGACY_SCHEMA_VERSION;
+    document.tournament.input.schema_version = LEGACY_SCHEMA_VERSION;
+    document.tournament.result = { status: "OPTIMAL", slots: [] };
+
+    await storage.replaceImported(document);
+
+    expect(await storage.loadLatest()).toEqual(document);
   });
 
   it("直前の確定状態を1世代だけ復元する", async () => {

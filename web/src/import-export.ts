@@ -1,6 +1,8 @@
 import {
   DOCUMENT_TYPE,
+  LEGACY_SCHEMA_VERSION,
   SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
   type JsonObject,
   type TournamentDocument,
 } from "./types";
@@ -31,6 +33,28 @@ export const LIMITS = {
   matches: 512,
   sections: 128,
 } as const;
+
+function isSupportedSchemaVersion(value: unknown): boolean {
+  return (SUPPORTED_SCHEMA_VERSIONS as readonly unknown[]).includes(value);
+}
+
+function validateNestedSchemaVersions(value: unknown, expected: string, path = "tournament"): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateNestedSchemaVersions(item, expected, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  const object = value as JsonObject;
+  if (object.schema_version !== undefined && object.schema_version !== expected) {
+    throw new ImportValidationError(
+      "SCHEMA_VERSION_UNSUPPORTED",
+      `保存ファイル内（${path}）に異なる版のデータが混在しています。書き出したファイルを選び直してください。`,
+    );
+  }
+  for (const [key, item] of Object.entries(object)) {
+    validateNestedSchemaVersions(item, expected, `${path}.${key}`);
+  }
+}
 
 export class ImportValidationError extends Error {
   constructor(
@@ -515,7 +539,7 @@ function validateDay2ScheduleResult(
     ? "resolved"
     : tournamentPlan.participant_resolution;
   if (
-    schedule.schema_version !== SCHEMA_VERSION ||
+    !isSupportedSchemaVersion(schedule.schema_version) ||
     schedule.schedule_scope !== "day2_tournament" ||
     !new Set(["OPTIMAL", "FEASIBLE"]).has(String(schedule.status)) ||
     (scheduleResolution !== "provisional" && scheduleResolution !== "resolved") ||
@@ -1096,8 +1120,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
 
   if (result.league_standings === undefined) {
     if (result.tournament_plan !== undefined) {
-      const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
-      const oddSplitPolicy = validateOddSplitPolicy(leagueSettings.odd_split_policy);
+      const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
       const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
       const tournamentPlan = objectValue(
         result.tournament_plan,
@@ -1109,6 +1132,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
         teamIds,
         oddSplitPolicy,
         rankSets,
+        tournamentCount,
       );
       validateDay2ScheduleResult(result, input, teams, tournamentPlan, undefined);
       validateTournamentResultsState(result, tournamentPlan);
@@ -1176,8 +1200,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
     }
   }
   if (result.tournament_plan !== undefined) {
-    const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
-    const oddSplitPolicy = validateOddSplitPolicy(leagueSettings.odd_split_policy);
+    const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
     const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
     const tournamentPlan = objectValue(
       result.tournament_plan,
@@ -1189,6 +1212,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       teamIds,
       oddSplitPolicy,
       rankSets,
+      tournamentCount,
     );
     validateDay2ScheduleResult(result, input, teams, tournamentPlan, rows);
     validateTournamentResultsState(result, tournamentPlan);
@@ -1203,6 +1227,29 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       "トーナメント表がないため、2日目日程を復元できませんでした。",
     );
   }
+}
+
+function tournamentPlanValidationContext(input: JsonObject): {
+  oddSplitPolicy: "upper" | "lower" | "alternate";
+  tournamentCount?: number;
+} {
+  if (input.schema_version === SCHEMA_VERSION) {
+    const finalStage = objectValue(input.final_stage, "決勝方式を読み取れませんでした。");
+    if (
+      finalStage.format !== "placement_tournament" ||
+      typeof finalStage.tournament_count !== "number" ||
+      !Number.isInteger(finalStage.tournament_count) ||
+      finalStage.tournament_count < 1
+    ) {
+      throw new ImportValidationError(
+        "INVALID_DOCUMENT",
+        "順位決定トーナメントの設定を読み取れませんでした。",
+      );
+    }
+    return { oddSplitPolicy: "upper", tournamentCount: finalStage.tournament_count };
+  }
+  const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
+  return { oddSplitPolicy: validateOddSplitPolicy(leagueSettings.odd_split_policy) };
 }
 
 function validateTournamentResultsState(result: JsonObject, plan: JsonObject): void {
@@ -1242,7 +1289,7 @@ function validateTournamentResultsState(result: JsonObject, plan: JsonObject): v
     result.final_standings,
     "総合最終順位を読み取れませんでした。",
   );
-  if (finalStandings.schema_version !== SCHEMA_VERSION || finalStandings.status !== "COMPLETE") {
+  if (!isSupportedSchemaVersion(finalStandings.schema_version) || finalStandings.status !== "COMPLETE") {
     throw new ImportValidationError(
       "INVALID_DOCUMENT",
       "総合最終順位の状態を読み取れませんでした。",
@@ -1633,12 +1680,18 @@ function validateTournamentPlan(
   teamIds: Set<string>,
   expectedPolicy: "upper" | "lower" | "alternate",
   rankSets: TournamentRankSets,
+  expectedTournamentCount?: number,
 ): void {
+  const currentPlan = plan.schema_version === SCHEMA_VERSION;
   if (
-    plan.schema_version !== SCHEMA_VERSION ||
+    !isSupportedSchemaVersion(plan.schema_version) ||
     plan.status !== "COMPLETE" ||
-    !new Set(["upper", "lower", "alternate"]).has(String(plan.odd_split_policy)) ||
-    plan.odd_split_policy !== expectedPolicy ||
+    (currentPlan
+      ? plan.format !== "placement_tournament" ||
+        plan.tournament_count !== expectedTournamentCount ||
+        plan.odd_split_policy !== undefined
+      : !new Set(["upper", "lower", "alternate"]).has(String(plan.odd_split_policy)) ||
+        plan.odd_split_policy !== expectedPolicy) ||
     typeof plan.random_seed !== "number" ||
     !Number.isInteger(plan.random_seed)
   ) {
@@ -1825,9 +1878,9 @@ export function parseTournamentJson(text: string): TournamentDocument {
       "このアプリの大会データではありません。選択したファイルを確認してください。",
     );
   }
-  if (root.schemaVersion !== SCHEMA_VERSION) {
+  if (!isSupportedSchemaVersion(root.schemaVersion)) {
     throw new ImportValidationError(
-      "UNSUPPORTED_SCHEMA_VERSION",
+      "SCHEMA_VERSION_UNSUPPORTED",
       `このファイルの版「${String(root.schemaVersion)}」には対応していません。アプリを更新してから再度お試しください。`,
     );
   }
@@ -1837,12 +1890,13 @@ export function parseTournamentJson(text: string): TournamentDocument {
     throw new ImportValidationError("INVALID_DOCUMENT", "大会名が入力されていません。");
   }
   const input = objectValue(tournament.input, "大会の入力内容を読み取れませんでした。");
-  if (input.schema_version !== SCHEMA_VERSION) {
+  if (input.schema_version !== root.schemaVersion) {
     throw new ImportValidationError(
-      "UNSUPPORTED_SCHEMA_VERSION",
-      "大会設定の版に対応していません。アプリを更新してから再度お試しください。",
+      "SCHEMA_VERSION_UNSUPPORTED",
+      "保存ファイルと大会設定の版が一致しません。書き出したファイルを選び直してください。",
     );
   }
+  validateNestedSchemaVersions(tournament, String(root.schemaVersion));
   const teams = arrayValue(input.teams, "チーム", LIMITS.teams);
   const courts = arrayValue(input.courts, "コート", LIMITS.courts);
   uniqueIds(courts, "コート");

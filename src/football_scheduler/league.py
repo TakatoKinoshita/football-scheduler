@@ -46,7 +46,7 @@ class ManualBlock(ContractModel):
 class LeaguePlanRequest(ContractModel):
     """リーグ生成のJSON互換入力。"""
 
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     teams: Annotated[tuple[LeagueTeam, ...], Field(min_length=2, max_length=32)]
     block_count: Annotated[int, Field(ge=1, le=32)]
     assignment_mode: AssignmentMode = AssignmentMode.RANDOM
@@ -83,7 +83,7 @@ class ManualCompletion(ContractModel):
 class LeaguePlan(ContractModel):
     """既存ソルバーへ渡せるMatchSpecを含むリーグ生成結果。"""
 
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     assignment_mode: AssignmentMode
     random_seed: int
     blocks: tuple[LeagueBlock, ...]

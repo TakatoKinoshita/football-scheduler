@@ -1,11 +1,15 @@
 export const DOCUMENT_TYPE = "football-scheduler-tournament" as const;
-export const SCHEMA_VERSION = "0.1.0" as const;
+export const SCHEMA_VERSION = "0.2.0" as const;
+export const LEGACY_SCHEMA_VERSION = "0.1.0" as const;
+export const SUPPORTED_SCHEMA_VERSIONS = [LEGACY_SCHEMA_VERSION, SCHEMA_VERSION] as const;
+
+export type SchemaVersion = (typeof SUPPORTED_SCHEMA_VERSIONS)[number];
 
 export type JsonObject = Record<string, unknown>;
 
 export interface TournamentDocument {
   documentType: typeof DOCUMENT_TYPE;
-  schemaVersion: typeof SCHEMA_VERSION;
+  schemaVersion: SchemaVersion;
   updatedAt: string;
   tournament: {
     name: string;
@@ -29,7 +33,6 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
         league: {
           block_count: null,
           assignment_mode: "random",
-          odd_split_policy: "upper",
         },
         day: {
           id: "day1",
@@ -50,7 +53,7 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
         referees: {
           organizer_capacity: 1,
           team_referees_required_after_first: true,
-          tournament_fallback: "organizer",
+          day2_fallback: "organizer",
         },
         random_seed: 20260803,
         solver: { max_time_seconds: 30 },

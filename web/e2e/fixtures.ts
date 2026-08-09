@@ -39,6 +39,11 @@ export function horizontalBracketTournamentFixture(
     participantCount === 8 ? upperEightPreviewJson : upperSixteenPreviewJson,
   ) as PreviewFixture;
   const plan = preview.tournament_plan;
+  plan.schema_version = "0.2.0";
+  const currentPlan = plan as unknown as Record<string, unknown>;
+  currentPlan.format = "placement_tournament";
+  currentPlan.tournament_count = 2;
+  delete currentPlan.odd_split_policy;
   const upperSeedDraws = structuredClone(plan.seed_draws) as unknown[];
   plan.lower = lowerTournamentValue(plan.upper);
   plan.seed_draws = [
@@ -121,20 +126,20 @@ export function horizontalBracketTournamentFixture(
   ]);
   const document = {
     documentType: "football-scheduler-tournament",
-    schemaVersion: "0.1.0",
+    schemaVersion: "0.2.0",
     updatedAt: "2026-08-09T00:00:00.000Z",
     tournament: {
       name: `水平ブラケット${String(participantCount)}チーム大会`,
       input: {
-        schema_version: "0.1.0",
+        schema_version: "0.2.0",
         request_kind: "day1_league",
         teams,
         courts,
         league: {
           block_count: blocks.length,
           assignment_mode: "random",
-          odd_split_policy: "upper",
         },
+        final_stage: { format: "placement_tournament", tournament_count: 2 },
         day: {
           id: "day1",
           start_time: "09:30",
@@ -146,16 +151,17 @@ export function horizontalBracketTournamentFixture(
         referees: {
           organizer_capacity: courts.length,
           team_referees_required_after_first: false,
+          day2_fallback: "organizer",
         },
         random_seed: 20260803,
         solver: { max_time_seconds: 30 },
       },
       result: {
-        schema_version: "0.1.0",
+        schema_version: "0.2.0",
         status: "OPTIMAL",
         schedule_scope: "day1_league",
         league_plan: {
-          schema_version: "0.1.0",
+          schema_version: "0.2.0",
           assignment_mode: "random",
           random_seed: 20260803,
           blocks,
@@ -191,7 +197,7 @@ export function horizontalBracketTournamentFixture(
           away_score: 0,
         })),
         league_standings: {
-          schema_version: "0.1.0",
+          schema_version: "0.2.0",
           status: "COMPLETE",
           standings,
           draws: [],
@@ -286,7 +292,7 @@ export function horizontalBracketTournamentFixture(
     const result = document.tournament.result as unknown as Record<string, unknown>;
     result.tournament_results = tournamentResults;
     result.final_standings = {
-      schema_version: "0.1.0",
+      schema_version: "0.2.0",
       status: "COMPLETE",
       match_results: canonicalResults,
       standings: finalStandings,
@@ -296,11 +302,11 @@ export function horizontalBracketTournamentFixture(
 }
 
 export const scheduleResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
   status: "OPTIMAL",
   schedule_scope: "day1_league",
   league_plan: {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     assignment_mode: "random",
     random_seed: 20260803,
     blocks: [{ id: "A", team_ids: ["team-01", "team-02"] }],
@@ -341,7 +347,7 @@ export const scheduleResult = {
 };
 
 export const standingsResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
   status: "COMPLETE",
   standings: [
     {
@@ -385,10 +391,11 @@ const emptyTournamentEvaluation = {
 };
 
 export const tournamentPlanResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
+  format: "placement_tournament",
+  tournament_count: 2,
   status: "COMPLETE",
   participant_resolution: "resolved",
-  odd_split_policy: "upper",
   random_seed: 20260803,
   upper: {
     pool: "upper",
@@ -456,7 +463,7 @@ export const provisionalTournamentPlanResult = {
 };
 
 export const day2ScheduleResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
   schedule_scope: "day2_tournament",
   participant_resolution: "resolved",
   status: "OPTIMAL",
@@ -519,11 +526,11 @@ const scheduleViewLeagueMatches = scheduleViewBlocks.map((block, index) => ({
 }));
 
 export const scheduleViewDay1Result = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
   status: "OPTIMAL",
   schedule_scope: "day1_league",
   league_plan: {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     assignment_mode: "random",
     random_seed: 20260803,
     blocks: scheduleViewBlocks,
@@ -636,10 +643,11 @@ function scheduleViewPool(pool: "upper" | "lower") {
 }
 
 export const scheduleViewTournamentPlanResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
+  format: "placement_tournament",
+  tournament_count: 2,
   status: "COMPLETE",
   participant_resolution: "provisional",
-  odd_split_policy: "upper",
   random_seed: 20260803,
   upper: scheduleViewPool("upper"),
   lower: scheduleViewPool("lower"),
@@ -676,7 +684,7 @@ const scheduleViewDay2Slots = [
 ];
 
 export const scheduleViewDay2ScheduleResult = {
-  schema_version: "0.1.0",
+  schema_version: "0.2.0",
   schedule_scope: "day2_tournament",
   participant_resolution: "provisional",
   status: "OPTIMAL",
@@ -724,24 +732,25 @@ export const scheduleViewDay2ScheduleResult = {
 };
 
 export function scheduleViewTournamentFixture() {
-  return {
+  const document = {
     documentType: "football-scheduler-tournament",
-    schemaVersion: "0.1.0",
+    schemaVersion: "0.2.0",
     updatedAt: "2026-08-07T00:00:00.000Z",
     tournament: {
       name: "表示切替大会",
       input: {
-        schema_version: "0.1.0",
+        schema_version: "0.2.0",
         request_kind: "day1_league",
         teams: scheduleViewTeams,
         courts: [
           { id: "court-a", name: "Aコート" },
           { id: "court-b", name: "Bコート" },
         ],
-        league: { block_count: 4, assignment_mode: "random", odd_split_policy: "upper" },
+        league: { block_count: 4, assignment_mode: "random" },
+        final_stage: { format: "placement_tournament", tournament_count: 2 },
         day: { id: "day1", start_time: "09:30", game_duration_minutes: 35, margin_minutes: 5, max_sections: 6, breaks: [] },
         day2: { id: "day2", start_time: "09:30", game_duration_minutes: 35, margin_minutes: 10, max_sections: 8, end_time: null, breaks: [] },
-        referees: { organizer_capacity: 2, team_referees_required_after_first: true, tournament_fallback: "organizer" },
+        referees: { organizer_capacity: 2, team_referees_required_after_first: true, day2_fallback: "organizer" },
         random_seed: 20260803,
         solver: { max_time_seconds: 30 },
       },
@@ -753,6 +762,7 @@ export function scheduleViewTournamentFixture() {
       },
     },
   };
+  return structuredClone(document);
 }
 
 export function tournamentResultsFixture() {
@@ -760,7 +770,7 @@ export function tournamentResultsFixture() {
     tournament: { result: Record<string, unknown> };
   };
   const standings = {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     status: "COMPLETE",
     standings: scheduleViewBlocks.flatMap((block) =>
       block.team_ids.map((teamId, index) => ({
@@ -838,19 +848,20 @@ export function tournamentResultsFixture() {
 export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   const document = {
     documentType: "football-scheduler-tournament",
-    schemaVersion: "0.1.0",
+    schemaVersion: "0.2.0",
     updatedAt: "2026-08-05T00:00:00.000Z",
     tournament: {
       name: options.name ?? "E2E地区大会",
       input: {
-        schema_version: "0.1.0",
+        schema_version: "0.2.0",
         request_kind: "day1_league",
         teams: [
           { id: "team-01", name: "青空FC" },
           { id: "team-02", name: "みどりSC" },
         ],
         courts: [{ id: "court-a", name: "Aコート" }],
-        league: { block_count: 1, assignment_mode: "random", odd_split_policy: "upper" },
+        league: { block_count: 1, assignment_mode: "random" },
+        final_stage: { format: "same_rank_league", uneven_policy: "strict_same_rank" },
         day: {
           id: "day1",
           start_time: "09:30",
@@ -861,6 +872,7 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
         referees: {
           organizer_capacity: 1,
           team_referees_required_after_first: true,
+          day2_fallback: "organizer",
         },
         random_seed: 20260803,
         solver: { max_time_seconds: 30 },
@@ -873,6 +885,28 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
       ...document,
       tournament: { ...document.tournament, result: scheduleResult },
     };
+  }
+  return document;
+}
+
+/** schema 0.1.0の閲覧・印刷専用フローを検証するための明示的な旧文書。 */
+export function legacyTournamentFixture(options: TournamentFixtureOptions = {}) {
+  const document = structuredClone(tournamentFixture(options)) as ReturnType<
+    typeof tournamentFixture
+  >;
+  document.schemaVersion = "0.1.0" as "0.2.0";
+  document.tournament.input.schema_version = "0.1.0";
+  document.tournament.input.league = {
+    ...document.tournament.input.league,
+    odd_split_policy: "upper",
+  } as typeof document.tournament.input.league;
+  delete (document.tournament.input as Record<string, unknown>).final_stage;
+  const referees = document.tournament.input.referees as Record<string, unknown>;
+  referees.tournament_fallback = referees.day2_fallback;
+  delete referees.day2_fallback;
+  if ("result" in document.tournament && document.tournament.result !== undefined) {
+    document.tournament.result.schema_version = "0.1.0";
+    document.tournament.result.league_plan.schema_version = "0.1.0";
   }
   return document;
 }

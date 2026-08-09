@@ -1,4 +1,5 @@
 import {
+  LEGACY_SCHEMA_VERSION,
   SCHEMA_VERSION,
   cloneDocument,
   type JsonObject,
@@ -19,6 +20,9 @@ export interface DocumentMode {
   migrated: boolean;
   legacyCompatibility: boolean;
 }
+
+export type FinalStageFormat = "placement_tournament" | "same_rank_league";
+export type SameRankUnevenPolicy = "strict_same_rank" | "merge_bottom";
 
 function objectValue(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -48,6 +52,7 @@ export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
     teams: input.teams,
     courts: input.courts,
     league,
+    final_stage: input.final_stage,
     day: input.day,
     referees: input.referees,
     random_seed: input.random_seed,
@@ -56,36 +61,67 @@ export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
 }
 
 export function normalizeDocument(document: TournamentDocument): DocumentMode {
+  if (
+    document.schemaVersion === LEGACY_SCHEMA_VERSION ||
+    document.tournament.input.schema_version === LEGACY_SCHEMA_VERSION
+  ) {
+    return { document, migrated: false, legacyCompatibility: true };
+  }
   const input = document.tournament.input;
   if (isDay1LeagueInput(input)) {
     return { document, migrated: false, legacyCompatibility: false };
   }
 
-  const matches = objectArray(input.matches);
-  const day = objectValue(input.day);
-  const referees = objectValue(input.referees);
-  if (matches.length > 0 && day !== undefined && referees !== undefined) {
-    return { document, migrated: false, legacyCompatibility: true };
-  }
+  return { document, migrated: false, legacyCompatibility: true };
+}
 
-  if (matches.length === 0 && day === undefined && referees === undefined) {
-    const migrated = cloneDocument(document);
-    const teams = objectArray(input.teams);
-    const courts = objectArray(input.courts);
-    migrated.tournament.input = {
+/** 0.1.0文書から生成結果を一切持ち込まず、編集可能な0.2.0設定を作る。 */
+export function convertLegacyToEditableDocument(
+  document: TournamentDocument,
+  now = new Date(),
+): TournamentDocument {
+  const converted = createEditableDocumentFromLegacy(document, now);
+  return converted;
+}
+
+function createEditableDocumentFromLegacy(
+  document: TournamentDocument,
+  now: Date,
+): TournamentDocument {
+  const source = document.tournament.input;
+  const league = objectValue(source.league) ?? {};
+  const referees = objectValue(source.referees) ?? {};
+  const teams = structuredClone(objectArray(source.teams));
+  const courts = structuredClone(objectArray(source.courts));
+  const converted = cloneDocument(document);
+  converted.schemaVersion = SCHEMA_VERSION;
+  converted.updatedAt = now.toISOString();
+  converted.tournament = {
+    name: document.tournament.name,
+    input: {
       schema_version: SCHEMA_VERSION,
       request_kind: "day1_league",
       teams,
       courts,
-      league: { block_count: null, assignment_mode: "random" },
-      day: {
+      league: {
+        block_count: typeof league.block_count === "number" ? league.block_count : null,
+        assignment_mode: new Set(["random", "seeded_snake", "manual"]).has(
+            String(league.assignment_mode),
+          )
+          ? league.assignment_mode
+          : "random",
+        ...(league.assignment_mode === "manual" && Array.isArray(league.manual_blocks)
+          ? { manual_blocks: structuredClone(league.manual_blocks) }
+          : {}),
+      },
+      day: structuredClone(objectValue(source.day)) ?? {
         id: "day1",
         start_time: "09:30",
         game_duration_minutes: 35,
         margin_minutes: 5,
         max_sections: null,
       },
-      day2: {
+      day2: structuredClone(objectValue(source.day2)) ?? {
         id: "day2",
         start_time: "09:30",
         game_duration_minutes: 35,
@@ -95,17 +131,22 @@ export function normalizeDocument(document: TournamentDocument): DocumentMode {
         breaks: [],
       },
       referees: {
-        organizer_capacity: Math.max(1, courts.length),
-        team_referees_required_after_first: true,
-        tournament_fallback: "organizer",
+        organizer_capacity:
+          typeof referees.organizer_capacity === "number"
+            ? referees.organizer_capacity
+            : Math.max(1, courts.length),
+        team_referees_required_after_first:
+          referees.team_referees_required_after_first !== false,
+        day2_fallback:
+          referees.tournament_fallback === "strict" || referees.day2_fallback === "strict"
+            ? "strict"
+            : "organizer",
       },
-      random_seed: 20260803,
-      solver: { max_time_seconds: 30 },
-    };
-    return { document: migrated, migrated: true, legacyCompatibility: false };
-  }
-
-  return { document, migrated: false, legacyCompatibility: true };
+      random_seed: Number.isInteger(source.random_seed) ? source.random_seed : 20260803,
+      solver: structuredClone(objectValue(source.solver)) ?? { max_time_seconds: 30 },
+    },
+  };
+  return converted;
 }
 
 function count(value: unknown): number {
@@ -213,14 +254,87 @@ export function validateDay1LeagueDocument(
       });
     }
   }
-  if (
-    league?.odd_split_policy !== undefined &&
-    !new Set(["upper", "lower", "alternate"]).has(String(league.odd_split_policy))
-  ) {
+  const finalStage = objectValue(input.final_stage);
+  if (finalStage === undefined) {
     issues.push({
-      field: "odd-split-policy",
+      field: "final-stage-format",
       step: 2,
-      message: "奇数人数ブロックの上下振り分けを選択してください。",
+      message: "2日目の決勝方式を選択してください。",
+    });
+  } else if (finalStage.format === "placement_tournament") {
+    const tournamentCount = numberValue(finalStage.tournament_count);
+    const supportedTeamCounts = new Set([8, 16, 24, 32]);
+    const supportedCounts = new Map<number, Set<number>>([
+      [8, new Set([2])],
+      [16, new Set([2])],
+      [24, new Set([3])],
+      [32, new Set([2, 4])],
+    ]);
+    const supportedBlocks = new Map<string, Set<number>>([
+      ["8:2", new Set([2, 4])],
+      ["16:2", new Set([2, 4, 8])],
+      ["24:3", new Set([2, 4, 8])],
+      ["32:2", new Set([2, 4, 8, 16])],
+      ["32:4", new Set([2, 4, 8])],
+    ]);
+    if (!supportedTeamCounts.has(teamCount)) {
+      issues.push({
+        field: "teams",
+        step: 1,
+        message: "順位決定トーナメントは8、16、24、32チームの大会で利用できます。",
+      });
+    } else if (
+      tournamentCount === undefined ||
+      !Number.isInteger(tournamentCount) ||
+      !supportedCounts.get(teamCount)?.has(tournamentCount)
+    ) {
+      issues.push({
+        field: "tournament-count",
+        step: 2,
+        message: "参加チーム数に対応するトーナメント数を選択してください。",
+      });
+    } else if (
+      blockCount !== undefined &&
+      !supportedBlocks.get(`${teamCount}:${tournamentCount}`)?.has(blockCount)
+    ) {
+      issues.push({
+        field: "block-count",
+        step: 2,
+        message: "このチーム数とトーナメント数に対応するブロック数を選択してください。",
+      });
+    }
+  } else if (finalStage.format === "same_rank_league") {
+    if (teamCount < 4 || teamCount > 32) {
+      issues.push({
+        field: "teams",
+        step: 1,
+        message: "同順位リーグは4〜32チームの大会で利用できます。",
+      });
+    } else if (
+      blockCount !== undefined &&
+      (blockCount < 2 || blockCount > Math.floor(teamCount / 2))
+    ) {
+      issues.push({
+        field: "block-count",
+        step: 2,
+        message: `同順位リーグのブロック数は2から${Math.floor(teamCount / 2)}までで選択してください。`,
+      });
+    } else if (
+      blockCount !== undefined &&
+      teamCount % blockCount !== 0 &&
+      !new Set(["strict_same_rank", "merge_bottom"]).has(String(finalStage.uneven_policy))
+    ) {
+      issues.push({
+        field: "same-rank-uneven-policy",
+        step: 2,
+        message: "ブロック人数が揃わない場合のグループ分けを選択してください。",
+      });
+    }
+  } else {
+    issues.push({
+      field: "final-stage-format",
+      step: 2,
+      message: "2日目の決勝方式を選択してください。",
     });
   }
   if (throughStep === 2) return issues;
@@ -288,7 +402,7 @@ const API_FIELD_MAP: Array<
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
   ["league.manual_blocks", "manual-blocks", 2, "手動ブロック割当て"],
-  ["league.odd_split_policy", "odd-split-policy", 2, "奇数人数の上下振り分け"],
+  ["final_stage", "final-stage-format", 2, "2日目の決勝方式"],
   ["day.start_time", "start-time", 3, "開始時刻"],
   ["day.game_duration_minutes", "game-duration", 3, "試合時間"],
   ["day.margin_minutes", "margin-minutes", 3, "試合間隔"],

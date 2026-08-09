@@ -16,7 +16,7 @@ function day2CreationResponse(
   day2Schedule: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     status: day2Schedule.status,
     tournament_plan: tournamentPlan,
     day2_schedule: day2Schedule,
@@ -254,7 +254,7 @@ test("確定順位から2日目を作成し、得点変更時は仮表と仮日�
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({
     request_kind: "day2_creation",
-    odd_split_policy: "upper",
+    final_stage: { format: "placement_tournament", tournament_count: 2 },
     league_standings: { status: "COMPLETE" },
     day: { id: "day2" },
   });
@@ -522,7 +522,7 @@ test("トーナメント表から2日目日程を作成し、設定変更時は2
   expect(requests[0]).toMatchObject({
     request_kind: "day2_creation",
     day: { id: "day2", start_time: "09:30", margin_minutes: 10 },
-    referees: { tournament_fallback: "organizer" },
+    referees: { day2_fallback: "organizer" },
   });
 
   await page.locator("#day2-margin-minutes").fill("15");

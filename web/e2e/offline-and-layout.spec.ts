@@ -48,9 +48,9 @@ test("Turnstile APIの読込み中は生成できず、安全確認後だけ生�
   await mockExternalServices(page, { completeTurnstile: false });
   await page.goto("/");
   await page.locator("#tournament-name").fill("安全確認大会");
-  await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
-  await page.locator("#block-count").selectOption("1");
+  await page.locator("#block-count").selectOption("2");
   await page.locator("#courts").fill("Aコート");
   await advanceToGeneration(page);
 
@@ -77,9 +77,9 @@ test("Turnstile APIを初期化できない場合は日本語で案内して生�
   });
   await page.goto("/");
   await page.locator("#tournament-name").fill("安全確認大会");
-  await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
-  await page.locator("#block-count").selectOption("1");
+  await page.locator("#block-count").selectOption("2");
   await page.locator("#courts").fill("Aコート");
   await advanceToGeneration(page);
 

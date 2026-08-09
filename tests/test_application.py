@@ -23,7 +23,7 @@ class _ModelLike:
 
 def _request() -> dict[str, Any]:
     return {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "day": {
             "id": "day1",
             "start_time": "09:30",
@@ -45,7 +45,7 @@ def _request() -> dict[str, Any]:
 
 def _result() -> dict[str, Any]:
     return {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "status": "optimal",
         "slots": [
             {
@@ -61,14 +61,14 @@ def _result() -> dict[str, Any]:
 
 def _day1_league_request(
     *,
-    team_count: int = 2,
-    block_count: int = 1,
+    team_count: int = 8,
+    block_count: int = 2,
     assignment_mode: str = "random",
     court_count: int = 1,
     manual_blocks: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "request_kind": "day1_league",
         "teams": [
             {"id": f"team-{index + 1}", "name": f"チーム{index + 1}"} for index in range(team_count)
@@ -81,6 +81,7 @@ def _day1_league_request(
             "block_count": block_count,
             "assignment_mode": assignment_mode,
         },
+        "final_stage": _final_stage_config(team_count, block_count),
         "day": {
             "id": "day1",
             "start_time": "09:30",
@@ -99,6 +100,30 @@ def _day1_league_request(
     return request
 
 
+def _final_stage_config(team_count: int, block_count: int) -> dict[str, object]:
+    placement_counts = {8: 2, 16: 2, 24: 3, 32: 2}
+    allowed_blocks = {
+        (8, 2): {2, 4},
+        (16, 2): {2, 4, 8},
+        (24, 3): {2, 4, 8},
+        (32, 2): {2, 4, 8, 16},
+    }
+    tournament_count = placement_counts.get(team_count)
+    if (
+        tournament_count is not None
+        and block_count in allowed_blocks[(team_count, tournament_count)]
+    ):
+        return {"format": "placement_tournament", "tournament_count": tournament_count}
+    if 4 <= team_count <= 32 and 2 <= block_count <= team_count // 2:
+        return {
+            "format": "same_rank_league",
+            "uneven_policy": (
+                "strict_same_rank" if team_count % block_count == 0 else "merge_bottom"
+            ),
+        }
+    return {"format": "placement_tournament", "tournament_count": 2}
+
+
 def _day2_creation_request(
     day1_request: dict[str, Any],
     day1_result: dict[str, Any],
@@ -106,12 +131,12 @@ def _day2_creation_request(
     standings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "request_kind": "day2_creation",
         "teams": day1_request["teams"],
         "courts": day1_request["courts"],
         "league_plan": day1_result["league_plan"],
-        "odd_split_policy": "upper",
+        "final_stage": day1_request["final_stage"],
         "day1_schedule": {
             "day": day1_request["day"],
             "slots": day1_result["slots"],
@@ -124,7 +149,7 @@ def _day2_creation_request(
         },
         "referees": {
             "organizer_capacity": len(day1_request["courts"]),
-            "tournament_fallback": "organizer",
+            "day2_fallback": "organizer",
         },
         "random_seed": 20260803,
         "solver": {"max_time_seconds": 5},
@@ -158,10 +183,12 @@ def test_day1_league_request_generates_match_and_passes_independent_validation()
     assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
     assert result["schedule_scope"] == "day1_league"
     assert result["validation"]["valid"] is True
-    assert len(result["league_plan"]["blocks"]) == 1
-    assert len(result["league_plan"]["logical_rounds"]) == 1
-    assert len(result["league_plan"]["matches"]) == 1
-    assert result["slots"][0]["match_id"] == result["league_plan"]["matches"][0]["id"]
+    assert len(result["league_plan"]["blocks"]) == 2
+    assert len(result["league_plan"]["logical_rounds"]) == 6
+    assert len(result["league_plan"]["matches"]) == 12
+    assert {slot["match_id"] for slot in result["slots"] if slot["match_id"] is not None} == {
+        match["id"] for match in result["league_plan"]["matches"]
+    }
     metrics = result["metrics"]
     validation_summary = result["validation"]["summary"]
     assert metrics["league_team_referee_counts"] == validation_summary["league_team_referee_counts"]
@@ -380,24 +407,26 @@ def test_day1_public_automatic_mode_rejects_manual_blocks_before_solver(
 
 
 def test_league_standings_request_returns_rankings_after_all_results_are_entered() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
-    match_id = generated["league_plan"]["matches"][0]["id"]
+    generated = application.handle_request(_day1_league_request(team_count=4, block_count=2))
 
     result = application.handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
-            "results": [{"match_id": match_id, "home_score": 2, "away_score": 1}],
+            "results": [
+                {"match_id": match["id"], "home_score": 2, "away_score": 1}
+                for match in generated["league_plan"]["matches"]
+            ],
             "random_seed": 20260803,
         }
     )
 
     assert result["status"] == "COMPLETE"
-    assert [standing["rank"] for standing in result["standings"]] == [1, 2]
+    assert [standing["rank"] for standing in result["standings"]] == [1, 2, 1, 2]
 
 
 def test_league_standings_request_reports_missing_results() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
+    generated = application.handle_request(_day1_league_request(team_count=4, block_count=2))
 
     result = application.handle_request(
         {
@@ -412,7 +441,8 @@ def test_league_standings_request_reports_missing_results() -> None:
 
 
 def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=4, block_count=1))
+    generated_request = _day1_league_request(team_count=8, block_count=2)
+    generated = application.handle_request(generated_request)
     standings = application.handle_request(
         {
             "request_kind": "league_standings",
@@ -430,20 +460,21 @@ def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> No
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
             "league_standings": standings,
-            "odd_split_policy": "upper",
+            "final_stage": generated_request["final_stage"],
             "random_seed": 20260803,
         }
     )
 
     assert result["status"] == "COMPLETE"
-    assert result["upper"]["participant_count"] == 2
-    assert result["lower"]["participant_count"] == 2
-    assert len(result["upper"]["matches"]) == 1
-    assert len(result["lower"]["matches"]) == 1
+    assert result["upper"]["participant_count"] == 4
+    assert result["lower"]["participant_count"] == 4
+    assert len(result["upper"]["matches"]) == 4
+    assert len(result["lower"]["matches"]) == 4
 
 
 def test_tournament_results_request_returns_overall_final_standings() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=4, block_count=1))
+    generated_request = _day1_league_request(team_count=8, block_count=2)
+    generated = application.handle_request(generated_request)
     standings = application.handle_request(
         {
             "request_kind": "league_standings",
@@ -460,7 +491,7 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
             "league_standings": standings,
-            "odd_split_policy": "upper",
+            "final_stage": generated_request["final_stage"],
             "random_seed": 20260803,
         }
     )
@@ -470,19 +501,33 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
         for seed in tournament[pool_name]["seeds"]
     }
     results = []
+    winners: dict[str, str] = {}
+    losers: dict[str, str] = {}
+
+    def resolved_team(entry: dict[str, Any]) -> str:
+        if entry["type"] == "league_rank":
+            return team_by_rank[(entry["block_id"], entry["rank"])]
+        if entry["type"] == "winner_of":
+            return winners[entry["match_id"]]
+        return losers[entry["match_id"]]
+
     for pool_name in ("upper", "lower"):
         for match in tournament[pool_name]["matches"]:
             home = match["home"]
             away = match["away"]
+            home_team = resolved_team(home)
+            away_team = resolved_team(away)
             results.append(
                 {
                     "match_id": match["id"],
-                    "home_team_id": team_by_rank[(home["block_id"], home["rank"])],
-                    "away_team_id": team_by_rank[(away["block_id"], away["rank"])],
+                    "home_team_id": home_team,
+                    "away_team_id": away_team,
                     "regular_score_home": 1,
                     "regular_score_away": 0,
                 }
             )
+            winners[match["id"]] = home_team
+            losers[match["id"]] = away_team
 
     outcome = application.handle_request(
         {
@@ -493,23 +538,28 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
     )
 
     assert outcome["status"] == "COMPLETE"
-    assert [row["rank"] for row in outcome["standings"]] == [1, 2, 3, 4]
+    assert [row["rank"] for row in outcome["standings"]] == list(range(1, 9))
     assert [row["pool"] for row in outcome["standings"]] == [
         "upper",
         "upper",
+        "upper",
+        "upper",
+        "lower",
+        "lower",
         "lower",
         "lower",
     ]
 
 
 def test_tournament_plan_request_returns_provisional_table_without_standings() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=8, block_count=2))
+    generated_request = _day1_league_request(team_count=8, block_count=2)
+    generated = application.handle_request(generated_request)
 
     result = application.handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
-            "odd_split_policy": "upper",
+            "final_stage": generated_request["final_stage"],
             "random_seed": 20260803,
         }
     )
@@ -524,17 +574,15 @@ def test_tournament_plan_request_returns_provisional_table_without_standings() -
 
 
 def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=2, block_count=1))
+    generated_request = _day1_league_request(team_count=8, block_count=2)
+    generated = application.handle_request(generated_request)
     standings = application.handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
             "results": [
-                {
-                    "match_id": generated["league_plan"]["matches"][0]["id"],
-                    "home_score": 1,
-                    "away_score": 0,
-                }
+                {"match_id": match["id"], "home_score": 1, "away_score": 0}
+                for match in generated["league_plan"]["matches"]
             ],
         }
     )
@@ -545,6 +593,7 @@ def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() ->
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
             "league_standings": standings,
+            "final_stage": generated_request["final_stage"],
         }
     )
 
@@ -557,6 +606,7 @@ def test_tournament_plan_request_rejects_team_limit() -> None:
     result = application.handle_request(
         {
             "request_kind": "tournament_plan",
+            "final_stage": {"format": "placement_tournament", "tournament_count": 2},
             "league_plan": {
                 "blocks": [
                     {"id": f"B{index}", "team_ids": [f"T{index}"]}
@@ -604,7 +654,7 @@ def test_inferred_horizon_does_not_become_a_silent_hard_constraint(
     result = application.handle_request(_day1_league_request())
 
     assert result["status"] == "optimal"
-    assert received[0]["day"]["max_sections"] == 2
+    assert received[0]["day"]["max_sections"] == len(received[0]["matches"]) * 2
     assert received[1]["day"]["max_sections"] is None
 
 
@@ -617,14 +667,11 @@ def test_day1_league_request_rejects_block_count_above_team_count(
         lambda _: pytest.fail("solver must not run"),
     )
 
-    result = application.handle_request(_day1_league_request(team_count=2, block_count=3))
+    result = application.handle_request(_day1_league_request(team_count=8, block_count=9))
 
     assert result["status"] == "error"
-    assert result["diagnostics"][0]["code"] == "INVALID_BLOCK_COUNT"
-    assert result["diagnostics"][0]["details"] == {
-        "block_count": 3,
-        "team_count": 2,
-    }
+    assert result["diagnostics"][0]["code"] == "PLACEMENT_TOURNAMENT_BLOCK_COUNT_INVALID"
+    assert result["diagnostics"][0]["details"]["block_count"] == 9
 
 
 @pytest.mark.parametrize(
@@ -807,7 +854,7 @@ def test_unexpected_exception_is_not_exposed(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() -> None:
-    day1_request = _day1_league_request(team_count=2, block_count=1, court_count=1)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
     standings = application.handle_request(
@@ -815,11 +862,8 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
             "request_kind": "league_standings",
             "league_plan": day1["league_plan"],
             "results": [
-                {
-                    "match_id": day1["league_plan"]["matches"][0]["id"],
-                    "home_score": 1,
-                    "away_score": 0,
-                }
+                {"match_id": match["id"], "home_score": 1, "away_score": 0}
+                for match in day1["league_plan"]["matches"]
             ],
             "random_seed": 20260803,
         }
@@ -829,7 +873,7 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
             "league_standings": standings,
-            "odd_split_policy": "upper",
+            "final_stage": day1_request["final_stage"],
             "random_seed": 20260803,
         }
     )
@@ -848,22 +892,22 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
             "margin_minutes": 10,
         },
         "referees": {
-            "organizer_capacity": 1,
-            "tournament_fallback": "organizer",
+            "organizer_capacity": 2,
+            "day2_fallback": "organizer",
         },
         "random_seed": 20260803,
         "solver": {"max_time_seconds": 5},
     }
     result = application.handle_request(day2_request)
 
-    assert result["status"] == "OPTIMAL"
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}
     assert result["schedule_scope"] == "day2_tournament"
     assert result["validation"]["valid"] is True
     assert result["integrated_validation"]["valid"] is True
-    assert result["slots"] == []
-    assert result["metrics"]["upper_tournament_final_section"] is None
-    assert result["metrics"]["lower_tournament_final_section"] is None
-    assert result["metrics"]["lower_tournament_final_section_gap"] is None
+    assert any(slot["match_id"] is not None for slot in result["slots"])
+    assert result["metrics"]["upper_tournament_final_section"] is not None
+    assert result["metrics"]["lower_tournament_final_section"] is not None
+    assert result["metrics"]["lower_tournament_final_section_gap"] is not None
 
     invalid_day1 = application.handle_request(
         {
@@ -878,10 +922,10 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
 
 @pytest.mark.parametrize("resolved", [False, True])
 def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> None:
-    team_count = 2 if resolved else 4
+    team_count = 8
     day1_request = _day1_league_request(
         team_count=team_count,
-        block_count=1,
+        block_count=2,
         court_count=2,
     )
     day1 = application.handle_request(day1_request)
@@ -907,7 +951,7 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
     tournament_request = {
         "request_kind": "tournament_plan",
         "league_plan": day1["league_plan"],
-        "odd_split_policy": "upper",
+        "final_stage": day1_request["final_stage"],
         "random_seed": 20260803,
     }
     if standings is not None:
@@ -916,7 +960,7 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
     schedule_request = {
         key: value
         for key, value in creation_request.items()
-        if key not in {"league_standings", "odd_split_policy"}
+        if key not in {"league_standings", "final_stage"}
     }
     schedule = application.handle_request(
         {
@@ -942,7 +986,7 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
 
 
 def test_day2_creation_reports_tournament_failure_without_partial_result() -> None:
-    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     standings = application.handle_request(
         {
@@ -969,7 +1013,7 @@ def test_day2_creation_reports_tournament_failure_without_partial_result() -> No
 
 
 def test_day2_creation_reports_schedule_failure_without_partial_result() -> None:
-    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     request = _day2_creation_request(day1_request, day1)
     request["day"] = {**request["day"], "max_sections": 1}
@@ -986,7 +1030,7 @@ def test_day2_creation_reports_schedule_failure_without_partial_result() -> None
 def test_day2_creation_rejects_failed_independent_validation_without_partial_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     monkeypatch.setattr(
         application,
@@ -1039,14 +1083,14 @@ def test_maximum_day2_creation_is_reproducible_and_under_production_limits(
 
 
 def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -> None:
-    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
     tournament = application.handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
-            "odd_split_policy": "upper",
+            "final_stage": day1_request["final_stage"],
             "random_seed": 20260803,
         }
     )
@@ -1068,7 +1112,7 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
             },
             "referees": {
                 "organizer_capacity": 2,
-                "tournament_fallback": "organizer",
+                "day2_fallback": "organizer",
             },
             "random_seed": 20260803,
             "solver": {"max_time_seconds": 5},
@@ -1095,14 +1139,14 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
 
 
 def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
-    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
     tournament = application.handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
-            "odd_split_policy": "upper",
+            "final_stage": day1_request["final_stage"],
             "random_seed": 20260803,
         }
     )
@@ -1132,7 +1176,7 @@ def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
             },
             "referees": {
                 "organizer_capacity": 2,
-                "tournament_fallback": "organizer",
+                "day2_fallback": "organizer",
             },
             "random_seed": 20260803,
             "solver": {"max_time_seconds": 5},

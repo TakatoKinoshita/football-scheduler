@@ -22,6 +22,10 @@ from football_scheduler.day2_schedule import (
     Day2ScheduleRequest,
     generate_day2_schedule,
 )
+from football_scheduler.final_stage import (
+    FinalStageConfigurationError,
+    validate_final_stage_input,
+)
 from football_scheduler.fixtures import (
     make_maximum_mvp_request,
     make_representative_request,
@@ -47,7 +51,7 @@ from football_scheduler.tournament_results import (
 )
 from football_scheduler.validator import validate_day2_schedule, validate_schedule
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 MAX_REQUEST_BYTES = 1_000_000
 MAX_TEAMS = 32
 MAX_COURTS = 16
@@ -82,6 +86,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         _validate_json_size(payload)
+        if "fixture" not in payload:
+            _require_supported_schema(payload)
         if payload.get("request_kind") == "league_standings":
             _validate_league_standings_limits(payload)
             return _to_json_object(
@@ -128,6 +134,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
         return _error_response(exc.code, exc.message, exc.details)
     except Day2ScheduleError as exc:
         return _error_response(exc.code, exc.message, exc.details)
+    except FinalStageConfigurationError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         return _error_response(
             "INPUT_SCHEMA_INVALID",
@@ -148,8 +156,63 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
 
+def _require_supported_schema(payload: Mapping[str, Any]) -> None:
+    received = payload.get("schema_version")
+    if received in {None, SCHEMA_VERSION}:
+        return
+    raise _RequestError(
+        "SCHEMA_VERSION_UNSUPPORTED",
+        "この大会データは現在の生成機能では使用できません。アプリを更新するか、編集用コピーへ変換してください。",
+        received_schema_version=str(received) if received is not None else "missing",
+        supported_schema_version=SCHEMA_VERSION,
+    )
+
+
+def _validate_request_final_stage(payload: Mapping[str, Any]) -> None:
+    request_kind = payload.get("request_kind")
+    if request_kind == "day1_league":
+        teams = payload.get("teams")
+        league = payload.get("league")
+        validate_final_stage_input(
+            payload.get("final_stage"),
+            team_count=(
+                len(teams)
+                if isinstance(teams, Sequence) and not isinstance(teams, (str, bytes, bytearray))
+                else None
+            ),
+            block_count=(
+                int(league["block_count"])
+                if isinstance(league, Mapping) and isinstance(league.get("block_count"), int)
+                else None
+            ),
+        )
+        return
+    if request_kind not in {"tournament_plan", "day2_creation"}:
+        return
+    league_plan = payload.get("league_plan")
+    blocks = league_plan.get("blocks") if isinstance(league_plan, Mapping) else None
+    if not isinstance(blocks, Sequence) or isinstance(blocks, (str, bytes, bytearray)):
+        team_count = None
+        block_count = None
+    else:
+        block_count = len(blocks)
+        team_count = sum(
+            len(block.get("team_ids", ()))
+            for block in blocks
+            if isinstance(block, Mapping)
+            and isinstance(block.get("team_ids"), Sequence)
+            and not isinstance(block.get("team_ids"), (str, bytes, bytearray))
+        )
+    validate_final_stage_input(
+        payload.get("final_stage"),
+        team_count=team_count,
+        block_count=block_count,
+    )
+
+
 def _generate_tournament_plan_response(payload: Mapping[str, Any]) -> dict[str, Any]:
     _validate_tournament_plan_limits(payload)
+    _validate_request_final_stage(payload)
     return _to_json_object(generate_tournament_plan(TournamentPlanRequest.model_validate(payload)))
 
 
@@ -229,6 +292,7 @@ def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, An
 
 def _prepare_day2_creation(payload: Mapping[str, Any]) -> dict[str, Any]:
     _validate_day2_creation_limits(payload)
+    _validate_request_final_stage(payload)
     request_data = _apply_solver_time_limit(payload)
     request = Day2CreationRequest.model_validate(request_data)
     return {
@@ -306,6 +370,8 @@ def _resolve_request(
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     if payload.get("request_kind") == "day1_league":
+        _validate_limits(payload)
+        _validate_request_final_stage(payload)
         prepared = prepare_day1_league_schedule(payload)
         fallback_request = (
             _to_json_object(prepared.fallback_request)

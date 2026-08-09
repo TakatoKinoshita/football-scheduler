@@ -113,7 +113,7 @@ function manualGeneratedResult(request: {
   return {
     ...scheduleResult,
     league_plan: {
-      schema_version: "0.1.0",
+      schema_version: "0.2.0",
       assignment_mode: "manual",
       random_seed: 20260803,
       blocks,
@@ -141,6 +141,7 @@ async function fillThroughGeneration(page: import("@playwright/test").Page): Pro
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("seeded_snake");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
   await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
@@ -207,6 +208,7 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
 
   await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
@@ -267,6 +269,7 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
   await page.getByLabel("青", { exact: true }).selectOption("A");
   await page.getByLabel("緑", { exact: true }).selectOption("B");
@@ -355,6 +358,7 @@ test("手動指定の人数超過では次へ進まない", async ({ page }) => 
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート");
   for (const name of ["青", "赤", "白", "緑"]) {
     await page.getByLabel(name, { exact: true }).selectOption("A");

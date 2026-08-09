@@ -32,7 +32,7 @@ def _event(
 def test_rest_api_event_is_forwarded_without_caching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = {"schema_version": "0.1.0", "teams": []}
+    payload = {"schema_version": "0.2.0", "teams": []}
     expected = {"status": "OPTIMAL", "slots": []}
     received: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -52,7 +52,7 @@ def test_rest_api_event_is_forwarded_without_caching(
 
 
 def test_base64_body_is_supported(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = {"schema_version": "0.1.0"}
+    payload = {"schema_version": "0.2.0"}
     encoded = base64.b64encode(json.dumps(payload).encode()).decode()
     received: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -164,14 +164,18 @@ def test_tournament_results_action_returns_http_200(
 
 def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
     payload = {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "request_kind": "day1_league",
         "teams": [{"id": f"team-{index}", "name": f"チーム{index}"} for index in range(1, 5)],
         "courts": [
             {"id": "court-a", "name": "Aコート"},
             {"id": "court-b", "name": "Bコート"},
         ],
-        "league": {"block_count": 1, "assignment_mode": "random"},
+        "league": {"block_count": 2, "assignment_mode": "random"},
+        "final_stage": {
+            "format": "same_rank_league",
+            "uneven_policy": "strict_same_rank",
+        },
         "day": {
             "id": "day1",
             "start_time": "09:30",
@@ -203,7 +207,7 @@ def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
 
 def test_manual_block_validation_error_returns_http_400() -> None:
     payload = {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "request_kind": "day1_league",
         "teams": [{"id": f"team-{index}", "name": f"チーム{index}"} for index in range(1, 6)],
         "courts": [{"id": "court-a", "name": "Aコート"}],
@@ -214,6 +218,10 @@ def test_manual_block_validation_error_returns_http_400() -> None:
                 {"id": "A", "team_ids": ["team-1", "team-2", "team-3", "team-4"]},
                 {"id": "B", "team_ids": ["team-5"]},
             ],
+        },
+        "final_stage": {
+            "format": "same_rank_league",
+            "uneven_policy": "merge_bottom",
         },
         "day": {
             "id": "day1",
@@ -321,6 +329,10 @@ def test_day2_creation_rejects_legacy_day2_action(
     ("code", "expected_status"),
     [
         ("INPUT_SCHEMA_INVALID", 400),
+        ("SCHEMA_VERSION_UNSUPPORTED", 400),
+        ("FINAL_STAGE_FORMAT_REQUIRED", 400),
+        ("PLACEMENT_TOURNAMENT_TEAM_COUNT_UNSUPPORTED", 400),
+        ("SAME_RANK_UNEVEN_POLICY_REQUIRED", 400),
         ("INVALID_BLOCK_COUNT", 400),
         ("TOURNAMENT_SOURCE_INVALID", 400),
         ("TOURNAMENT_RESULT_INVALID", 400),

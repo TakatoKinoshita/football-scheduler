@@ -30,7 +30,7 @@ def _request(
     random_seed: int = 20260803,
 ) -> dict[str, object]:
     return {
-        "schema_version": "0.1.0",
+        "schema_version": "0.2.0",
         "teams": _teams(team_count),
         "block_count": block_count,
         "assignment_mode": assignment_mode,

@@ -70,7 +70,6 @@ def _source(block_sizes: tuple[int, ...], *, seed: int = 17) -> tuple[LeaguePlan
 def _request(
     block_sizes: tuple[int, ...],
     *,
-    policy: str = "upper",
     seed: int = 17,
     with_standings: bool = True,
 ) -> dict[str, object]:
@@ -78,7 +77,7 @@ def _request(
     request: dict[str, object] = {
         "request_kind": "tournament_plan",
         "league_plan": plan.model_dump(mode="json"),
-        "odd_split_policy": policy,
+        "final_stage": {"format": "placement_tournament", "tournament_count": 2},
         "random_seed": seed,
     }
     if with_standings:
@@ -233,19 +232,17 @@ def test_six_team_table_has_two_preliminaries_and_seven_matches() -> None:
     assert len([match for match in result.matches if match.rank_range == (5, 6)]) == 1
 
 
-def test_odd_split_policy_upper_lower_and_alternate() -> None:
-    upper = generate_tournament_plan(_request((3, 3), policy="upper"))
-    lower = generate_tournament_plan(_request((3, 3), policy="lower"))
-    alternate = generate_tournament_plan(_request((3, 3), policy="alternate"))
+def test_odd_split_policy_is_not_part_of_schema_0_2() -> None:
+    request = _request((3, 3))
+    request["odd_split_policy"] = "upper"
 
-    assert (upper.upper.participant_count, upper.lower.participant_count) == (4, 2)
-    assert (lower.upper.participant_count, lower.lower.participant_count) == (2, 4)
-    assert (alternate.upper.participant_count, alternate.lower.participant_count) == (3, 3)
+    with pytest.raises(ValidationError):
+        generate_tournament_plan(request)
 
 
 def test_empty_and_single_participant_pools_do_not_create_matches() -> None:
     one_each = generate_tournament_plan(_request((2,)))
-    empty_lower = generate_tournament_plan(_request((1, 1), policy="upper"))
+    empty_lower = generate_tournament_plan(_request((1, 1)))
 
     assert len(one_each.upper.matches) == len(one_each.lower.matches) == 0
     assert len(one_each.upper.placements) == len(one_each.lower.placements) == 1
@@ -396,7 +393,7 @@ def test_rejects_missing_or_inconsistent_final_standings() -> None:
 
 
 def test_generated_json_round_trip_is_stable() -> None:
-    result = generate_tournament_plan(_request((3, 4, 5), policy="alternate", with_standings=False))
+    result = generate_tournament_plan(_request((3, 4, 5), with_standings=False))
 
     restored = TournamentPlan.model_validate_json(result.model_dump_json())
 

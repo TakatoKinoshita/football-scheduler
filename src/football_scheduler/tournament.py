@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, model_validator
 
+from football_scheduler.final_stage import PlacementTournamentFinalStage
 from football_scheduler.league import LeaguePlan
 from football_scheduler.league_results import LeagueStandings
 from football_scheduler.models import ContractModel, Identifier, NonEmptyText
@@ -63,11 +64,11 @@ TournamentEntry = Annotated[
 
 
 class TournamentPlanRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["tournament_plan"]
     league_plan: LeaguePlan
     league_standings: LeagueStandings | None = None
-    odd_split_policy: OddSplitPolicy = OddSplitPolicy.UPPER
+    final_stage: PlacementTournamentFinalStage
     random_seed: int = 20260803
 
 
@@ -323,10 +324,11 @@ class TournamentWarning(ContractModel):
 
 
 class TournamentPlan(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
+    format: Literal["placement_tournament"] = "placement_tournament"
     status: Literal["COMPLETE"] = "COMPLETE"
     participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
-    odd_split_policy: OddSplitPolicy
+    tournament_count: Annotated[int, Field(gt=0)]
     random_seed: int
     upper: TournamentPoolPlan
     lower: TournamentPoolPlan
@@ -699,7 +701,7 @@ def generate_tournament_plan(
     )
     slots_by_block = _validate_source(data.league_plan, data.league_standings)
     upper_rows, lower_rows = _split_rank_slots(
-        data.league_plan, slots_by_block, data.odd_split_policy
+        data.league_plan, slots_by_block, OddSplitPolicy.UPPER
     )
     upper_seeds, upper_draws = _seed_pool(TournamentPool.UPPER, upper_rows, data.random_seed)
     lower_seeds, lower_draws = _seed_pool(TournamentPool.LOWER, lower_rows, data.random_seed)
@@ -711,7 +713,7 @@ def generate_tournament_plan(
             if data.league_standings is not None
             else ParticipantResolution.PROVISIONAL
         ),
-        odd_split_policy=data.odd_split_policy,
+        tournament_count=data.final_stage.tournament_count,
         random_seed=data.random_seed,
         upper=upper,
         lower=lower,

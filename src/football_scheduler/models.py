@@ -8,7 +8,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 Identifier = Annotated[
     str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -36,8 +36,8 @@ class RefereeKind(StrEnum):
     TEAM = "team"
 
 
-class TournamentFallback(StrEnum):
-    """トーナメントで直前試合の勝者を使えない場合の扱い。"""
+class Day2Fallback(StrEnum):
+    """2日目にチーム審判を割り当てられない場合の扱い。"""
 
     ORGANIZER = "organizer"
     STRICT = "strict"
@@ -123,7 +123,7 @@ class DaySettings(ContractModel):
 class RefereeSettings(ContractModel):
     organizer_capacity: Annotated[int, Field(ge=0)]
     team_referees_required_after_first: bool = True
-    tournament_fallback: TournamentFallback = TournamentFallback.ORGANIZER
+    day2_fallback: Day2Fallback = Day2Fallback.ORGANIZER
 
 
 class SolverSettings(ContractModel):
@@ -131,7 +131,7 @@ class SolverSettings(ContractModel):
 
 
 class ScheduleRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     teams: tuple[Team, ...]
     courts: tuple[Court, ...]
     matches: tuple[MatchSpec, ...]
@@ -270,7 +270,7 @@ class SolverMetrics(ContractModel):
 
 
 class ScheduleResult(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     status: SolverStatus
     slots: tuple[Slot, ...] = ()
     section_timings: tuple[SectionTiming, ...] = ()

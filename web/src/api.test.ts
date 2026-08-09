@@ -18,7 +18,11 @@ describe("日程生成API", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const result = await generateSchedule({ schema_version: "0.1.0" }, "turnstile-token", fetchMock);
+    const input = {
+      schema_version: "0.2.0",
+      final_stage: { format: "placement_tournament", tournament_count: 2 },
+    };
+    const result = await generateSchedule(input, "turnstile-token", fetchMock);
     expect(result.status).toBe("OPTIMAL");
     expect(fetchMock).toHaveBeenCalledWith(
       API_PATH,
@@ -29,6 +33,7 @@ describe("日程生成API", () => {
       }),
     );
     const [, options] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(options?.body))).toEqual(input);
     expect(new Headers(options?.headers).has("x-api-key")).toBe(false);
     expect(new Headers(options?.headers).get("x-turnstile-action")).toBe("generate_schedule");
   });

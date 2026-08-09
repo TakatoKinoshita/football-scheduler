@@ -9,6 +9,7 @@ import {
 } from "./api";
 import {
   buildDay1ScheduleRequest,
+  convertLegacyToEditableDocument,
   issuesFromApiDetails,
   isDay1LeagueInput,
   normalizeDocument,
@@ -74,6 +75,7 @@ import {
   type TournamentMatchProgress,
 } from "./tournament-results";
 import {
+  SCHEMA_VERSION,
   cloneDocument,
   createTournamentDocument,
   type JsonObject,
@@ -116,7 +118,8 @@ root.innerHTML = `
       リーグ順位の確定後は、2日目の試合結果を入力して総合最終順位まで確定できます。
     </div>
     <div id="legacy-banner" class="notice no-print" role="note" hidden>
-      従来形式の大会データを互換モードで開いています。内容を壊さないため大会設定は変更できませんが、日程の再生成と保存・印刷は利用できます。
+      従来形式の大会データを閲覧・印刷専用で開いています。新しい日程の生成や大会設定の変更はできません。
+      <button id="convert-legacy-copy" class="secondary" type="button">編集用コピーを作成</button>
     </div>
 
     <nav class="steps no-print" aria-label="作成手順">
@@ -188,15 +191,35 @@ root.innerHTML = `
           <div id="manual-block-team-list" class="manual-block-team-list"></div>
           <span id="manual-blocks-error" class="field-error" role="alert"></span>
         </fieldset>
-        <label class="field" for="odd-split-policy">
-          <span>奇数人数ブロックの上下振り分け <em>必須</em></span>
-          <select id="odd-split-policy">
-            <option value="upper">中央順位を上位へ入れる</option>
-            <option value="lower">中央順位を下位へ入れる</option>
-            <option value="alternate">ブロック順に上位・下位を交互にする</option>
+        <label class="field" for="final-stage-format">
+          <span>2日目の決勝方式 <em>必須</em></span>
+          <select id="final-stage-format">
+            <option value="">選択してください</option>
+            <option value="placement_tournament">順位決定トーナメント</option>
+            <option value="same_rank_league">同順位リーグ</option>
           </select>
-          <small>結果を見る前に大会要項どおり選びます。生成後に変えると結果を取り消します。</small>
-          <span id="odd-split-policy-error" class="field-error" role="alert"></span>
+          <small>1日目を生成する前に選びます。変更すると入力済み結果を含む全生成結果を取り消します。</small>
+          <span id="final-stage-format-error" class="field-error" role="alert"></span>
+        </label>
+        <label id="tournament-count-field" class="field" for="tournament-count" hidden>
+          <span>トーナメント数 <em>必須</em></span>
+          <select id="tournament-count">
+            <option value="">選択してください</option>
+            <option value="2">2トーナメント</option>
+            <option value="3">3トーナメント</option>
+            <option value="4">4トーナメント</option>
+          </select>
+          <small>参加チーム数に対応する数を選択してください。</small>
+          <span id="tournament-count-error" class="field-error" role="alert"></span>
+        </label>
+        <label id="same-rank-uneven-policy-field" class="field" for="same-rank-uneven-policy" hidden>
+          <span>端数ブロックの扱い <em>必須</em></span>
+          <select id="same-rank-uneven-policy">
+            <option value="strict_same_rank">厳密に同順位で分ける</option>
+            <option value="merge_bottom">最下位グループへ統合する</option>
+          </select>
+          <small>各ブロックの人数が揃わない場合だけ選択します。</small>
+          <span id="same-rank-uneven-policy-error" class="field-error" role="alert"></span>
         </label>
         <label class="field field-wide" for="courts">
           <span>使用コート <em>必須</em> <small>1行に1コート・1〜16コート</small></span>
@@ -659,7 +682,11 @@ const manualBlocksField = requiredElement<HTMLFieldSetElement>("#manual-blocks")
 const manualBlockSummary = requiredElement<HTMLElement>("#manual-block-summary");
 const manualBlockCounts = requiredElement<HTMLElement>("#manual-block-counts");
 const manualBlockTeamList = requiredElement<HTMLElement>("#manual-block-team-list");
-const oddSplitPolicyInput = requiredElement<HTMLSelectElement>("#odd-split-policy");
+const finalStageFormatInput = requiredElement<HTMLSelectElement>("#final-stage-format");
+const tournamentCountInput = requiredElement<HTMLSelectElement>("#tournament-count");
+const tournamentCountField = requiredElement<HTMLElement>("#tournament-count-field");
+const sameRankUnevenPolicyInput = requiredElement<HTMLSelectElement>("#same-rank-uneven-policy");
+const sameRankUnevenPolicyField = requiredElement<HTMLElement>("#same-rank-uneven-policy-field");
 const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
 const gameDurationInput = requiredElement<HTMLInputElement>("#game-duration");
 const marginInput = requiredElement<HTMLInputElement>("#margin-minutes");
@@ -714,7 +741,7 @@ function turnstileApi(): TurnstileApi | undefined {
 
 function refreshGenerateEnabled(): void {
   generateButton.disabled =
-    turnstileToken.length === 0 || !navigator.onLine || currentStep !== 3;
+    legacyCompatibility || turnstileToken.length === 0 || !navigator.onLine || currentStep !== 3;
 }
 
 function requireTurnstileConfirmation(message: string): void {
@@ -902,6 +929,7 @@ function currentDay2Settings(): JsonObject | undefined {
 }
 
 function saveDay2Settings(): void {
+  if (legacyCompatibility) return;
   const day2 = currentDay2Settings();
   if (day2 === undefined) {
     day2Status.textContent =
@@ -924,7 +952,7 @@ function saveDay2Settings(): void {
       input: {
         ...documentState.tournament.input,
         day2,
-        referees: { ...referees, tournament_fallback: day2FallbackInput.value },
+        referees: { ...referees, day2_fallback: day2FallbackInput.value },
       },
       result: nextResult,
     },
@@ -974,7 +1002,7 @@ function saveDay2Generation(plan: JsonObject, schedule: JsonObject, day2: JsonOb
       input: {
         ...documentState.tournament.input,
         day2,
-        referees: { ...referees, tournament_fallback: day2FallbackInput.value },
+        referees: { ...referees, day2_fallback: day2FallbackInput.value },
       },
       result: {
         ...result,
@@ -1072,6 +1100,7 @@ function refreshLeagueResultsProgress(totalMatches: number): void {
   ).size;
   leagueResultsProgress.textContent = `入力済み ${enteredCount} / ${totalMatches}試合`;
   standingsButton.disabled =
+    legacyCompatibility ||
     enteredCount !== totalMatches ||
     totalMatches === 0 ||
     !navigator.onLine ||
@@ -1091,6 +1120,7 @@ function refreshDay2GenerationEnabled(): void {
       ? "2日目設定に入力誤りがあります。休憩は「4:60」の形式で入力してください。"
       : `${provisional ? "仮トーナメント・仮日程／" : ""}${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
   day2Button.disabled =
+    legacyCompatibility ||
     !hasLeaguePlan ||
     legacyDay1ViolationCount > 0 ||
     settings === undefined ||
@@ -1116,6 +1146,7 @@ function refreshTournamentResultsEnabled(): void {
   }
   tournamentResultsProgress.textContent = `入力済み ${enteredCount} / ${totalCount}試合`;
   tournamentResultsButton.disabled =
+    legacyCompatibility ||
     plan === undefined ||
     !complete ||
     !navigator.onLine ||
@@ -2438,6 +2469,7 @@ function requestLeagueStandings(): void {
   standingsStatus.textContent = "順位を計算しています…";
   void calculateLeagueStandings(
     {
+      schema_version: SCHEMA_VERSION,
       request_kind: "league_standings",
       league_plan: plan,
       results: leagueResults(),
@@ -2503,20 +2535,19 @@ function requestDay2Generation(): void {
   day2CreationTurnstileToken = "";
   day2Button.disabled = true;
   day2StatusOwner = "generation";
-  const league = asObject(documentState.tournament.input.league);
   const referees = asObject(documentState.tournament.input.referees) ?? {};
   const creationRequest: JsonObject = {
-    schema_version: "0.1.0",
+    schema_version: SCHEMA_VERSION,
     request_kind: "day2_creation",
     teams: documentState.tournament.input.teams,
     courts: documentState.tournament.input.courts,
     league_plan: leaguePlan,
-    odd_split_policy: league?.odd_split_policy ?? "upper",
+    final_stage: documentState.tournament.input.final_stage,
     day1_schedule: { day: day1, slots: result.slots ?? [] },
     day: day2,
     referees: {
       ...referees,
-      tournament_fallback: day2FallbackInput.value,
+      day2_fallback: day2FallbackInput.value,
     },
     random_seed: documentState.tournament.input.random_seed ?? 20260803,
     solver: { max_time_seconds: 30 },
@@ -2603,8 +2634,9 @@ function requestTournamentStandings(): void {
   tournamentResultsStatus.textContent = "2日目の全試合を検証し、総合最終順位を計算しています…";
   void calculateTournamentStandings(
     {
-      schema_version: "0.1.0",
+      schema_version: SCHEMA_VERSION,
       request_kind: "tournament_results",
+      final_stage: documentState.tournament.input.final_stage,
       tournament_plan: plan,
       results: tournamentResults(),
     },
@@ -2742,11 +2774,14 @@ function renderManualBlockAssignment(): void {
 
 function setLegacyControlsDisabled(disabled: boolean): void {
   for (const control of [
+    nameInput,
     teamsInput,
     courtsInput,
     blockCountInput,
     assignmentModeInput,
-    oddSplitPolicyInput,
+    finalStageFormatInput,
+    tournamentCountInput,
+    sameRankUnevenPolicyInput,
     startTimeInput,
     gameDurationInput,
     marginInput,
@@ -2754,20 +2789,52 @@ function setLegacyControlsDisabled(disabled: boolean): void {
     maxSectionsInput,
     randomSeedInput,
     teamRefereesInput,
+    day2StartTimeInput,
+    day2GameDurationInput,
+    day2MarginInput,
+    day2EndTimeInput,
+    day2MaxSectionsInput,
+    day2FallbackInput,
+    day2BreaksInput,
   ]) {
     control.disabled = disabled;
   }
   requiredElement<HTMLElement>("#legacy-banner").hidden = !disabled;
   manualBlocksField.disabled = disabled;
+  for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+    "[data-panel='4'] input, [data-panel='4'] select, [data-panel='4'] textarea, [data-panel='5'] input, [data-panel='5'] select, [data-panel='5'] textarea",
+  )) {
+    control.disabled = disabled;
+  }
+}
+
+function renderFinalStageControls(): void {
+  const teamCount = lines(teamsInput.value).length;
+  const blockCount = blockCountInput.value === "" ? undefined : Number(blockCountInput.value);
+  const format = finalStageFormatInput.value;
+  tournamentCountField.hidden = format !== "placement_tournament";
+  sameRankUnevenPolicyField.hidden =
+    format !== "same_rank_league" ||
+    blockCount === undefined ||
+    blockCount < 1 ||
+    teamCount % blockCount === 0;
+  if (format === "same_rank_league" && sameRankUnevenPolicyField.hidden) {
+    sameRankUnevenPolicyInput.value = "strict_same_rank";
+  }
 }
 
 function updateReview(): void {
   const teamCount = lines(teamsInput.value).length;
   const courtCount = lines(courtsInput.value).length;
   const blockText = blockCountInput.value === "" ? "未選択" : `${blockCountInput.value}ブロック`;
+  const finalStageText = finalStageFormatInput.value === "placement_tournament"
+    ? `${tournamentCountInput.value || "未選択"}トーナメント`
+    : finalStageFormatInput.value === "same_rank_league"
+      ? "同順位リーグ"
+      : "決勝方式未選択";
   requiredElement<HTMLElement>("#generation-review").textContent = legacyCompatibility
-    ? "従来形式の大会設定をそのまま使って日程を再生成します。"
-    : `${teamCount}チーム／${blockText}／${courtCount}コート／${startTimeInput.value}開始で生成します。`;
+    ? "従来形式の大会データを閲覧・印刷専用で表示しています。"
+    : `${teamCount}チーム／${blockText}／${finalStageText}／${courtCount}コート／${startTimeInput.value}開始で生成します。`;
 }
 
 function renderStep(): void {
@@ -2791,6 +2858,7 @@ function renderStep(): void {
 function render(): void {
   const input = documentState.tournament.input;
   const league = asObject(input.league);
+  const finalStage = asObject(input.final_stage);
   const day = asObject(input.day);
   const day2 = asObject(input.day2);
   const referees = asObject(input.referees);
@@ -2802,11 +2870,15 @@ function render(): void {
     new Set(["random", "seeded_snake", "manual"]).has(String(league?.assignment_mode))
       ? String(league?.assignment_mode)
       : "random";
-  oddSplitPolicyInput.value = new Set(["upper", "lower", "alternate"]).has(
-    String(league?.odd_split_policy),
-  )
-    ? String(league?.odd_split_policy)
-    : "upper";
+  finalStageFormatInput.value = new Set(["placement_tournament", "same_rank_league"]).has(
+    String(finalStage?.format),
+  ) ? String(finalStage?.format) : "";
+  tournamentCountInput.value = typeof finalStage?.tournament_count === "number"
+    ? String(finalStage.tournament_count)
+    : "";
+  sameRankUnevenPolicyInput.value = finalStage?.uneven_policy === "merge_bottom"
+    ? "merge_bottom"
+    : "strict_same_rank";
   startTimeInput.value = typeof day?.start_time === "string" ? day.start_time : "09:30";
   gameDurationInput.value = String(day?.game_duration_minutes ?? 35);
   marginInput.value = String(day?.margin_minutes ?? 5);
@@ -2823,16 +2895,18 @@ function render(): void {
   day2EndTimeInput.value = typeof day2?.end_time === "string" ? day2.end_time : "";
   day2MaxSectionsInput.value =
     typeof day2?.max_sections === "number" ? String(day2.max_sections) : "";
-  day2FallbackInput.value = referees?.tournament_fallback === "strict" ? "strict" : "organizer";
+  day2FallbackInput.value = referees?.day2_fallback === "strict" ? "strict" : "organizer";
   day2BreaksInput.value = asObjectArray(day2?.breaks)
     .map((item) => `${String(item.after_section)}:${String(item.duration_minutes)}`)
     .join("\n");
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   setLegacyControlsDisabled(legacyCompatibility);
+  renderFinalStageControls();
   renderManualBlockAssignment();
   clearFieldIssues();
   renderResult();
+  setLegacyControlsDisabled(legacyCompatibility);
   renderStep();
 }
 
@@ -2862,13 +2936,28 @@ function updateDraft(invalidateResult = false): void {
           blockCount,
         )
       : undefined;
+    const finalStage = finalStageFormatInput.value === "placement_tournament"
+      ? {
+          format: "placement_tournament",
+          tournament_count:
+            tournamentCountInput.value === "" ? null : Number(tournamentCountInput.value),
+        }
+      : finalStageFormatInput.value === "same_rank_league"
+        ? {
+            format: "same_rank_league",
+            uneven_policy:
+              blockCount > 0 && teams.length % blockCount === 0
+                ? "strict_same_rank"
+                : sameRankUnevenPolicyInput.value,
+          }
+        : undefined;
     documentState = {
       ...previous,
       updatedAt: now,
       tournament: {
         name: nameInput.value.trim(),
         input: {
-          schema_version: "0.1.0",
+          schema_version: SCHEMA_VERSION,
           request_kind: "day1_league",
           teams: teams.map((team, index) => ({
             ...team,
@@ -2878,9 +2967,9 @@ function updateDraft(invalidateResult = false): void {
           league: {
             block_count: blockCountInput.value === "" ? null : blockCount,
             assignment_mode: assignmentModeInput.value,
-            odd_split_policy: oddSplitPolicyInput.value,
             ...(manualBlocks === undefined ? {} : { manual_blocks: manualBlocks }),
           },
+          ...(finalStage === undefined ? {} : { final_stage: finalStage }),
           day: {
             id: "day1",
             start_time: startTimeInput.value,
@@ -2900,8 +2989,8 @@ function updateDraft(invalidateResult = false): void {
           referees: {
             organizer_capacity: inputNumber(organizerCapacityInput),
             team_referees_required_after_first: teamRefereesInput.checked,
-            tournament_fallback:
-              asObject(previous.tournament.input.referees)?.tournament_fallback ?? "organizer",
+            day2_fallback:
+              asObject(previous.tournament.input.referees)?.day2_fallback ?? "organizer",
           },
           random_seed: inputNumber(randomSeedInput),
           solver: { max_time_seconds: 30 },
@@ -2914,6 +3003,7 @@ function updateDraft(invalidateResult = false): void {
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   updateReview();
+  renderFinalStageControls();
   renderManualBlockAssignment();
   saveState.textContent = "保存しています…";
   autosave.schedule(
@@ -2964,14 +3054,11 @@ function renderDay2Preparation(
     );
   }
   day2GenerationConfirmation.hidden = false;
-  const league = asObject(documentState.tournament.input.league);
-  const splitLabels: Record<string, string> = {
-    upper: "中央順位を上位へ入れる",
-    lower: "中央順位を下位へ入れる",
-    alternate: "ブロック順に上位・下位を交互にする",
-  };
-  const policy = String(league?.odd_split_policy ?? "upper");
-  tournamentReview.textContent = `${standings === undefined ? "仮トーナメント／" : ""}上下振り分け：${splitLabels[policy] ?? splitLabels.upper}`;
+  const finalStage = asObject(documentState.tournament.input.final_stage);
+  const finalStageLabel = finalStage?.format === "same_rank_league"
+    ? "同順位リーグ"
+    : `順位決定トーナメント（${String(finalStage?.tournament_count ?? "未選択")}組）`;
+  tournamentReview.textContent = `${standings === undefined ? "仮日程／" : ""}${finalStageLabel}`;
   day2Button.textContent = asObject(result.day2_schedule) === undefined
     ? "2日目を作成する"
     : "2日目を再作成する";
@@ -3076,7 +3163,9 @@ courtsInput.addEventListener("input", () => onConfigurationChanged({ courtsChang
 for (const control of [
   blockCountInput,
   assignmentModeInput,
-  oddSplitPolicyInput,
+  finalStageFormatInput,
+  tournamentCountInput,
+  sameRankUnevenPolicyInput,
   startTimeInput,
   gameDurationInput,
   marginInput,
@@ -3087,6 +3176,9 @@ for (const control of [
   control.addEventListener("input", () => onConfigurationChanged());
   control.addEventListener("change", () => onConfigurationChanged());
 }
+finalStageFormatInput.addEventListener("change", renderFinalStageControls);
+blockCountInput.addEventListener("change", renderFinalStageControls);
+teamsInput.addEventListener("input", renderFinalStageControls);
 organizerCapacityInput.addEventListener("input", () => {
   organizerCapacityTouched = true;
   onConfigurationChanged();
@@ -3178,6 +3270,30 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
     });
 });
 
+requiredElement<HTMLButtonElement>("#convert-legacy-copy").addEventListener("click", () => {
+  if (!legacyCompatibility) return;
+  if (
+    !window.confirm(
+      "従来形式の設定だけを引き継いで編集用コピーを作成します。生成済み日程と入力済み結果はコピーされません。よろしいですか？",
+    )
+  ) return;
+  autosave.cancel();
+  documentState = convertLegacyToEditableDocument(documentState);
+  tournamentResultDrafts.clear();
+  legacyCompatibility = false;
+  organizerCapacityTouched = inferOrganizerCapacityTouched();
+  currentStep = 1;
+  void storage.confirm(documentState).then(() => {
+    render();
+    backupStatus.textContent =
+      "編集用コピーを作成しました。2日目の決勝方式を選択して、日程を生成し直してください。";
+  }).catch(() => {
+    render();
+    backupStatus.textContent =
+      "編集用コピーを端末へ保存できませんでした。入力を続ける前にファイルへ保存してください。";
+  });
+});
+
 requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
   if (!window.confirm("現在の内容を、ひとつ前に確定した状態へ戻しますか？")) return;
   autosave.cancel();
@@ -3221,6 +3337,45 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
 function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
   const issues = issuesFromApiDetails(error.details);
   if (issues.length > 0) return issues;
+  const finalStageFields: Record<string, FieldIssue> = {
+    FINAL_STAGE_FORMAT_REQUIRED: {
+      field: "final-stage-format",
+      step: 2,
+      message: error.message,
+    },
+    PLACEMENT_TOURNAMENT_TEAM_COUNT_UNSUPPORTED: {
+      field: "teams",
+      step: 1,
+      message: error.message,
+    },
+    PLACEMENT_TOURNAMENT_COUNT_INVALID: {
+      field: "tournament-count",
+      step: 2,
+      message: error.message,
+    },
+    PLACEMENT_TOURNAMENT_BLOCK_COUNT_INVALID: {
+      field: "block-count",
+      step: 2,
+      message: error.message,
+    },
+    SAME_RANK_LEAGUE_TEAM_COUNT_UNSUPPORTED: {
+      field: "teams",
+      step: 1,
+      message: error.message,
+    },
+    SAME_RANK_UNEVEN_POLICY_REQUIRED: {
+      field: "same-rank-uneven-policy",
+      step: 2,
+      message: error.message,
+    },
+    SAME_RANK_UNEVEN_POLICY_INVALID: {
+      field: "same-rank-uneven-policy",
+      step: 2,
+      message: error.message,
+    },
+  };
+  const finalStageIssue = finalStageFields[error.code];
+  if (finalStageIssue !== undefined) return [finalStageIssue];
   if (error.code === "INVALID_BLOCK_COUNT") {
     return [
       {

@@ -798,7 +798,7 @@ def _validate_day2_referees(
     for court_slots in by_court.values():
         court_slots.sort(key=lambda item: int(item["section_no"]))
     capacity = _organizer_capacity(data)
-    fallback = _tournament_fallback(data)
+    fallback = _day2_fallback(data)
     for section, section_slots in sorted(by_section.items()):
         organizer_count = sum(
             _referee_with_source(slot)[0] == "organizer" for slot in section_slots
@@ -1322,10 +1322,10 @@ def _referee_with_source(
     )
 
 
-def _tournament_fallback(data: Mapping[str, Any]) -> str:
+def _day2_fallback(data: Mapping[str, Any]) -> str:
     referees = _config(data).get("referees")
     if isinstance(referees, Mapping):
-        return str(referees.get("tournament_fallback", "organizer"))
+        return str(referees.get("day2_fallback", "organizer"))
     return "organizer"
 
 

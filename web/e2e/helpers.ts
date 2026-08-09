@@ -76,9 +76,10 @@ export async function openReadyApp(page: Page): Promise<void> {
   await mockExternalServices(page);
   await openApp(page);
   await page.locator("#tournament-name").fill("E2E地区大会");
-  await page.locator("#teams").fill("青空FC\nみどりSC");
+  await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
-  await page.locator("#block-count").selectOption("1");
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート");
   await advanceToGeneration(page);
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
@@ -97,7 +98,11 @@ export async function advanceToGeneration(page: Page): Promise<void> {
     await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   }
   const blockCount = page.locator("#block-count");
-  if ((await blockCount.inputValue()) === "") await blockCount.selectOption("1");
+  if ((await blockCount.inputValue()) === "") await blockCount.selectOption("2");
+  const finalStage = page.locator("#final-stage-format");
+  if ((await finalStage.inputValue()) === "") {
+    await finalStage.selectOption("same_rank_league");
+  }
   await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
 }
 

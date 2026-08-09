@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from football_scheduler.day2_schedule import Day1ScheduleSource, Day2ScheduleRequest
+from football_scheduler.final_stage import PlacementTournamentFinalStage
 from football_scheduler.league import LeaguePlan, LeagueTeam
 from football_scheduler.league_results import LeagueStandings
 from football_scheduler.models import (
@@ -16,23 +17,19 @@ from football_scheduler.models import (
     RefereeSettings,
     SolverSettings,
 )
-from football_scheduler.tournament import (
-    OddSplitPolicy,
-    TournamentPlan,
-    TournamentPlanRequest,
-)
+from football_scheduler.tournament import TournamentPlan, TournamentPlanRequest
 
 
 class Day2CreationRequest(ContractModel):
     """トーナメント生成と2日目配置に共通する利用者入力。"""
 
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["day2_creation"]
     teams: Annotated[tuple[LeagueTeam, ...], Field(min_length=2, max_length=32)]
     courts: Annotated[tuple[Court, ...], Field(min_length=1, max_length=16)]
     league_plan: LeaguePlan
     league_standings: LeagueStandings | None = None
-    odd_split_policy: OddSplitPolicy = OddSplitPolicy.UPPER
+    final_stage: PlacementTournamentFinalStage
     day1_schedule: Day1ScheduleSource
     day: DaySettings = DaySettings(id="day2", game_duration_minutes=35, margin_minutes=10)
     referees: RefereeSettings
@@ -44,7 +41,7 @@ class Day2CreationRequest(ContractModel):
             request_kind="tournament_plan",
             league_plan=self.league_plan,
             league_standings=self.league_standings,
-            odd_split_policy=self.odd_split_policy,
+            final_stage=self.final_stage,
             random_seed=self.random_seed,
         )
 

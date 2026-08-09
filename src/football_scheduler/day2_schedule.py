@@ -17,6 +17,7 @@ from football_scheduler.league import LeaguePlan, LeagueTeam
 from football_scheduler.models import (
     ContractModel,
     Court,
+    Day2Fallback,
     DaySettings,
     Diagnostic,
     Identifier,
@@ -31,7 +32,6 @@ from football_scheduler.models import (
     SolverSettings,
     SolverStatus,
     TeamRefereeCount,
-    TournamentFallback,
 )
 from football_scheduler.timekeeping import (
     DayTimingError,
@@ -64,7 +64,7 @@ class Day1ScheduleSource(ContractModel):
 
 
 class Day2ScheduleRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["day2_schedule"]
     teams: Annotated[tuple[LeagueTeam, ...], Field(min_length=2, max_length=32)]
     courts: Annotated[tuple[Court, ...], Field(min_length=1, max_length=16)]
@@ -170,7 +170,7 @@ class TeamRouteEntry(ContractModel):
 
 
 class Day2Schedule(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     schedule_scope: Literal["day2_tournament"] = "day2_tournament"
     participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     status: SolverStatus
@@ -387,7 +387,7 @@ def generate_day2_schedule(
         layout,
         started,
     )
-    if invalid_reasons and data.referees.tournament_fallback is TournamentFallback.STRICT:
+    if invalid_reasons and data.referees.day2_fallback is Day2Fallback.STRICT:
         return _failed_schedule(
             data,
             path_model.matches,
@@ -536,7 +536,7 @@ def _find_referee_ready_layout(
             if count > data.referees.organizer_capacity
         }
         strict_invalid = bool(invalid_reasons) and (
-            data.referees.tournament_fallback is TournamentFallback.STRICT
+            data.referees.day2_fallback is Day2Fallback.STRICT
         )
         if not strict_invalid and not capacity_overruns:
             best_valid = (layout, slots, invalid_reasons, capacity_overruns)

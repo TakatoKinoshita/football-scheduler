@@ -19,7 +19,7 @@ class LeagueMatchResult(ContractModel):
 
 
 class LeagueStandingsRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["league_standings"]
     league_plan: LeaguePlan
     results: tuple[LeagueMatchResult, ...]
@@ -62,7 +62,7 @@ class DrawRecord(ContractModel):
 
 
 class LeagueStandings(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     status: Literal["COMPLETE"] = "COMPLETE"
     standings: tuple[Standing, ...]
     draws: tuple[DrawRecord, ...]

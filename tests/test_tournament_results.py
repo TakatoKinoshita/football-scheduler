@@ -73,7 +73,7 @@ def _plan(block_sizes: tuple[int, ...], *, resolved: bool = True) -> TournamentP
     request: dict[str, Any] = {
         "request_kind": "tournament_plan",
         "league_plan": league_plan.model_dump(mode="json"),
-        "odd_split_policy": "upper",
+        "final_stage": {"format": "placement_tournament", "tournament_count": 2},
         "random_seed": 31,
     }
     if resolved:
