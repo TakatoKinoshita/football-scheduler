@@ -13,6 +13,7 @@ from football_scheduler import application
 
 MAX_HTTP_BODY_BYTES = 1_000_000
 _ACTION_BY_REQUEST_KIND = {
+    "schedule_creation": "create_schedule",
     "day1_league": "generate_schedule",
     "league_standings": "calculate_standings",
     "tournament_plan": "generate_tournament",
@@ -74,6 +75,7 @@ _CLIENT_ERROR_CODES = {
     "DAY_SECTION_LIMIT_CONFLICT",
     "DAY_OVERRUNS_MIDNIGHT",
     "DAY1_SCHEDULE_INVALID",
+    "DAY1_RESULT_REQUIRED",
     "SAME_RANK_INPUT_INVALID",
     "SAME_RANK_SOURCE_INVALID",
     "DUPLICATE_SAME_RANK_RESULT",

@@ -168,6 +168,28 @@ def _day2_creation_request(
     return request
 
 
+def _schedule_creation_request(
+    day1_request: dict[str, Any],
+    *,
+    generation_scope: str = "all",
+    existing_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request = {
+        **day1_request,
+        "request_kind": "schedule_creation",
+        "generation_scope": generation_scope,
+        "day2": {
+            "id": "day2",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 10,
+        },
+    }
+    if existing_result is not None:
+        request["existing_result"] = existing_result
+    return request
+
+
 def test_direct_request_is_solved_and_independently_validated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1056,6 +1078,243 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
     assert [standing["rank"] for standing in result["standings"]] == [1, 2, 3, 4]
 
 
+@pytest.mark.parametrize("final_format", ["placement_tournament", "same_rank_league"])
+def test_schedule_creation_all_returns_atomic_canonical_result(final_format: str) -> None:
+    team_count = 8 if final_format == "placement_tournament" else 4
+    day1_request = _day1_league_request(
+        team_count=team_count,
+        block_count=2,
+        court_count=2,
+    )
+    if final_format == "same_rank_league":
+        day1_request["final_stage"] = {
+            "format": "same_rank_league",
+            "uneven_policy": "strict_same_rank",
+        }
+
+    combined = _handle_request(_schedule_creation_request(day1_request))
+
+    assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
+    assert combined["schema_version"] == "0.2.0"
+    assert combined["generation_scope"] == "all"
+    result = combined["tournament_result"]
+    assert result["validation"]["valid"] is True
+    assert result["day2_schedule"]["validation"]["valid"] is True
+    assert result["integrated_validation"]["valid"] is True
+    expected_plan = "same_rank_plan" if final_format == "same_rank_league" else "tournament_plan"
+    unexpected_plan = "tournament_plan" if final_format == "same_rank_league" else "same_rank_plan"
+    assert expected_plan in result
+    assert unexpected_plan not in result
+
+
+def test_schedule_creation_day2_only_preserves_day1_and_removes_stale_day2_results() -> None:
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
+    day1 = _handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
+    league_results = [
+        {"match_id": match["id"], "home_score": 1, "away_score": 0}
+        for match in day1["league_plan"]["matches"]
+    ]
+    standings = _handle_request(
+        {
+            "schema_version": "0.2.0",
+            "request_kind": "league_standings",
+            "league_plan": day1["league_plan"],
+            "results": league_results,
+            "random_seed": 20260803,
+        }
+    )
+    existing = {
+        **day1,
+        "league_results": league_results,
+        "league_standings": standings,
+        "same_rank_plan": {"stale": True},
+        "same_rank_league_results": [{"stale": True}],
+        "final_standings": {"stale": True},
+    }
+
+    combined = _handle_request(
+        _schedule_creation_request(
+            day1_request,
+            generation_scope="day2_only",
+            existing_result=existing,
+        )
+    )
+
+    assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
+    assert combined["generation_scope"] == "day2_only"
+    result = combined["tournament_result"]
+    assert result["slots"] == day1["slots"]
+    assert result["league_results"] == league_results
+    assert result["league_standings"] == standings
+    assert "tournament_plan" in result
+    assert "same_rank_plan" not in result
+    assert "same_rank_league_results" not in result
+    assert "final_standings" not in result
+    assert result["integrated_validation"]["valid"] is True
+
+
+def test_maximum_team_count_schedule_creation_day2_only_uses_production_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day1_request = _day1_league_request(team_count=32, block_count=8, court_count=4)
+    day1_request["final_stage"] = {
+        "format": "placement_tournament",
+        "tournament_count": 4,
+    }
+    day1 = _handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
+    request = _schedule_creation_request(
+        day1_request,
+        generation_scope="day2_only",
+        existing_result=day1,
+    )
+    request["solver"] = {"max_time_seconds": 30}
+    monkeypatch.setenv("SOLVER_MAX_TIME_SECONDS", "20")
+    assert len(json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()) <= (
+        application.MAX_REQUEST_BYTES
+    )
+
+    started = monotonic()
+    result = _handle_request(request)
+
+    assert monotonic() - started < 28
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    assert result["generation_scope"] == "day2_only"
+    tournament_result = result["tournament_result"]
+    assert len(tournament_result["tournament_plan"]["pools"]) == 4
+    assert tournament_result["integrated_validation"]["valid"] is True
+
+
+def test_schedule_creation_failure_never_returns_partial_tournament_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
+    monkeypatch.setattr(
+        application,
+        "_generate_day2_creation_response",
+        lambda _: {
+            "status": "error",
+            "diagnostics": [
+                {
+                    "code": "SCHEDULE_GENERATION_FAILED",
+                    "message": "2日目を作成できませんでした。",
+                    "details": {"operation_stage": "day2_schedule"},
+                }
+            ],
+        },
+    )
+
+    result = _handle_request(_schedule_creation_request(day1_request))
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["details"]["operation_stage"] == "day2_schedule"
+    assert "tournament_result" not in result
+
+
+@pytest.mark.parametrize(
+    ("legacy_stage", "public_stage"),
+    [
+        ("tournament_plan", "final_stage_plan"),
+        ("same_rank_league_plan", "final_stage_plan"),
+        ("same_rank_day2_schedule", "day2_schedule"),
+        ("day2_schedule", "day2_schedule"),
+        ("integrated_validation", "integrated_validation"),
+    ],
+)
+def test_schedule_creation_normalizes_public_operation_stages(
+    legacy_stage: str,
+    public_stage: str,
+) -> None:
+    normalized = application._normalize_schedule_creation_failure(
+        {
+            "status": "error",
+            "diagnostics": [
+                {
+                    "code": "SCHEDULE_GENERATION_FAILED",
+                    "message": "生成できませんでした。",
+                    "details": {"operation_stage": legacy_stage},
+                }
+            ],
+        }
+    )
+
+    assert normalized["diagnostics"][0]["details"]["operation_stage"] == public_stage
+
+
+def test_schedule_creation_shares_solver_budget_between_both_days(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    times = iter([107.5])
+    monkeypatch.setattr(application, "monotonic", lambda: next(times))
+
+    adjusted = application._apply_schedule_creation_remaining_budget(
+        {"solver": {"max_time_seconds": 30}},
+        operation_started=100.0,
+    )
+
+    assert adjusted["solver"]["max_time_seconds"] == 17.5
+
+
+def test_schedule_creation_caps_first_solver_to_transport_safe_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SOLVER_MAX_TIME_SECONDS", "30")
+    prepared = application._prepare_schedule_creation(
+        _schedule_creation_request(_day1_league_request(team_count=8, block_count=2, court_count=2))
+    )
+
+    assert prepared["request"]["solver"]["max_time_seconds"] == (
+        application.SCHEDULE_CREATION_MAX_TIME_SECONDS
+    )
+
+
+def test_schedule_creation_rejects_failed_integrated_validation_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
+    monkeypatch.setattr(
+        application,
+        "_generate_day1_schedule_response",
+        lambda _: {
+            "status": "OPTIMAL",
+            "league_plan": {},
+            "slots": [],
+            "validation": {"valid": True},
+        },
+    )
+    monkeypatch.setattr(
+        application,
+        "_generate_day2_creation_response",
+        lambda _: {
+            "status": "OPTIMAL",
+            "tournament_plan": {},
+            "day2_schedule": {"integrated_validation": {"valid": False}},
+        },
+    )
+
+    result = _handle_request(_schedule_creation_request(day1_request))
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "DAY2_VALIDATION_FAILED"
+    assert result["diagnostics"][0]["details"]["operation_stage"] == ("integrated_validation")
+    assert "tournament_result" not in result
+
+
+def test_schedule_creation_day2_only_requires_existing_result() -> None:
+    request = _schedule_creation_request(
+        _day1_league_request(team_count=8, block_count=2, court_count=2),
+        generation_scope="day2_only",
+    )
+
+    result = _handle_request(request)
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "INPUT_SCHEMA_INVALID"
+    assert result["diagnostics"][0]["details"]["operation_stage"] == "input"
+    assert "tournament_result" not in result
+
+
 @pytest.mark.parametrize(
     "request_kind",
     [
@@ -1063,6 +1322,7 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
         "same_rank_league_results",
         "same_rank_day2_schedule",
         "day2_creation",
+        "schedule_creation",
     ],
 )
 def test_same_rank_generation_entry_points_reject_schema_0_1_0(request_kind: str) -> None:

@@ -64,6 +64,7 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
 @pytest.mark.parametrize(
     "action",
     [
+        "create_schedule",
         "calculate_standings",
         "generate_tournament",
         "calculate_tournament_results",

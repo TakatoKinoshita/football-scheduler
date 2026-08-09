@@ -1,6 +1,7 @@
 const API_PATH = "/api/v1/schedules:generate";
 const MAX_BODY_BYTES = 1_000_000;
 const TURNSTILE_ACTIONS = new Set([
+  "create_schedule",
   "generate_schedule",
   "calculate_standings",
   "generate_tournament",

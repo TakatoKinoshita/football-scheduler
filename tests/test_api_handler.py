@@ -142,6 +142,50 @@ def test_day2_creation_action_returns_both_results_with_http_200(
     assert json.loads(response["body"]) == expected
 
 
+def test_schedule_creation_action_returns_canonical_result_with_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = {
+        "schema_version": "0.2.0",
+        "status": "OPTIMAL",
+        "generation_scope": "all",
+        "tournament_result": {"status": "OPTIMAL"},
+    }
+    monkeypatch.setattr(api_handler.application, "handle_request", lambda _: expected)
+
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"schedule_creation"}',
+            headers={"x-turnstile-action": "create_schedule"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == expected
+
+
+def test_schedule_creation_rejects_legacy_generation_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: pytest.fail("action不一致時はアプリケーションを呼び出してはなりません"),
+    )
+
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"schedule_creation"}',
+            headers={"x-turnstile-action": "generate_schedule"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
+
+
 def test_tournament_results_action_returns_http_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

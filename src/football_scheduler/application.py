@@ -11,6 +11,7 @@ import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from time import monotonic
 from typing import Any
 
 from pydantic import ValidationError
@@ -55,6 +56,7 @@ from football_scheduler.same_rank_schedule import (
     generate_same_rank_day2_schedule,
 )
 from football_scheduler.same_rank_validator import validate_same_rank_day2_schedule
+from football_scheduler.schedule_creation import ScheduleCreationRequest
 from football_scheduler.solver import solve_schedule
 from football_scheduler.tournament import (
     TournamentGenerationError,
@@ -76,6 +78,7 @@ MAX_COURTS = 16
 MAX_MATCHES = 512
 MAX_SECTIONS = 128
 DEFAULT_SOLVER_MAX_TIME_SECONDS = 30.0
+SCHEDULE_CREATION_MAX_TIME_SECONDS = 25.0
 
 
 class _RequestError(ValueError):
@@ -127,6 +130,8 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             )
         if payload.get("request_kind") == "same_rank_day2_schedule":
             return _generate_same_rank_schedule_response(payload)
+        if payload.get("request_kind") == "schedule_creation":
+            return _generate_schedule_creation_response(payload)
         if payload.get("request_kind") == "day2_creation":
             return _generate_day2_creation_response(payload)
         if payload.get("request_kind") == "day2_schedule":
@@ -220,7 +225,29 @@ def _validate_request_final_stage(payload: Mapping[str, Any]) -> None:
             ),
         )
         return
-    if request_kind not in {"tournament_plan", "same_rank_league_plan", "day2_creation"}:
+    if request_kind not in {
+        "tournament_plan",
+        "same_rank_league_plan",
+        "day2_creation",
+        "schedule_creation",
+    }:
+        return
+    if request_kind == "schedule_creation":
+        teams = payload.get("teams")
+        league = payload.get("league")
+        validate_final_stage_input(
+            payload.get("final_stage"),
+            team_count=(
+                len(teams)
+                if isinstance(teams, Sequence) and not isinstance(teams, (str, bytes, bytearray))
+                else None
+            ),
+            block_count=(
+                int(league["block_count"])
+                if isinstance(league, Mapping) and isinstance(league.get("block_count"), int)
+                else None
+            ),
+        )
         return
     league_plan = payload.get("league_plan")
     blocks = league_plan.get("blocks") if isinstance(league_plan, Mapping) else None
@@ -366,6 +393,232 @@ def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, An
     )
 
 
+def _generate_schedule_creation_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    prepared = _run_day2_creation_stage(
+        "input",
+        {"COMPLETE"},
+        lambda: _prepare_schedule_creation(payload),
+    )
+    if prepared.get("status") != "COMPLETE":
+        return prepared
+    request = ScheduleCreationRequest.model_validate(prepared["request"])
+    operation_started = monotonic()
+
+    if request.generation_scope == "all":
+        day1_response = _run_day2_creation_stage(
+            "day1_schedule",
+            {"OPTIMAL", "FEASIBLE"},
+            lambda: _generate_day1_schedule_response(_to_json_object(request.day1_request())),
+        )
+        if day1_response.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+            return day1_response
+        validation = day1_response.get("validation")
+        if not isinstance(validation, Mapping) or validation.get("valid") is not True:
+            return _error_response(
+                "DAY1_VALIDATION_FAILED",
+                "生成した1日目日程が大会規則の安全確認に合格しませんでした。入力を保存して、もう一度お試しください。",
+                {"operation_stage": "day1_schedule"},
+            )
+        base_result = day1_response
+    else:
+        if request.existing_result is None:  # model validatorで保証する防御的分岐
+            raise _RequestError(
+                "DAY1_RESULT_REQUIRED",
+                "2日目だけを作成するには、既存の1日目日程が必要です。",
+            )
+        base_result = _json_round_trip(request.existing_result)
+
+    try:
+        day2_payload = _day2_creation_payload(request, base_result)
+    except _RequestError as exc:
+        return _with_operation_stage(
+            _error_response(exc.code, exc.message, exc.details),
+            "day1_schedule",
+        )
+    if request.generation_scope == "all":
+        try:
+            day2_payload = _apply_schedule_creation_remaining_budget(
+                day2_payload,
+                operation_started=operation_started,
+            )
+        except _RequestError as exc:
+            return _with_operation_stage(
+                _error_response(exc.code, exc.message, exc.details),
+                "day2_schedule",
+            )
+    day2_response = _generate_day2_creation_response(day2_payload)
+    if day2_response.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+        return _normalize_schedule_creation_failure(day2_response)
+
+    day2_schedule = day2_response.get("day2_schedule")
+    integrated_validation = (
+        day2_schedule.get("integrated_validation") if isinstance(day2_schedule, Mapping) else None
+    )
+    if (
+        not isinstance(integrated_validation, Mapping)
+        or integrated_validation.get("valid") is not True
+    ):
+        return _error_response(
+            "DAY2_VALIDATION_FAILED",
+            "生成した両日の日程が大会規則の安全確認に合格しませんでした。入力を保存して、もう一度お試しください。",
+            {"operation_stage": "integrated_validation"},
+        )
+
+    tournament_result = _merge_schedule_creation_result(base_result, day2_response)
+    return _json_round_trip(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "status": day2_response["status"],
+            "generation_scope": request.generation_scope,
+            "tournament_result": tournament_result,
+        }
+    )
+
+
+def _prepare_schedule_creation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_limits(payload)
+    _validate_request_final_stage(payload)
+    request_data = _apply_solver_time_limit(payload)
+    request = ScheduleCreationRequest.model_validate(request_data)
+    if (
+        request.generation_scope == "all"
+        and request.solver.max_time_seconds > SCHEDULE_CREATION_MAX_TIME_SECONDS
+    ):
+        request = request.model_copy(
+            update={
+                "solver": request.solver.model_copy(
+                    update={"max_time_seconds": SCHEDULE_CREATION_MAX_TIME_SECONDS}
+                )
+            }
+        )
+    return {"status": "COMPLETE", "request": _to_json_object(request)}
+
+
+def _apply_schedule_creation_remaining_budget(
+    payload: Mapping[str, Any],
+    *,
+    operation_started: float,
+) -> dict[str, Any]:
+    remaining = SCHEDULE_CREATION_MAX_TIME_SECONDS - (monotonic() - operation_started)
+    if remaining <= 0.1:
+        raise _RequestError(
+            "SCHEDULE_SEARCH_TIMEOUT",
+            "日程生成が時間上限に達しました。入力を保存して、もう一度お試しください。",
+            maximum_seconds=SCHEDULE_CREATION_MAX_TIME_SECONDS,
+        )
+    adjusted = deepcopy(dict(payload))
+    solver = adjusted.get("solver")
+    solver_data = dict(solver) if isinstance(solver, Mapping) else {}
+    requested = solver_data.get("max_time_seconds", remaining)
+    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+        requested = remaining
+    solver_data["max_time_seconds"] = max(0.1, min(float(requested), remaining))
+    adjusted["solver"] = solver_data
+    return adjusted
+
+
+def _normalize_schedule_creation_failure(response: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = _json_round_trip(response)
+    diagnostics = normalized.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return normalized
+    stage_map = {
+        "tournament_plan": "final_stage_plan",
+        "same_rank_league_plan": "final_stage_plan",
+        "day2_schedule": "day2_schedule",
+        "same_rank_day2_schedule": "day2_schedule",
+        "integrated_validation": "integrated_validation",
+    }
+    for diagnostic in diagnostics:
+        if not isinstance(diagnostic, dict):
+            continue
+        details = diagnostic.get("details")
+        if not isinstance(details, dict):
+            continue
+        stage = details.get("operation_stage")
+        if isinstance(stage, str):
+            details["operation_stage"] = stage_map.get(stage, stage)
+    return normalized
+
+
+def _generate_day1_schedule_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    request_data, response_metadata, fallback_request_data = _resolve_request(payload)
+    _validate_limits(request_data)
+    request_data = _apply_solver_time_limit(request_data)
+    if fallback_request_data is not None:
+        fallback_request_data = _apply_solver_time_limit(fallback_request_data)
+
+    result = solve_schedule(request_data)
+    result_data = _to_json_object(result)
+    if result_data.get("status") == "INFEASIBLE" and fallback_request_data is not None:
+        request_data = fallback_request_data
+        result = solve_schedule(request_data)
+        result_data = _to_json_object(result)
+    document = _build_validation_document(request_data, result_data)
+    validation = _to_json_object(validate_schedule(document))
+    return _json_round_trip({**result_data, **response_metadata, "validation": validation})
+
+
+def _day2_creation_payload(
+    request: ScheduleCreationRequest,
+    tournament_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    request_data = request.model_dump(mode="json")
+    league_plan = tournament_result.get("league_plan")
+    slots = tournament_result.get("slots")
+    if (
+        not isinstance(league_plan, Mapping)
+        or not isinstance(slots, Sequence)
+        or isinstance(slots, (str, bytes, bytearray))
+    ):
+        raise _RequestError(
+            "DAY1_RESULT_REQUIRED",
+            "2日目の作成に必要な1日目の日程またはブロック分けがありません。1日目から作成し直してください。",
+        )
+    payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "request_kind": "day2_creation",
+        "teams": request_data["teams"],
+        "courts": request_data["courts"],
+        "league_plan": _json_round_trip(league_plan),
+        "final_stage": request_data["final_stage"],
+        "day1_schedule": {"day": request_data["day"], "slots": list(slots)},
+        "day": request_data["day2"],
+        "referees": request_data["referees"],
+        "random_seed": request.random_seed,
+        "solver": request_data["solver"],
+    }
+    league_standings = tournament_result.get("league_standings")
+    if isinstance(league_standings, Mapping):
+        payload["league_standings"] = _json_round_trip(league_standings)
+    return payload
+
+
+def _merge_schedule_creation_result(
+    existing_result: Mapping[str, Any],
+    day2_response: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = _json_round_trip(existing_result)
+    for field in (
+        "tournament_plan",
+        "same_rank_plan",
+        "day2_schedule",
+        "integrated_validation",
+        "tournament_results",
+        "same_rank_league_results",
+        "same_rank_standings",
+        "final_standings",
+    ):
+        merged.pop(field, None)
+    plan_key = "same_rank_plan" if "same_rank_plan" in day2_response else "tournament_plan"
+    merged[plan_key] = _json_round_trip(day2_response[plan_key])
+    merged["day2_schedule"] = _json_round_trip(day2_response["day2_schedule"])
+    integrated_validation = day2_response["day2_schedule"].get("integrated_validation")
+    if isinstance(integrated_validation, Mapping):
+        merged["integrated_validation"] = _json_round_trip(integrated_validation)
+    return merged
+
+
 def _finish_day2_creation(
     schedule_response: dict[str, Any],
     *,
@@ -435,6 +688,8 @@ def _run_day2_creation_stage(
         response = operation()
     except _RequestError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
+    except LeagueGenerationError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
     except TournamentGenerationError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
     except Day2ScheduleError as exc:
@@ -442,6 +697,8 @@ def _run_day2_creation_stage(
     except SameRankGenerationError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
     except SameRankScheduleError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except FinalStageConfigurationError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         response = _error_response(
