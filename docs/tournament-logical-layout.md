@@ -1,5 +1,8 @@
 # トーナメント論理配置契約
 
+> 本文はschema `0.1.0`の`TournamentPoolPlan`を記録する。schema `0.2.0`の順位帯コレクションと
+> 対応構成は[決勝方式仕様](product/final-stage-formats.md)を正本とし、移行はIssue #61で行う。
+
 ## 目的
 
 `TournamentPoolPlan.logical_layout`は、完全順位決定トーナメントを表示処理が安定した順序で配置するための契約である。座標、用紙寸法、垂直・水平などの見た目は含めない。
