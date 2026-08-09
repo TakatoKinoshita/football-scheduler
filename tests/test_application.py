@@ -984,6 +984,87 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
     assert combined["day2_schedule"]["integrated_validation"]["valid"] is True
 
 
+def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=2, court_count=1)
+    day1_request["final_stage"] = {
+        "format": "same_rank_league",
+        "uneven_policy": "strict_same_rank",
+    }
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": day1["league_plan"],
+            "results": [
+                {"match_id": match["id"], "home_score": 1, "away_score": 0}
+                for match in day1["league_plan"]["matches"]
+            ],
+            "random_seed": 20260803,
+        }
+    )
+
+    combined = application.handle_request(
+        _day2_creation_request(day1_request, day1, standings=standings)
+    )
+
+    assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
+    assert "same_rank_plan" in combined
+    assert "tournament_plan" not in combined
+    assert combined["day2_schedule"]["schedule_scope"] == "day2_same_rank_league"
+    assert combined["day2_schedule"]["validation"]["valid"] is True
+    assert combined["day2_schedule"]["integrated_validation"]["valid"] is True
+
+    plan = combined["same_rank_plan"]
+    team_by_rank = {
+        (participant["entry"]["block_id"], participant["entry"]["rank"]): participant["team"][
+            "team_id"
+        ]
+        for group in plan["groups"]
+        for participant in group["participants"]
+    }
+    result = application.handle_request(
+        {
+            "request_kind": "same_rank_league_results",
+            "same_rank_plan": plan,
+            "results": [
+                {
+                    "match_id": match["id"],
+                    "home_team_id": team_by_rank[
+                        (match["home"]["block_id"], match["home"]["rank"])
+                    ],
+                    "away_team_id": team_by_rank[
+                        (match["away"]["block_id"], match["away"]["rank"])
+                    ],
+                    "regular_score_home": 1,
+                    "regular_score_away": 0,
+                }
+                for group in plan["groups"]
+                for match in group["matches"]
+            ],
+        }
+    )
+
+    assert result["status"] == "COMPLETE"
+    assert [standing["rank"] for standing in result["standings"]] == [1, 2, 3, 4]
+
+
+@pytest.mark.parametrize(
+    "request_kind",
+    [
+        "same_rank_league_plan",
+        "same_rank_league_results",
+        "same_rank_day2_schedule",
+        "day2_creation",
+    ],
+)
+def test_same_rank_generation_entry_points_reject_schema_0_1_0(request_kind: str) -> None:
+    result = application.handle_request({"schema_version": "0.1.0", "request_kind": request_kind})
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "SCHEMA_VERSION_UNSUPPORTED"
+
+
 def test_day2_creation_reports_tournament_failure_without_partial_result() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
     day1 = application.handle_request(day1_request)

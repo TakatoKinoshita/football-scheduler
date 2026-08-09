@@ -152,7 +152,7 @@ class SameRankWarning(ContractModel):
     code: Literal["SAME_RANK_UNEVEN_BLOCKS", "SAME_RANK_SINGLETON_GROUP"]
     message: NonEmptyText
     group_id: Identifier | None = None
-    details: dict[str, int | str | list[str]] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SameRankLeaguePlan(ContractModel):
@@ -297,6 +297,19 @@ def generate_same_rank_league_plan(
                     "team_count": team_count,
                     "block_count": block_count,
                     "uneven_policy": policy.value,
+                    "block_sizes": [
+                        len(data.league_plan.blocks[index].team_ids)
+                        for index in range(len(data.league_plan.blocks))
+                    ],
+                    "groups": [
+                        {
+                            "group_id": group.id,
+                            "participant_count": len(group.participants),
+                            "source_block_ranks": list(group.source_block_ranks),
+                            "overall_rank_range": list(group.overall_rank_range),
+                        }
+                        for group in groups
+                    ],
                 },
             )
         )

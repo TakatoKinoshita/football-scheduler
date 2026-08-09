@@ -162,6 +162,36 @@ def test_tournament_results_action_returns_http_200(
     assert response["statusCode"] == 200
 
 
+@pytest.mark.parametrize(
+    ("request_kind", "action"),
+    [
+        ("same_rank_league_plan", "generate_same_rank_league"),
+        ("same_rank_league_results", "calculate_same_rank_results"),
+        ("same_rank_day2_schedule", "generate_same_rank_day2_schedule"),
+    ],
+)
+def test_same_rank_actions_are_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+    request_kind: str,
+    action: str,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: {"status": "COMPLETE"},
+    )
+
+    response = api_handler.lambda_handler(
+        _event(
+            json.dumps({"request_kind": request_kind}),
+            headers={"x-turnstile-action": action},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 200
+
+
 def test_day1_schedule_response_includes_referee_audit_metrics() -> None:
     payload = {
         "schema_version": "0.2.0",
@@ -338,10 +368,14 @@ def test_day2_creation_rejects_legacy_day2_action(
         ("TOURNAMENT_RESULT_INVALID", 400),
         ("DAY_END_TIME_INVALID", 400),
         ("DAY1_SCHEDULE_INVALID", 400),
+        ("SAME_RANK_RESULTS_INCOMPLETE", 400),
+        ("SAME_RANK_PLAN_INVALID", 400),
         ("TEAM_LIMIT_EXCEEDED", 413),
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),
         ("TOURNAMENT_REFEREE_UNAVAILABLE", 422),
+        ("SAME_RANK_REFEREE_UNAVAILABLE", 422),
+        ("SAME_RANK_SCHEDULE_SEARCH_TIMEOUT", 504),
         ("DAY2_VALIDATION_FAILED", 500),
         ("SCHEDULE_GENERATION_FAILED", 500),
     ],

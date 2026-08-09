@@ -17,6 +17,9 @@ _ACTION_BY_REQUEST_KIND = {
     "league_standings": "calculate_standings",
     "tournament_plan": "generate_tournament",
     "tournament_results": "calculate_tournament_results",
+    "same_rank_league_plan": "generate_same_rank_league",
+    "same_rank_league_results": "calculate_same_rank_results",
+    "same_rank_day2_schedule": "generate_same_rank_day2_schedule",
     "day2_creation": "create_day2",
     "day2_schedule": "generate_day2_schedule",
 }
@@ -71,6 +74,15 @@ _CLIENT_ERROR_CODES = {
     "DAY_SECTION_LIMIT_CONFLICT",
     "DAY_OVERRUNS_MIDNIGHT",
     "DAY1_SCHEDULE_INVALID",
+    "SAME_RANK_INPUT_INVALID",
+    "SAME_RANK_SOURCE_INVALID",
+    "DUPLICATE_SAME_RANK_RESULT",
+    "UNKNOWN_SAME_RANK_MATCH",
+    "SAME_RANK_RESULTS_INCOMPLETE",
+    "SAME_RANK_RESULTS_REQUIRE_RESOLVED_PLAN",
+    "SAME_RANK_RESULT_PARTICIPANT_MISMATCH",
+    "SAME_RANK_PENALTY_NOT_ALLOWED",
+    "SAME_RANK_PLAN_INVALID",
 }
 _LIMIT_ERROR_CODES = {
     "INPUT_TOO_LARGE",
@@ -157,7 +169,12 @@ def _status_for_result(result: Mapping[str, Any]) -> int:
     if status == "UNKNOWN":
         return (
             504
-            if code in {"SCHEDULE_SEARCH_TIMEOUT", "TOURNAMENT_SCHEDULE_SEARCH_TIMEOUT"}
+            if code
+            in {
+                "SCHEDULE_SEARCH_TIMEOUT",
+                "TOURNAMENT_SCHEDULE_SEARCH_TIMEOUT",
+                "SAME_RANK_SCHEDULE_SEARCH_TIMEOUT",
+            }
             else 503
         )
     if status != "error":
@@ -166,7 +183,7 @@ def _status_for_result(result: Mapping[str, Any]) -> int:
         return 400
     if code in _LIMIT_ERROR_CODES:
         return 413
-    if code == "SCHEDULE_SEARCH_TIMEOUT":
+    if code in {"SCHEDULE_SEARCH_TIMEOUT", "SAME_RANK_SCHEDULE_SEARCH_TIMEOUT"}:
         return 504
     if code in {
         "INSUFFICIENT_SLOTS",
@@ -175,6 +192,7 @@ def _status_for_result(result: Mapping[str, Any]) -> int:
         "TOURNAMENT_SCHEDULE_INFEASIBLE",
         "TOURNAMENT_REFEREE_UNAVAILABLE",
         "ORGANIZER_CAPACITY_INSUFFICIENT",
+        "SAME_RANK_REFEREE_UNAVAILABLE",
     }:
         return 422
     return 500

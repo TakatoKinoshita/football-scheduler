@@ -89,6 +89,20 @@ def test_18_teams_strict_groups_are_4_4_4_4_2_and_cover_every_rank() -> None:
         (5,),
     ]
     assert [warning.code for warning in plan.warnings] == ["SAME_RANK_UNEVEN_BLOCKS"]
+    assert plan.warnings[0].details["block_sizes"] == [5, 5, 4, 4]
+    assert [item["participant_count"] for item in plan.warnings[0].details["groups"]] == [
+        4,
+        4,
+        4,
+        4,
+        2,
+    ]
+    assert plan.warnings[0].details["groups"][-1] == {
+        "group_id": "same-rank-5",
+        "participant_count": 2,
+        "source_block_ranks": [5],
+        "overall_rank_range": [17, 18],
+    }
 
 
 def test_18_teams_merge_bottom_groups_are_4_4_4_6() -> None:
@@ -124,6 +138,8 @@ def test_17_teams_strict_singleton_is_automatic_17th_with_two_warnings() -> None
         "SAME_RANK_UNEVEN_BLOCKS",
         "SAME_RANK_SINGLETON_GROUP",
     ]
+    assert plan.warnings[0].details["block_sizes"] == [5, 4, 4, 4]
+    assert plan.warnings[0].details["groups"][-1]["overall_rank_range"] == [17, 17]
 
 
 def test_divisible_groups_normalize_to_strict_without_warning() -> None:

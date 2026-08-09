@@ -24,6 +24,7 @@ from football_scheduler.day2_schedule import (
 )
 from football_scheduler.final_stage import (
     FinalStageConfigurationError,
+    SameRankLeagueFinalStage,
     validate_final_stage_input,
 )
 from football_scheduler.fixtures import (
@@ -37,6 +38,23 @@ from football_scheduler.league_results import (
     LeagueStandingsRequest,
     calculate_league_standings,
 )
+from football_scheduler.same_rank_league import (
+    SameRankGenerationError,
+    SameRankLeaguePlan,
+    SameRankLeaguePlanRequest,
+    generate_same_rank_league_plan,
+)
+from football_scheduler.same_rank_results import (
+    SameRankResultsError,
+    SameRankResultsRequest,
+    calculate_same_rank_standings,
+)
+from football_scheduler.same_rank_schedule import (
+    SameRankDay2ScheduleRequest,
+    SameRankScheduleError,
+    generate_same_rank_day2_schedule,
+)
+from football_scheduler.same_rank_validator import validate_same_rank_day2_schedule
 from football_scheduler.solver import solve_schedule
 from football_scheduler.tournament import (
     TournamentGenerationError,
@@ -100,6 +118,15 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             return _to_json_object(
                 calculate_tournament_standings(TournamentResultsRequest.model_validate(payload))
             )
+        if payload.get("request_kind") == "same_rank_league_plan":
+            return _generate_same_rank_plan_response(payload)
+        if payload.get("request_kind") == "same_rank_league_results":
+            _validate_same_rank_results_limits(payload)
+            return _to_json_object(
+                calculate_same_rank_standings(SameRankResultsRequest.model_validate(payload))
+            )
+        if payload.get("request_kind") == "same_rank_day2_schedule":
+            return _generate_same_rank_schedule_response(payload)
         if payload.get("request_kind") == "day2_creation":
             return _generate_day2_creation_response(payload)
         if payload.get("request_kind") == "day2_schedule":
@@ -131,6 +158,12 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except TournamentGenerationError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except TournamentResultsError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except SameRankGenerationError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except SameRankResultsError as exc:
+        return _error_response(exc.code, exc.message, exc.details)
+    except SameRankScheduleError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except Day2ScheduleError as exc:
         return _error_response(exc.code, exc.message, exc.details)
@@ -187,7 +220,7 @@ def _validate_request_final_stage(payload: Mapping[str, Any]) -> None:
             ),
         )
         return
-    if request_kind not in {"tournament_plan", "day2_creation"}:
+    if request_kind not in {"tournament_plan", "same_rank_league_plan", "day2_creation"}:
         return
     league_plan = payload.get("league_plan")
     blocks = league_plan.get("blocks") if isinstance(league_plan, Mapping) else None
@@ -214,6 +247,14 @@ def _generate_tournament_plan_response(payload: Mapping[str, Any]) -> dict[str, 
     _validate_tournament_plan_limits(payload)
     _validate_request_final_stage(payload)
     return _to_json_object(generate_tournament_plan(TournamentPlanRequest.model_validate(payload)))
+
+
+def _generate_same_rank_plan_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_tournament_plan_limits(payload)
+    _validate_request_final_stage(payload)
+    return _to_json_object(
+        generate_same_rank_league_plan(SameRankLeaguePlanRequest.model_validate(payload))
+    )
 
 
 def _generate_day2_schedule_response(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -244,15 +285,66 @@ def _generate_day2_schedule_response(payload: Mapping[str, Any]) -> dict[str, An
     )
 
 
+def _generate_same_rank_schedule_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_day2_schedule_limits(payload)
+    request_data = _apply_solver_time_limit(payload)
+    request = SameRankDay2ScheduleRequest.model_validate(request_data)
+    day1_document = _build_day1_source_validation_document(request_data)
+    day1_validation = _to_json_object(validate_schedule(day1_document))
+    if day1_validation.get("valid") is not True:
+        raise _RequestError(
+            "DAY1_SCHEDULE_INVALID",
+            "既存の1日目日程が大会規則の検証に合格しません。1日目日程を再作成してください。",
+            diagnostics=list(day1_validation.get("diagnostics", [])),
+        )
+    schedule = generate_same_rank_day2_schedule(request)
+    result_data = _to_json_object(schedule)
+    if result_data.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+        return result_data
+    validation = _to_json_object(validate_same_rank_day2_schedule(request, schedule))
+    integrated_validation = _integrated_validation(day1_validation, validation)
+    return _json_round_trip(
+        {
+            **result_data,
+            "validation": validation,
+            "integrated_validation": integrated_validation,
+        }
+    )
+
+
 def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    same_rank = (
+        isinstance(payload.get("final_stage"), Mapping)
+        and payload["final_stage"].get("format") == "same_rank_league"
+    )
+    plan_stage = "same_rank_league_plan" if same_rank else "tournament_plan"
     prepared = _run_day2_creation_stage(
-        "tournament_plan",
+        plan_stage,
         {"COMPLETE"},
         lambda: _prepare_day2_creation(payload),
     )
     if prepared.get("status") != "COMPLETE":
         return prepared
     request = Day2CreationRequest.model_validate(prepared["request"])
+
+    if isinstance(request.final_stage, SameRankLeagueFinalStage):
+        same_rank_response = _run_day2_creation_stage(
+            "same_rank_league_plan",
+            {"COMPLETE"},
+            lambda: _generate_same_rank_plan_response(_to_json_object(request.same_rank_request())),
+        )
+        if same_rank_response.get("status") != "COMPLETE":
+            return same_rank_response
+        schedule_response = _run_day2_creation_stage(
+            "same_rank_day2_schedule",
+            {"OPTIMAL", "FEASIBLE"},
+            lambda: _generate_same_rank_schedule_from_creation(request, same_rank_response),
+        )
+        return _finish_day2_creation(
+            schedule_response,
+            plan_key="same_rank_plan",
+            plan_response=same_rank_response,
+        )
 
     tournament_response = _run_day2_creation_stage(
         "tournament_plan",
@@ -267,6 +359,19 @@ def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, An
         {"OPTIMAL", "FEASIBLE"},
         lambda: _generate_day2_schedule_from_creation(request, tournament_response),
     )
+    return _finish_day2_creation(
+        schedule_response,
+        plan_key="tournament_plan",
+        plan_response=tournament_response,
+    )
+
+
+def _finish_day2_creation(
+    schedule_response: dict[str, Any],
+    *,
+    plan_key: str,
+    plan_response: Mapping[str, Any],
+) -> dict[str, Any]:
     if schedule_response.get("status") not in {"OPTIMAL", "FEASIBLE"}:
         return schedule_response
     if (
@@ -284,7 +389,7 @@ def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, An
         {
             "schema_version": SCHEMA_VERSION,
             "status": schedule_response["status"],
-            "tournament_plan": tournament_response,
+            plan_key: plan_response,
             "day2_schedule": schedule_response,
         }
     )
@@ -311,6 +416,16 @@ def _generate_day2_schedule_from_creation(
     )
 
 
+def _generate_same_rank_schedule_from_creation(
+    request: Day2CreationRequest,
+    same_rank_response: Mapping[str, Any],
+) -> dict[str, Any]:
+    same_rank_plan = SameRankLeaguePlan.model_validate(same_rank_response)
+    return _generate_same_rank_schedule_response(
+        _to_json_object(request.same_rank_schedule_request(same_rank_plan))
+    )
+
+
 def _run_day2_creation_stage(
     operation_stage: str,
     success_statuses: set[str],
@@ -323,6 +438,10 @@ def _run_day2_creation_stage(
     except TournamentGenerationError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
     except Day2ScheduleError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except SameRankGenerationError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except SameRankScheduleError as exc:
         response = _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
         response = _error_response(
@@ -598,6 +717,12 @@ def _validate_day2_schedule_limits(request: Mapping[str, Any]) -> None:
             matches = pool.get("matches")
             if isinstance(matches, Sequence) and not isinstance(matches, (str, bytes, bytearray)):
                 tournament_match_count += len(matches)
+    same_rank_plan = request.get("same_rank_plan")
+    if isinstance(same_rank_plan, Mapping):
+        for group in _mapping_sequence(same_rank_plan.get("groups")):
+            matches = group.get("matches")
+            if isinstance(matches, Sequence) and not isinstance(matches, (str, bytes, bytearray)):
+                tournament_match_count += len(matches)
     if tournament_match_count > MAX_MATCHES:
         raise _RequestError(
             "MATCH_LIMIT_EXCEEDED",
@@ -657,6 +782,30 @@ def _validate_tournament_results_limits(request: Mapping[str, Any]) -> None:
             f"チーム数が上限の{MAX_TEAMS}を超えています。",
             actual=tournament_team_count,
             maximum=MAX_TEAMS,
+        )
+
+
+def _validate_same_rank_results_limits(request: Mapping[str, Any]) -> None:
+    _validate_sequence_limit(
+        request,
+        "results",
+        MAX_MATCHES,
+        "同順位リーグ結果数",
+        "MATCH_LIMIT_EXCEEDED",
+    )
+    same_rank_plan = request.get("same_rank_plan")
+    match_count = 0
+    if isinstance(same_rank_plan, Mapping):
+        for group in _mapping_sequence(same_rank_plan.get("groups")):
+            matches = group.get("matches")
+            if isinstance(matches, Sequence) and not isinstance(matches, (str, bytes, bytearray)):
+                match_count += len(matches)
+    if match_count > MAX_MATCHES:
+        raise _RequestError(
+            "MATCH_LIMIT_EXCEEDED",
+            f"同順位リーグ試合数が上限の{MAX_MATCHES}を超えています。",
+            actual=match_count,
+            maximum=MAX_MATCHES,
         )
 
 
