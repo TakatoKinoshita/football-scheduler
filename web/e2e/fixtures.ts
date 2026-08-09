@@ -486,6 +486,23 @@ export const standingsResult = {
   draws: [],
 };
 
+export const minimumSameRankStandingsResult = {
+  ...standingsResult,
+  standings: [
+    ...standingsResult.standings,
+    {
+      block_id: "B", rank: 1, team_id: "team-03", played: 1,
+      wins: 0, draws: 1, losses: 0, goals_for: 0, goals_against: 0,
+      goal_difference: 0, points: 1, tie_break: "勝点・得失点差・総得点", head_to_head: null,
+    },
+    {
+      block_id: "B", rank: 2, team_id: "team-04", played: 1,
+      wins: 0, draws: 1, losses: 0, goals_for: 0, goals_against: 0,
+      goal_difference: 0, points: 1, tie_break: "勝点・得失点差・総得点", head_to_head: null,
+    },
+  ],
+};
+
 const emptyTournamentEvaluation = {
   first_match_same_block_count: 0,
   possible_same_block_match_count: 0,
@@ -771,10 +788,11 @@ export function scheduleViewTournamentFixture() {
 }
 
 export function sameRankWebFixture(
-  teamCount: 16 | 17,
-  options: { resolved?: boolean } = {},
+  teamCount: 16 | 17 | 18,
+  options: { resolved?: boolean; policy?: "strict_same_rank" | "merge_bottom" } = {},
 ) {
   const resolved = options.resolved ?? true;
+  const policy = options.policy ?? "strict_same_rank";
   const document = scheduleViewTournamentFixture() as unknown as {
     tournament: { input: Record<string, unknown>; result: Record<string, unknown> };
   };
@@ -839,7 +857,8 @@ export function sameRankWebFixture(
   const teamByRank = new Map(
     standingsRows.map((row) => [`${row.block_id}:${String(row.rank)}`, row.team_id]),
   );
-  const groups = Array.from({ length: q }, (_, index) => {
+  const regularGroupCount = policy === "merge_bottom" && r > 0 ? q - 1 : q;
+  const groups = Array.from({ length: regularGroupCount }, (_, index) => {
     const rank = index + 1;
     const participants = blocks.map((block) => {
       const entry = { type: "league_rank", block_id: block.id, rank };
@@ -877,23 +896,95 @@ export function sameRankWebFixture(
       matches,
     };
   });
-  if (r > 0) {
+  if (r > 0 && policy === "strict_same_rank") {
     const rank = q + 1;
-    const block = blocks[0]!;
-    const entry = { type: "league_rank", block_id: block.id, rank };
-    const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
+    const participants = blocks.slice(0, r).map((block) => {
+      const entry = { type: "league_rank", block_id: block.id, rank };
+      const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
+      return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
+    });
+    const matches: Array<Record<string, unknown>> = [];
+    for (let home = 0; home < participants.length; home += 1) {
+      for (let away = home + 1; away < participants.length; away += 1) {
+        matches.push({
+          id: `SR-${String(rank)}-M${String(matches.length + 1)}`,
+          phase: "same_rank_league",
+          group_id: `same-rank-${String(rank)}`,
+          round: `第${String(matches.length + 1)}ラウンド`,
+          round_no: matches.length + 1,
+          home: participants[home]!.entry,
+          away: participants[away]!.entry,
+          home_team: participants[home]!.team,
+          away_team: participants[away]!.team,
+        });
+      }
+    }
     groups.push({
       id: `same-rank-${String(rank)}`,
       display_name: `${String(rank)}位グループ`,
       source_block_ranks: [rank],
       overall_rank_range: [q * blockCount + 1, teamCount],
-      participants: [{ entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null }],
-      logical_rounds: [],
-      matches: [],
+      participants,
+      logical_rounds: matches.map((match, index) => ({
+        group_id: `same-rank-${String(rank)}`,
+        round_no: index + 1,
+        match_ids: [match.id],
+      })),
+      matches,
+    });
+  } else if (r > 0) {
+    const rank = q;
+    const participants = [
+      ...blocks.map((block) => ({ block, rank })),
+      ...blocks.slice(0, r).map((block) => ({ block, rank: q + 1 })),
+    ].map(({ block, rank: participantRank }) => {
+      const entry = { type: "league_rank", block_id: block.id, rank: participantRank };
+      const teamId = teamByRank.get(`${block.id}:${String(participantRank)}`)!;
+      return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
+    });
+    const matches: Array<Record<string, unknown>> = [];
+    for (let home = 0; home < participants.length; home += 1) {
+      for (let away = home + 1; away < participants.length; away += 1) {
+        matches.push({
+          id: `SR-BOTTOM-M${String(matches.length + 1)}`,
+          phase: "same_rank_league",
+          group_id: "same-rank-bottom",
+          round: `第${String(matches.length + 1)}ラウンド`,
+          round_no: matches.length + 1,
+          home: participants[home]!.entry,
+          away: participants[away]!.entry,
+          home_team: participants[home]!.team,
+          away_team: participants[away]!.team,
+        });
+      }
+    }
+    groups.push({
+      id: "same-rank-bottom",
+      display_name: "最下位統合グループ",
+      source_block_ranks: [q, q + 1],
+      overall_rank_range: [(q - 1) * blockCount + 1, teamCount],
+      participants,
+      logical_rounds: matches.map((match, index) => ({
+        group_id: "same-rank-bottom", round_no: index + 1, match_ids: [match.id],
+      })),
+      matches,
     });
   }
+  const activeGroups = groups.filter((group) => group.matches.length > 0);
+  const batchCount = Math.ceil(activeGroups.length / 2);
+  const scheduledMatches = Array.from(
+    { length: Math.max(...activeGroups.map((group) => group.matches.length), 0) },
+    (_, matchIndex) => activeGroups.flatMap((group, groupIndex) => {
+      const match = group.matches[matchIndex];
+      return match === undefined ? [] : [{
+        match,
+        section: matchIndex * batchCount + Math.floor(groupIndex / 2) + 1,
+        court: groupIndex % 2 === 0 ? "court-a" : "court-b",
+      }];
+    }),
+  ).flat();
   const sameRankMatches = groups.flatMap((group) => group.matches);
-  const automaticStandings = r === 1 ? [{
+  const automaticStandings = policy === "strict_same_rank" && r === 1 ? [{
     group_id: `same-rank-${String(q + 1)}`,
     overall_rank: teamCount,
     entry: groups.at(-1)!.participants[0]!.entry,
@@ -903,15 +994,15 @@ export function sameRankWebFixture(
   document.tournament.input.league = { block_count: blockCount, assignment_mode: "random" };
   document.tournament.input.final_stage = {
     format: "same_rank_league",
-    uneven_policy: "strict_same_rank",
+    uneven_policy: policy,
   };
   document.tournament.input.day = {
     id: "day1", start_time: "09:30", game_duration_minutes: 15,
     margin_minutes: 0, max_sections: 40, breaks: [],
   };
   document.tournament.input.day2 = {
-    id: "day2", start_time: "09:30", game_duration_minutes: 35,
-    margin_minutes: 10, max_sections: 80, end_time: null, breaks: [],
+    id: "day2", start_time: "09:30", game_duration_minutes: 15,
+    margin_minutes: 0, max_sections: 80, end_time: null, breaks: [],
   };
   document.tournament.result = {
     schema_version: "0.2.0",
@@ -948,11 +1039,11 @@ export function sameRankWebFixture(
     same_rank_plan: {
       schema_version: "0.2.0", format: "same_rank_league", status: "COMPLETE",
       participant_resolution: resolved ? "resolved" : "provisional",
-      uneven_policy: "strict_same_rank", team_count: teamCount, block_count: blockCount,
+      uneven_policy: policy, team_count: teamCount, block_count: blockCount,
       random_seed: 20260803, groups, automatic_standings: automaticStandings,
       warnings: r > 0 ? [
         { code: "SAME_RANK_UNEVEN_BLOCKS", message: "ブロック人数に端数があります。", group_id: null, details: {} },
-        ...(r === 1 ? [{
+        ...(policy === "strict_same_rank" && r === 1 ? [{
           code: "SAME_RANK_SINGLETON_GROUP", message: "1チームの順位を自動確定します。",
           group_id: `same-rank-${String(q + 1)}`, details: {},
         }] : []),
@@ -962,15 +1053,132 @@ export function sameRankWebFixture(
       schema_version: "0.2.0", schedule_scope: "day2_same_rank_league",
       participant_resolution: resolved ? "resolved" : "provisional", status: "OPTIMAL",
       same_rank_matches: sameRankMatches,
-      slots: sameRankMatches.map((match, index) => ({
-        day_id: "day2", section_no: index + 1, court_id: "court-a", match_id: match.id,
-        referee_assignment: { kind: "organizer", organizer_reason: "fallback", fallback_reasons: [] },
-      })),
+      slots: [],
       section_timings: [], expected_end_time: null, team_schedules: [],
-      metrics: { used_sections: sameRankMatches.length, organizer_referee_count: sameRankMatches.length, referee_counts: [] },
+      metrics: {},
       diagnostics: [],
     },
   };
+  const schedule = document.tournament.result.day2_schedule as Record<string, unknown>;
+  const usedSections = Math.max(...scheduledMatches.map((item) => item.section), 0);
+  const byPosition = new Map(
+    scheduledMatches.map((item) => [`${String(item.section)}:${item.court}`, item]),
+  );
+  schedule.slots = Array.from({ length: usedSections }, (_, index) => index + 1).flatMap((section) =>
+    ["court-a", "court-b"].map((court) => {
+      const item = byPosition.get(`${String(section)}:${court}`);
+      return item === undefined
+        ? { day_id: "day2", section_no: section, court_id: court, match_id: null, referee_assignment: null }
+        : {
+            day_id: "day2", section_no: section, court_id: court, match_id: item.match.id,
+            referee_assignment: section === 1
+              ? { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "first_section", fallback_reasons: [] }
+              : { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "fallback", fallback_reasons: ["team_referee_unavailable"] },
+          };
+    })
+  );
+  schedule.team_schedules = scheduledMatches.flatMap((item) =>
+    [item.match.home, item.match.away].map((rankRef) => ({
+      rank_ref: rankRef,
+      team_id: resolved
+        ? teamByRank.get(`${String((rankRef as Record<string, unknown>).block_id)}:${String((rankRef as Record<string, unknown>).rank)}`)
+        : null,
+      role: "match",
+      match_id: item.match.id,
+      section_no: item.section,
+      court_id: item.court,
+    }))
+  );
+  const day2Start = 9 * 60 + 30;
+  schedule.section_timings = Array.from({ length: usedSections }, (_, index) => {
+    const start = day2Start + index * 15;
+    const clockValue = (minutes: number): string =>
+      `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
+    return {
+      day_id: "day2", section_no: index + 1, start_time: clockValue(start),
+      match_end_time: clockValue(start + 15), break_after_minutes: 0,
+    };
+  });
+  schedule.expected_end_time = usedSections === 0
+    ? null
+    : (schedule.section_timings as Array<Record<string, unknown>>).at(-1)!.match_end_time;
+  const organizerCount = scheduledMatches.length;
+  const fallbackCount = scheduledMatches.filter((item) => item.section > 1).length;
+  const sectionsByRank = new Map<string, number[]>();
+  for (const item of scheduledMatches) {
+    for (const rankRef of [item.match.home, item.match.away]) {
+      const entry = rankRef as Record<string, unknown>;
+      const key = `${String(entry.block_id)}:${String(entry.rank)}`;
+      sectionsByRank.set(key, [...(sectionsByRank.get(key) ?? []), item.section]);
+    }
+  }
+  let maximumWait = 0;
+  for (const sections of sectionsByRank.values()) {
+    const ordered = [...sections].sort((left, right) => left - right);
+    for (let index = 1; index < ordered.length; index += 1) {
+      maximumWait = Math.max(maximumWait, ordered[index]! - ordered[index - 1]! - 1);
+    }
+  }
+  const courtCounts = ["court-a", "court-b"].map(
+    (court) => scheduledMatches.filter((item) => item.court === court).length,
+  );
+  const metricValues: Record<string, number> = {
+    used_sections: usedSections,
+    referee_count_difference: 0,
+    maximum_team_wait_sections: maximumWait,
+    referee_then_match_count: 0,
+    previous_same_court_referee_count: 0,
+    gap_court_change_count: 0,
+    court_usage_difference: Math.max(...courtCounts) - Math.min(...courtCounts),
+  };
+  const objectives = Object.keys(metricValues);
+  const summary = {
+    expected_match_count: sameRankMatches.length,
+    scheduled_match_count: sameRankMatches.length,
+    used_sections: usedSections,
+    organizer_referee_count: organizerCount,
+    fallback_count: fallbackCount,
+    error_count: 0,
+  };
+  schedule.metrics = {
+    random_seed: 20260803,
+    num_search_workers: 1,
+    max_time_seconds: 10,
+    ortools_version: "fixture",
+    wall_time_seconds: 0,
+    used_sections: usedSections,
+    organizer_referee_count: organizerCount,
+    fallback_count: fallbackCount,
+    unused_slot_count: usedSections * 2 - sameRankMatches.length,
+    referee_counts: groups.flatMap((group) => group.participants.map((participant) => ({
+      rank_ref: participant.entry,
+      team_id: resolved ? participant.team?.team_id ?? null : null,
+      count: 0,
+    }))),
+    referee_count_min: 0,
+    referee_count_max: 0,
+    referee_count_difference: 0,
+    maximum_team_wait_sections: maximumWait,
+    referee_then_match_count: 0,
+    previous_same_court_referee_count: 0,
+    gap_court_change_count: 0,
+    court_usage_difference: metricValues.court_usage_difference,
+    layout_attempt_count: 1,
+    optimized_objectives: objectives,
+    objective_stages: objectives.map((objective) => ({
+      objective,
+      value: metricValues[objective],
+      optimality_proven: true,
+    })),
+    optimality_proven: true,
+  };
+  schedule.validation = { valid: true, diagnostics: [], summary };
+  schedule.integrated_validation = {
+    valid: true,
+    diagnostics: [],
+    summary: { day1: {}, day2: summary, error_count: 0 },
+  };
+  document.tournament.result.integrated_validation = schedule.integrated_validation;
   return structuredClone(document);
 }
 
@@ -1080,9 +1288,11 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
         teams: [
           { id: "team-01", name: "青空FC" },
           { id: "team-02", name: "みどりSC" },
+          { id: "team-03", name: "中央キッカーズ" },
+          { id: "team-04", name: "海浜ユナイテッド" },
         ],
         courts: [{ id: "court-a", name: "Aコート" }],
-        league: { block_count: 1, assignment_mode: "random" },
+        league: { block_count: 2, assignment_mode: "random" },
         final_stage: { format: "same_rank_league", uneven_policy: "strict_same_rank" },
         day: {
           id: "day1",
@@ -1105,7 +1315,7 @@ export function tournamentFixture(options: TournamentFixtureOptions = {}) {
   if (options.withResult) {
     return {
       ...document,
-      tournament: { ...document.tournament, result: scheduleResult },
+      tournament: { ...document.tournament, result: minimumSameRankScheduleResult },
     };
   }
   return document;

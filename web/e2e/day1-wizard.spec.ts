@@ -456,10 +456,6 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
   const source = tournamentFixture({ withResult: true }) as ReturnType<
     typeof tournamentFixture
   > & { tournament: { result: unknown } };
-  source.tournament.input.teams.push(
-    { id: "team-03", name: "中央キッカーズ" },
-    { id: "team-04", name: "海浜ユナイテッド" },
-  );
   source.tournament.input.courts.push({ id: "court-b", name: "Bコート" });
   source.tournament.input.league.block_count = 2;
   source.tournament.result = generatedRolePathResult({

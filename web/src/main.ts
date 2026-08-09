@@ -111,6 +111,7 @@ declare global {
         },
       ) => string;
       reset: (widgetId: string) => void;
+      remove?: (widgetId: string) => void;
     };
   }
 }
@@ -229,6 +230,7 @@ root.innerHTML = `
         <label id="same-rank-uneven-policy-field" class="field" for="same-rank-uneven-policy" hidden>
           <span>端数ブロックの扱い <em>必須</em></span>
           <select id="same-rank-uneven-policy">
+            <option value="">選択してください</option>
             <option value="strict_same_rank">厳密に同順位で分ける</option>
             <option value="merge_bottom">最下位グループへ統合する</option>
           </select>
@@ -660,6 +662,8 @@ let day2ScheduleViewMode = loadScheduleViewMode("day2");
 let tournamentBracketViewMode = loadTournamentBracketViewMode();
 let legacyCompatibility = false;
 let organizerCapacityTouched = false;
+let sameRankUnevenPolicyApplicable = false;
+let persistedApplicableSameRankPolicyPending = false;
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
 let turnstileSetupStarted = false;
@@ -672,6 +676,7 @@ let day2CreationTurnstileSetupStarted = false;
 let tournamentResultsTurnstileToken = "";
 let tournamentResultsTurnstileWidgetId: string | undefined;
 let tournamentResultsTurnstileSetupStarted = false;
+let tournamentResultsTurnstileAction: string | undefined;
 let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
 let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let day2StatusOwner: "turnstile" | "generation" = "turnstile";
@@ -3303,14 +3308,19 @@ function renderFinalStageControls(): void {
   ) {
     tournamentCountInput.value = "";
   }
-  sameRankUnevenPolicyField.hidden =
-    format !== "same_rank_league" ||
-    blockCount === undefined ||
-    blockCount < 1 ||
-    teamCount % blockCount === 0;
-  if (format === "same_rank_league" && sameRankUnevenPolicyField.hidden) {
+  const applicable =
+    format === "same_rank_league" &&
+    blockCount !== undefined &&
+    blockCount > 0 &&
+    teamCount % blockCount !== 0;
+  sameRankUnevenPolicyField.hidden = !applicable;
+  if (applicable && !sameRankUnevenPolicyApplicable && !persistedApplicableSameRankPolicyPending) {
+    sameRankUnevenPolicyInput.value = "";
+  } else if (format === "same_rank_league" && !applicable) {
     sameRankUnevenPolicyInput.value = "strict_same_rank";
   }
+  sameRankUnevenPolicyApplicable = applicable;
+  persistedApplicableSameRankPolicyPending = false;
 }
 
 function updateReview(): void {
@@ -3366,9 +3376,19 @@ function render(): void {
   tournamentCountInput.value = typeof finalStage?.tournament_count === "number"
     ? String(finalStage.tournament_count)
     : "";
-  sameRankUnevenPolicyInput.value = finalStage?.uneven_policy === "merge_bottom"
-    ? "merge_bottom"
+  const restoredBlockCount = typeof league?.block_count === "number" ? league.block_count : 0;
+  const restoredUnevenPolicy = finalStage?.uneven_policy;
+  const restoredUnevenApplicable =
+    finalStage?.format === "same_rank_league" &&
+    restoredBlockCount > 0 &&
+    asObjectArray(input.teams).length % restoredBlockCount !== 0;
+  const restoredExplicitPolicy =
+    restoredUnevenPolicy === "strict_same_rank" || restoredUnevenPolicy === "merge_bottom";
+  sameRankUnevenPolicyInput.value = restoredUnevenApplicable && restoredExplicitPolicy
+    ? restoredUnevenPolicy
     : "strict_same_rank";
+  sameRankUnevenPolicyApplicable = false;
+  persistedApplicableSameRankPolicyPending = restoredUnevenApplicable && restoredExplicitPolicy;
   startTimeInput.value = typeof day?.start_time === "string" ? day.start_time : "09:30";
   gameDurationInput.value = String(day?.game_duration_minutes ?? 35);
   marginInput.value = String(day?.margin_minutes ?? 5);
@@ -3417,6 +3437,7 @@ function updateDraft(invalidateResult = false): void {
     const seeded = assignmentModeInput.value === "seeded_snake";
     const previousLeague = asObject(previous.tournament.input.league);
     const blockCount = blockCountInput.value === "" ? 0 : Number(blockCountInput.value);
+    renderFinalStageControls();
     const keepManualDraft = assignmentModeInput.value === "manual"
       || asObjectArray(previousLeague?.manual_blocks).length > 0;
     const manualBlocks = keepManualDraft
@@ -4299,8 +4320,13 @@ function setupDay2CreationTurnstile(): void {
 }
 
 function setupTournamentResultsTurnstile(): void {
-  if (tournamentResultsTurnstileSetupStarted) return;
+  const action = asObject(documentState.tournament.input.final_stage)?.format === "same_rank_league"
+    ? "calculate_same_rank_results"
+    : "calculate_tournament_results";
+  if (tournamentResultsTurnstileSetupStarted && tournamentResultsTurnstileAction === action) return;
   tournamentResultsTurnstileSetupStarted = true;
+  tournamentResultsTurnstileAction = action;
+  tournamentResultsTurnstileToken = "";
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
   const container = requiredElement<HTMLElement>("#tournament-results-turnstile-widget");
   if (!siteKey) {
@@ -4311,11 +4337,16 @@ function setupTournamentResultsTurnstile(): void {
   }
   void loadTurnstileApi()
     .then((api) => {
+      if (tournamentResultsTurnstileAction !== action) return;
       try {
+        if (tournamentResultsTurnstileWidgetId !== undefined) {
+          api.remove?.(tournamentResultsTurnstileWidgetId);
+          tournamentResultsTurnstileWidgetId = undefined;
+        }
         container.replaceChildren();
         tournamentResultsTurnstileWidgetId = api.render(container, {
           sitekey: siteKey,
-          action: "calculate_tournament_results",
+          action,
           callback: (token) => {
             tournamentResultsTurnstileToken = token;
             refreshTournamentResultsEnabled();

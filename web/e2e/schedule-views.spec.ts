@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 import {
+  minimumSameRankScheduleResult,
+  minimumSameRankStandingsResult,
   horizontalBracketTournamentFixture,
   scheduleViewDay2ScheduleResult,
   scheduleResult,
@@ -161,9 +163,12 @@ test("表示切替後もリーグ得点入力を一組だけ保存し、確定�
     tournament: {
       ...base.tournament,
       result: {
-        ...scheduleResult,
-        league_results: [{ match_id: "LG-A-M1", home_score: 2, away_score: 1 }],
-        league_standings: standingsResult,
+        ...minimumSameRankScheduleResult,
+        league_results: [
+          { match_id: "LG-A-M1", home_score: 2, away_score: 1 },
+          { match_id: "LG-B-M1", home_score: 0, away_score: 0 },
+        ],
+        league_standings: minimumSameRankStandingsResult,
       },
     },
   });

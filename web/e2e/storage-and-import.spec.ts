@@ -120,7 +120,7 @@ test("JSONを書き出し、別の有効な大会を読み込める", async ({ p
 
   await importDocument(page, tournamentFixture({ name: "読込み大会", withResult: true }));
   await expect(page.locator("#tournament-name")).toHaveValue("読込み大会");
-  await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
 });
 
 test("不正JSONでは現在の大会を変更しない", async ({ page }) => {

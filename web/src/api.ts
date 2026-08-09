@@ -125,7 +125,7 @@ export function calculateLeagueStandings(
   return generateSchedule(input, turnstileToken, fetchImplementation);
 }
 
-/** リーグ順位枠と任意の確定順位から、上位・下位の完全順位決定表を生成する。 */
+/** リーグ順位枠と任意の確定順位から、順序付きプールの完全順位決定表を生成する。 */
 export function generateTournamentPlan(
   input: JsonObject,
   turnstileToken: string,

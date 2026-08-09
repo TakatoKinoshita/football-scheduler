@@ -43,6 +43,9 @@ export async function mockExternalServices(
               setTimeout(function () {
                 options.callback(nextTurnstileToken());
               }, 0);
+            },
+            remove: function (widgetId) {
+              delete window.__e2eTurnstileOptionsById[widgetId];
             }
           };
         }

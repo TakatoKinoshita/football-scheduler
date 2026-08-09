@@ -46,13 +46,24 @@ export function isDay1LeagueInput(input: JsonObject): boolean {
 export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
   const league = { ...(objectValue(input.league) ?? {}) };
   if (league.assignment_mode !== "manual") delete league.manual_blocks;
+  const finalStage = { ...(objectValue(input.final_stage) ?? {}) };
+  const teamCount = objectArray(input.teams).length;
+  const blockCount = numberValue(league.block_count);
+  if (
+    finalStage.format === "same_rank_league" &&
+    blockCount !== undefined &&
+    blockCount > 0 &&
+    teamCount % blockCount === 0
+  ) {
+    finalStage.uneven_policy = "strict_same_rank";
+  }
   return {
     schema_version: input.schema_version,
     request_kind: input.request_kind,
     teams: input.teams,
     courts: input.courts,
     league,
-    final_stage: input.final_stage,
+    final_stage: Object.keys(finalStage).length === 0 ? input.final_stage : finalStage,
     day: input.day,
     referees: input.referees,
     random_seed: input.random_seed,

@@ -216,6 +216,63 @@ describe("1日目リーグ入力", () => {
     expect(validateDay1LeagueDocument(document)).toEqual([]);
   });
 
+  it("端数がある同順位リーグでは端数処理の明示選択を必須にする", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = Array.from({ length: 5 }, (_, index) => ({
+      id: `team-${index + 1}`,
+      name: `チーム${index + 1}`,
+    }));
+    document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "",
+    };
+
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
+      field: "same-rank-uneven-policy",
+      step: 2,
+      message: "ブロック人数が揃わない場合のグループ分けを選択してください。",
+    });
+  });
+
+  it("割り切れる同順位リーグのAPI要求は厳密方式へ正規化する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.teams = Array.from({ length: 4 }, (_, index) => ({
+      id: `team-${index + 1}`,
+      name: `チーム${index + 1}`,
+    }));
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "",
+    };
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).final_stage).toEqual({
+      format: "same_rank_league",
+      uneven_policy: "strict_same_rank",
+    });
+  });
+
+  it("端数がある同順位リーグの明示選択はAPI要求でも保持する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.teams = Array.from({ length: 5 }, (_, index) => ({
+      id: `team-${index + 1}`,
+      name: `チーム${index + 1}`,
+    }));
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "merge_bottom",
+    };
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).final_stage).toEqual({
+      format: "same_rank_league",
+      uneven_policy: "merge_bottom",
+    });
+  });
+
   it("有効な手動割当てを受理する", () => {
     const document = createTournamentDocument();
     document.tournament.name = "地区大会";
