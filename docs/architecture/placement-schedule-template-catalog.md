@@ -77,9 +77,14 @@ generatorは理論下限から固定horizonを増やし、審判条件を満た�
 とし、最初の未証明段階以降は未証明として保存する。候補はcanonical位置から再度hydrateし、
 独立validatorに合格した場合だけcheckpointへatomicに保存する。
 
-strictでは、コートごとの直前実試合をsection間の状態としてCPモデル内で追跡する。直前試合の
-勝者が当該sectionの試合または他の審判候補と衝突する配置をモデル自身が除外するため、全候補を
-事後列挙しなくても固定horizonの実行不能をCP-SATの`INFEASIBLE`として証明できる。
+コートごとの直前実試合をsection間の状態としてCPモデル内で追跡する。入力コート順に、直前試合の
+勝者が当該sectionの試合・先に選ばれた審判候補と衝突しない場合はチーム審判、それ以外は主催者
+フォールバックとして数える。strictでは全非決勝戦にチーム審判を必須とし、organizerでは決勝を
+含む主催者数を能力以下にする。このため、全候補を事後列挙しなくても固定horizonの実行不能を
+CP-SATの`INFEASIBLE`として証明できる。
+
+モデル規模を抑えるため、strictは全コートの審判候補を対称に扱うモデル、organizerは入力コート順の
+フォールバック選択まで表現するモデルを使い分ける。いずれも同じ審判規則を強化も緩和もしない。
 
 日程規則、canonical位置、template format、固定するOR-Tools条件を変えた場合は、rulesetまたは
 format versionを更新し、全shardを新規生成する。旧checkpointや一部shardを新rulesetへ混在させない。

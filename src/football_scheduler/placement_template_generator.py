@@ -51,7 +51,7 @@ from football_scheduler.timekeeping import expected_end_time, section_timings
 from football_scheduler.tournament import generate_tournament_plan
 from football_scheduler.validator import validate_day2_schedule
 
-GENERATOR_VERSION = "placement-template-generator-v6"
+GENERATOR_VERSION = "placement-template-generator-v8"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"

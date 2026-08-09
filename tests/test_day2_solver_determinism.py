@@ -22,7 +22,12 @@ for fallback in ("organizer", "strict"):
         fallback=fallback,
     )
     path_model = _build_path_model(request.tournament_plan)
-    model, _variables = _build_cp_model(request, path_model, 17)
+    model, _variables = _build_cp_model(
+        request,
+        path_model,
+        17,
+        exact_referee_constraints=True,
+    )
     print(f"{fallback}:{sha256(str(model.proto).encode()).hexdigest()}")
 """
 

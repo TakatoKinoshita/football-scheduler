@@ -780,7 +780,12 @@ def _generate_day2_schedule_at_fixed_horizon(
 
     path_model = _build_path_model(data.tournament_plan)
     started = perf_counter()
-    model, variables = _build_cp_model(data, path_model, horizon)
+    model, variables = _build_cp_model(
+        data,
+        path_model,
+        horizon,
+        exact_referee_constraints=True,
+    )
     model.add(variables.used_sections == horizon)
     total_wall_time = 0.0
     while True:
@@ -1146,6 +1151,8 @@ def _build_cp_model(
     data: Day2ScheduleRequest,
     path_model: _PathModel,
     horizon: int,
+    *,
+    exact_referee_constraints: bool = False,
 ) -> tuple[cp_model.CpModel, _ModelVariables]:
     model = cp_model.CpModel()
     match_count, court_count = len(path_model.matches), len(data.courts)
@@ -1192,15 +1199,13 @@ def _build_cp_model(
             model.add(match_in_section[left, section] + match_in_section[right, section + 1] <= 1)
             model.add(match_in_section[right, section] + match_in_section[left, section + 1] <= 1)
 
-    if data.referees.day2_fallback is Day2Fallback.STRICT:
-        _add_strict_referee_constraints(
-            model,
-            placement,
-            match_in_section,
-            data,
-            path_model,
-            horizon,
+    if exact_referee_constraints:
+        referee_constraint_builder = (
+            _add_strict_referee_constraints
+            if data.referees.day2_fallback is Day2Fallback.STRICT
+            else _add_organizer_referee_constraints
         )
+        referee_constraint_builder(model, placement, match_in_section, data, path_model, horizon)
 
     section_number: dict[int, cp_model.IntVar] = {}
     index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
@@ -1313,7 +1318,7 @@ def _add_strict_referee_constraints(
     path_model: _PathModel,
     horizon: int,
 ) -> None:
-    """各コートの直前実試合を追跡し、strict審判条件をCPへ厳密に組み込む。"""
+    """直前実試合の全勝敗経路を使い、strict審判条件を厳密に組み込む。"""
 
     non_final_indexes = tuple(
         index for index, match in enumerate(path_model.matches) if not match.final
@@ -1387,6 +1392,110 @@ def _add_strict_referee_constraints(
             for right in range(left + 1, len(path_model.matches)):
                 if _matches_can_share_team(winner_paths[left], winner_paths[right]):
                     model.add(source_used[left] + source_used[right] <= 1)
+
+
+def _add_organizer_referee_constraints(
+    model: cp_model.CpModel,
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+) -> None:
+    """コート順の直前勝者審判と主催者フォールバックを厳密に組み込む。"""
+
+    non_final_indexes = tuple(
+        index for index, match in enumerate(path_model.matches) if not match.final
+    )
+    final_indexes = tuple(index for index, match in enumerate(path_model.matches) if match.final)
+    winner_paths = tuple(
+        _outcome_paths(path_model.paths_by_match[match.id], match.id, "W")
+        for match in path_model.matches
+    )
+    match_indexes = range(len(path_model.matches))
+    court_indexes = range(len(data.courts))
+    last_match: dict[tuple[int, int, int], cp_model.IntVar] = {}
+    for match_index in match_indexes:
+        for court_index in court_indexes:
+            if horizon > 1:
+                last_match[match_index, 1, court_index] = placement[match_index, 0, court_index]
+            for section in range(2, horizon):
+                previous_last = last_match[match_index, section - 1, court_index]
+                previous_placement = placement[match_index, section - 1, court_index]
+                previous_occupied = sum(
+                    placement[index, section - 1, court_index] for index in match_indexes
+                )
+                current_last = model.new_bool_var(
+                    f"referee_last_{match_index}_s{section}_c{court_index}"
+                )
+                model.add(current_last >= previous_placement)
+                model.add(current_last >= previous_last - previous_occupied)
+                model.add(current_last <= previous_placement + previous_last)
+                model.add(current_last <= previous_placement + 1 - previous_occupied)
+                last_match[match_index, section, court_index] = current_last
+
+    for section in range(1, horizon):
+        selected_by_court: list[dict[int, cp_model.IntVar]] = []
+        selected_sources: list[cp_model.IntVar] = []
+        for court_index in court_indexes:
+            current_non_final = sum(
+                placement[target_index, section, court_index] for target_index in non_final_indexes
+            )
+            current_selected: dict[int, cp_model.IntVar] = {}
+            for source_index in match_indexes:
+                previous = last_match[source_index, section, court_index]
+                candidate = model.new_bool_var(
+                    f"referee_candidate_{source_index}_s{section}_c{court_index}"
+                )
+                model.add(candidate <= previous)
+                model.add(candidate <= current_non_final)
+                model.add(candidate >= previous + current_non_final - 1)
+
+                conflicting_matches = [
+                    match_in_section[target_index, section]
+                    for target_index, target in enumerate(path_model.matches)
+                    if _matches_can_share_team(
+                        winner_paths[source_index],
+                        path_model.paths_by_match[target.id],
+                    )
+                ]
+                intrinsic = model.new_bool_var(
+                    f"referee_intrinsic_{source_index}_s{section}_c{court_index}"
+                )
+                model.add(intrinsic <= candidate)
+                for conflict in conflicting_matches:
+                    model.add(intrinsic + conflict <= 1)
+                model.add(intrinsic >= candidate - sum(conflicting_matches))
+
+                blockers = [
+                    selected
+                    for earlier in selected_by_court
+                    for earlier_source, selected in earlier.items()
+                    if _matches_can_share_team(
+                        winner_paths[source_index],
+                        winner_paths[earlier_source],
+                    )
+                ]
+                selected = model.new_bool_var(
+                    f"referee_selected_{source_index}_s{section}_c{court_index}"
+                )
+                model.add(selected <= intrinsic)
+                for blocker in blockers:
+                    model.add(selected + blocker <= 1)
+                model.add(selected >= intrinsic - sum(blockers))
+                current_selected[source_index] = selected
+                selected_sources.append(selected)
+            selected_by_court.append(current_selected)
+
+        current_non_final_count = sum(
+            match_in_section[index, section] for index in non_final_indexes
+        )
+        team_referee_count = sum(selected_sources)
+        current_final_count = sum(match_in_section[index, section] for index in final_indexes)
+        model.add(
+            current_final_count + current_non_final_count - team_referee_count
+            <= data.referees.organizer_capacity
+        )
 
 
 def _solve_lexicographically(
