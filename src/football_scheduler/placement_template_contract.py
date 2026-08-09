@@ -112,6 +112,7 @@ class PlacementTemplateProvenance(ContractModel):
 
 
 class PlacementTemplateEntry(ContractModel):
+    format_version: Literal[1] = TEMPLATE_FORMAT_VERSION
     key: PlacementTemplateKey
     status: PlacementTemplateStatus
     used_sections: Annotated[int, Field(gt=0)] | None = None
