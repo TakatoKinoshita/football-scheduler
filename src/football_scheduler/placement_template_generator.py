@@ -11,7 +11,7 @@ import math
 import os
 import platform
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -51,7 +51,7 @@ from football_scheduler.timekeeping import expected_end_time, section_timings
 from football_scheduler.tournament import generate_tournament_plan
 from football_scheduler.validator import validate_day2_schedule
 
-GENERATOR_VERSION = "placement-template-generator-v1"
+GENERATOR_VERSION = "placement-template-generator-v3"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"
@@ -143,7 +143,7 @@ class StabilizedPlacementTemplateSolver:
                 "day": base.day.model_copy(update={"max_sections": horizon}),
             }
         )
-        schedule = day2_schedule._generate_day2_schedule_with_solver(request)
+        schedule = day2_schedule._generate_day2_schedule_at_fixed_horizon(request, horizon)
         if schedule.metrics.num_search_workers != 1:
             raise PlacementTemplateIntegrityError(
                 f"{key.catalog_id}: CP-SATのnum_search_workersが1ではありません"
@@ -218,7 +218,13 @@ class StabilizedPlacementTemplateSolver:
                 "league_plan": league_plan.model_dump(mode="json"),
                 "day1_schedule": {"day": {"id": "day1"}, "slots": []},
                 "tournament_plan": tournament_plan.model_dump(mode="json"),
-                "day": {"id": "day2", "max_sections": 1},
+                "day": {
+                    "id": "day2",
+                    "start_time": "00:00",
+                    "game_duration_minutes": 1,
+                    "margin_minutes": 0,
+                    "max_sections": 1,
+                },
                 "referees": {
                     "organizer_capacity": key.organizer_capacity,
                     "day2_fallback": key.day2_fallback.value,
@@ -338,10 +344,33 @@ def generate_topology_shard(
         active_solver = solver or StabilizedPlacementTemplateSolver(
             max_time_seconds=max_time_seconds
         )
-        for key in pending:
-            entry = generate_template_entry(key, solver=active_solver, validator=validator)
-            write_entry_checkpoint(entry, checkpoint_directory)
-            entries[key.catalog_id] = entry
+        ordered_pending = sorted(
+            pending,
+            key=lambda key: (
+                key.court_count,
+                key.organizer_capacity,
+                0 if key.day2_fallback is Day2Fallback.STRICT else 1,
+            ),
+        )
+        for key in ordered_pending:
+            generated_entry = (
+                _derive_placement_template_entry(
+                    key,
+                    entries.values(),
+                    solver=active_solver,
+                    validator=validator,
+                )
+                if isinstance(active_solver, StabilizedPlacementTemplateSolver)
+                else None
+            )
+            if generated_entry is None:
+                generated_entry = generate_template_entry(
+                    key,
+                    solver=active_solver,
+                    validator=validator,
+                )
+            write_entry_checkpoint(generated_entry, checkpoint_directory)
+            entries[key.catalog_id] = generated_entry
     else:
         payloads = [(key.model_dump(mode="json"), max_time_seconds) for key in pending]
         with ProcessPoolExecutor(max_workers=workers) as executor:
@@ -451,6 +480,44 @@ def check_catalog(
                 f"manifestとentryのprovenanceが一致しません: {reference.file}"
             )
     return shards
+
+
+def validate_catalog_hydration(
+    shards: Sequence[PlacementTemplateShard],
+    *,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> int:
+    """全available entryを実planへ復元し、独立validatorで検査する。
+
+    これはcatalog検証専用でありCP-SATを呼ばない。proven_infeasibleは
+    配置を持たないことをモデル検証済みなので対象外とする。
+    """
+
+    request_factory = StabilizedPlacementTemplateSolver(max_time_seconds=1)
+    hydrated_count = 0
+    for shard in shards:
+        for entry in shard.entries:
+            if entry.status is PlacementTemplateStatus.PROVEN_INFEASIBLE:
+                continue
+            if entry.used_sections is None:
+                raise PlacementTemplateIntegrityError(
+                    f"{entry.key.catalog_id}: available entryに使用セクション数がありません"
+                )
+            request = request_factory._base_request(entry.key)
+            path_model = day2_schedule._build_path_model(request.tournament_plan)
+            schedule = day2_schedule._generate_day2_schedule_from_template(
+                request,
+                path_model,
+                entry.used_sections,
+                entry,
+            )
+            if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+                raise PlacementTemplateIntegrityError(
+                    f"{entry.key.catalog_id}: template hydrateが成功しませんでした"
+                )
+            _validate_hydrated_candidate(entry, request, schedule, validator)
+            hydrated_count += 1
+    return hydrated_count
 
 
 def load_entry(path: Path) -> PlacementTemplateEntry:
@@ -579,6 +646,76 @@ def _available_entry(
         referee_signature=placement_referee_signature(assignments),
         provenance=current_provenance(),
     )
+
+
+def _derive_placement_template_entry(
+    target_key: PlacementTemplateKey,
+    candidates: Iterable[PlacementTemplateEntry],
+    *,
+    solver: StabilizedPlacementTemplateSolver,
+    validator: CandidateValidator,
+) -> PlacementTemplateEntry | None:
+    """同じ理論下限を達成した、より厳しいキーの配置を安全に再利用する。"""
+
+    lower_horizon = solver.bounds(target_key).lower_horizon
+    compatible = sorted(
+        (
+            entry
+            for entry in candidates
+            if entry.status is PlacementTemplateStatus.AVAILABLE
+            and entry.used_sections == lower_horizon
+            and entry.key.pool_count == target_key.pool_count
+            and entry.key.pool_size == target_key.pool_size
+            and entry.key.court_count == target_key.court_count
+            and entry.key.organizer_capacity <= target_key.organizer_capacity
+            and (
+                entry.key.day2_fallback is target_key.day2_fallback
+                or (
+                    entry.key.day2_fallback is Day2Fallback.STRICT
+                    and target_key.day2_fallback is Day2Fallback.ORGANIZER
+                )
+            )
+        ),
+        key=lambda entry: (
+            0 if entry.key.day2_fallback is target_key.day2_fallback else 1,
+            entry.key.organizer_capacity,
+            entry.key.catalog_id,
+        ),
+    )
+    for source in compatible:
+        objectives = tuple(
+            objective.model_copy(
+                update={"optimality_proven": index == 0},
+            )
+            for index, objective in enumerate(source.objectives)
+        )
+        candidate = _with_entry_digest(
+            source.model_copy(
+                update={
+                    "key": target_key,
+                    "objectives": objectives,
+                    "sha256": "",
+                }
+            )
+        )
+        base_request = solver._base_request(target_key)
+        request = base_request.model_copy(
+            update={
+                "day": base_request.day.model_copy(update={"max_sections": lower_horizon}),
+            }
+        )
+        path_model = day2_schedule._build_path_model(request.tournament_plan)
+        schedule = day2_schedule._generate_day2_schedule_from_template(
+            request,
+            path_model,
+            lower_horizon,
+            candidate,
+        )
+        if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+            continue
+        _validate_hydrated_candidate(candidate, request, schedule, validator)
+        return candidate
+    return None
 
 
 def _validate_hydrated_candidate(
@@ -793,5 +930,6 @@ __all__ = [
     "merge_shards",
     "shard_file",
     "topology_keys",
+    "validate_catalog_hydration",
     "write_entry_checkpoint",
 ]

@@ -16,6 +16,7 @@ from football_scheduler.placement_template_generator import (
     generate_topology_shard,
     load_manifest,
     merge_shards,
+    validate_catalog_hydration,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -118,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"catalog SHA-256: {catalog_sha256}")
             print(f"available: {available_count}")
             print(f"proven_infeasible: {infeasible_count}")
+            hydrated_count = validate_catalog_hydration(shards)
+            print(f"hydrated and independently validated: {hydrated_count}")
             return 0
 
         if not args.topology:

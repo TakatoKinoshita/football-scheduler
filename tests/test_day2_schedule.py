@@ -71,6 +71,7 @@ def _request(
     resolved: bool = False,
     fallback: str = "organizer",
     max_time_seconds: float = 10,
+    random_seed: int = 17,
 ) -> tuple[Day2ScheduleRequest, TournamentPlan]:
     teams, league, standings = _source(team_count, block_count)
     tournament_request: dict[str, Any] = {
@@ -80,7 +81,7 @@ def _request(
             "format": "placement_tournament",
             "tournament_count": tournament_count,
         },
-        "random_seed": 17,
+        "random_seed": random_seed,
     }
     if resolved:
         tournament_request["league_standings"] = standings.model_dump(mode="json")
@@ -104,7 +105,7 @@ def _request(
                 "organizer_capacity": organizer_capacity or court_count,
                 "day2_fallback": fallback,
             },
-            "random_seed": 17,
+            "random_seed": random_seed,
             "solver": {"max_time_seconds": max_time_seconds},
         }
     )

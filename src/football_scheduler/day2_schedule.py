@@ -768,6 +768,124 @@ def _generate_day2_schedule_with_solver(
     )
 
 
+def _generate_day2_schedule_at_fixed_horizon(
+    data: Day2ScheduleRequest,
+    horizon: int,
+) -> Day2Schedule:
+    """オフラインtemplate生成用に固定horizonの実行可能性を厳密探索する。
+
+    通常APIの最適化経路とは分離し、審判条件を満たさない完全配置を安定順の
+    no-goodで除外する。全候補を尽くした場合だけINFEASIBLEを返す。
+    """
+
+    path_model = _build_path_model(data.tournament_plan)
+    started = perf_counter()
+    model, variables = _build_cp_model(data, path_model, horizon)
+    model.add(variables.used_sections == horizon)
+    total_wall_time = 0.0
+    while True:
+        remaining = data.solver.max_time_seconds - (perf_counter() - started)
+        if remaining <= _MIN_SOLVER_SECONDS:
+            return _failed_schedule(
+                data,
+                path_model.matches,
+                SolverStatus.UNKNOWN,
+                "TOURNAMENT_SCHEDULE_SEARCH_TIMEOUT",
+                "制限時間内に2日目の日程を見つけられませんでした。条件を変えて再実行してください。",
+                wall_time_seconds=total_wall_time,
+                maximum_sections=horizon,
+            )
+        solver = _configured_solver(remaining, data.random_seed)
+        status = _status(solver.solve(model))
+        total_wall_time += solver.wall_time
+        if status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+            code = (
+                "TOURNAMENT_SCHEDULE_INFEASIBLE"
+                if status is SolverStatus.INFEASIBLE
+                else "TOURNAMENT_SCHEDULE_SEARCH_TIMEOUT"
+            )
+            message = (
+                "指定された時間・休憩・審判条件では、2日目の日程を作成できません。"
+                if status is SolverStatus.INFEASIBLE
+                else (
+                    "制限時間内に2日目の日程を見つけられませんでした。"
+                    "条件を変えて再実行してください。"
+                )
+            )
+            return _failed_schedule(
+                data,
+                path_model.matches,
+                status,
+                code,
+                message,
+                wall_time_seconds=total_wall_time,
+                maximum_sections=horizon,
+            )
+
+        slots = _extract_slots(data, path_model, variables, solver)
+        assignments, invalid_reasons = _assign_referees(data, path_model, slots)
+        slots = tuple(
+            slot.model_copy(update={"referee_assignment": assignments.get(slot.match_id)})
+            if slot.match_id is not None
+            else slot
+            for slot in slots
+        )
+        organizer_by_section = Counter(
+            slot.section_no
+            for slot in slots
+            if slot.match_id is not None
+            and slot.referee_assignment is not None
+            and slot.referee_assignment.kind is RefereeKind.ORGANIZER
+        )
+        capacity_overruns = {
+            section: count
+            for section, count in organizer_by_section.items()
+            if count > data.referees.organizer_capacity
+        }
+        strict_invalid = bool(invalid_reasons) and (
+            data.referees.day2_fallback is Day2Fallback.STRICT
+        )
+        if not strict_invalid and not capacity_overruns:
+            layout = _SolvedLayout(
+                solver=solver,
+                status=SolverStatus.FEASIBLE,
+                wall_time_seconds=total_wall_time,
+                optimized_objectives=("used_sections",),
+                primary_bound=float(horizon),
+            )
+            routes = _team_routes(path_model, slots)
+            metrics = _audit_metrics(data, path_model, slots, routes, layout, variables)
+            return Day2Schedule(
+                participant_resolution=data.tournament_plan.participant_resolution,
+                status=(
+                    SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE
+                ),
+                tournament_matches=path_model.matches,
+                slots=slots,
+                section_timings=section_timings(data.day, horizon),
+                expected_end_time=expected_end_time(data.day, horizon),
+                team_schedules=routes,
+                metrics=metrics,
+                diagnostics=(
+                    ()
+                    if metrics.optimality_proven
+                    else (
+                        Diagnostic(
+                            code="OPTIMALITY_NOT_PROVEN",
+                            message="実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。",
+                        ),
+                    )
+                ),
+            )
+
+        selected_variables = [
+            variable
+            for coordinate, variable in sorted(variables.placement.items())
+            if solver.boolean_value(variable)
+        ]
+        model.add(sum(selected_variables) <= len(path_model.matches) - 1)
+
+
 def _find_referee_ready_layout(
     model: cp_model.CpModel,
     variables: _ModelVariables,

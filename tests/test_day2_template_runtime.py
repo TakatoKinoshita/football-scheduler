@@ -31,6 +31,24 @@ from football_scheduler.placement_template_runtime import PlacementTemplateCatal
 from football_scheduler.validator import validate_day2_schedule
 from tests.test_day2_schedule import _request, _validation_document
 
+_SUPPORTED_TOURNAMENT_CONFIGURATIONS = (
+    (8, 2, 2),
+    (8, 4, 2),
+    (16, 2, 2),
+    (16, 4, 2),
+    (16, 8, 2),
+    (24, 2, 3),
+    (24, 4, 3),
+    (24, 8, 3),
+    (32, 2, 2),
+    (32, 4, 2),
+    (32, 8, 2),
+    (32, 16, 2),
+    (32, 2, 4),
+    (32, 4, 4),
+    (32, 8, 4),
+)
+
 
 @pytest.fixture(scope="module")
 def available_template() -> tuple[Day2ScheduleRequest, PlacementTemplateEntry, Day2Schedule]:
@@ -248,6 +266,44 @@ def test_package_loader_validates_and_indexes_all_1360_entries(
         )
     monkeypatch.setattr(template_runtime, "files", lambda _package: tmp_path)
     template_runtime.clear_placement_template_catalog_cache()
+
+
+@pytest.mark.parametrize(
+    ("team_count", "block_count", "tournament_count"),
+    _SUPPORTED_TOURNAMENT_CONFIGURATIONS,
+)
+@pytest.mark.parametrize("random_seed", (17, 101, 20260803))
+@pytest.mark.parametrize("resolved", (False, True))
+def test_all_supported_tournaments_use_catalog_without_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    team_count: int,
+    block_count: int,
+    tournament_count: int,
+    random_seed: int,
+    resolved: bool,
+) -> None:
+    request, _plan = _request(
+        team_count=team_count,
+        block_count=block_count,
+        tournament_count=tournament_count,
+        court_count=4,
+        organizer_capacity=4,
+        resolved=resolved,
+        max_sections=80,
+        random_seed=random_seed,
+    )
+    monkeypatch.setattr(
+        day2_schedule,
+        "_generate_day2_schedule_with_solver",
+        lambda _request: pytest.fail("収録済みキーでCP-SAT fallbackを呼びました"),
+    )
+
+    result = day2_schedule.generate_day2_schedule(request)
+
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert all(item.code != "PLACEMENT_TEMPLATE_FALLBACK_USED" for item in result.diagnostics)
+    report = validate_day2_schedule(_validation_document(request, result))
+    assert report["valid"] is True, report
 
     catalog = template_runtime.load_placement_template_catalog()
 

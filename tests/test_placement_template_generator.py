@@ -32,6 +32,7 @@ from football_scheduler.placement_template_generator import (
     merge_shards,
     shard_file,
     topology_keys,
+    validate_catalog_hydration,
     write_json_atomic,
 )
 
@@ -188,6 +189,7 @@ def test_single_aggregator_manifest_and_checks_use_parsed_json_digest(tmp_path: 
         shards[topology].sha256 for topology in SUPPORTED_PLACEMENT_TOPOLOGIES
     ]
     assert len(checked) == 5
+    assert validate_catalog_hydration(checked) == 0
 
     # JSONの空白やkey順はdigest契約に含めず、parse後のcanonical値だけを対象にする。
     path = shard_file(tmp_path, (2, 4))

@@ -44,6 +44,11 @@ TypeScript／ViteのPWA、ブラウザ内自動保存、JSON入出力、オフ�
 トーナメントは未確定の全勝敗経路を考慮して休憩と役割衝突を検証し、決勝以外は直前の実試合の
 勝者を審判へ割り当てる。全プールの決勝は主催者審判とし、最高順位帯の決勝を最後の実試合
 セクションへ必ず配置する。他の決勝は使用セクション数を増やさない範囲で終了時刻へ寄せる。
+順位決定トーナメントの配置は、5トポロジー・1,360キーを開発時にCP-SATで事前計算した
+version付きJSON catalogから取得する。本番ではcanonical試合位置を実際の試合・コートへ復元し、
+時刻、審判、チーム経路、監査値を再構築して独立検証する。catalogを利用できない場合だけ
+安定化済みCP-SATへ切り替え、`PLACEMENT_TEMPLATE_FALLBACK_USED`警告を残す。保存場所、digest、
+再生成手順は[日程テンプレートcatalog設計](docs/architecture/placement-schedule-template-catalog.md)を参照する。
 同順位リーグは全参加チームを審判候補とし、最終セクションへ特別な試合を固定しない。確定済み
 日程では2日目の結果を入力でき、形式に応じた結果検証を経て、順序付きプールまたはグループを
 通した総合1位から最下位までを確定・保存・印刷できる。
@@ -201,6 +206,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 uv run pytest
+uv run python scripts/generate_placement_templates.py --check
 uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
 uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
 cd web
@@ -211,8 +217,9 @@ npm run build:functions
 npm run test:e2e
 ```
 
-32チームの本番経路検証は2回の実行に時間がかかる。API adapter、独立制約検証、30秒上限、
-1 MB応答上限、同じseedでの再現性をまとめて確認する。
+32チームの本番経路検証は異なる`PYTHONHASHSEED`の別プロセスで2回実行する。API adapter、
+2トーナメント64試合、独立・統合制約検証、30秒上限、1 MB応答上限、同じ入力の再現性を
+まとめて確認する。
 
 ## Lambdaコンテナのローカル検証
 
