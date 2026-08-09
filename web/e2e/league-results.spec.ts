@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   day2ScheduleResult,
@@ -19,6 +19,17 @@ import {
   openApp,
   scheduleCreationResponse,
 } from "./helpers";
+
+async function regenerateAllSchedules(page: Page): Promise<void> {
+  const confirmationMessage = new Promise<string>((resolve) => {
+    page.once("dialog", async (dialog) => {
+      resolve(dialog.message());
+      await dialog.accept();
+    });
+  });
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect(confirmationMessage).resolves.toContain("削除して作り直します");
+}
 
 function day2CreationResponse(
   existingResult: Record<string, unknown>,
@@ -404,7 +415,7 @@ for (const failedStage of ["final_stage_plan", "day2_schedule", "integrated_vali
 
     await page.locator("#tab-schedule-settings").click();
     await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
-    await page.getByRole("button", { name: "日程を生成する" }).click();
+    await regenerateAllSchedules(page);
 
     await expect(page.locator("#generation-status")).toContainText("現在の生成結果は保持しています");
     await page.locator("#tab-day2").click();
@@ -413,7 +424,7 @@ for (const failedStage of ["final_stage_plan", "day2_schedule", "integrated_vali
 
     await page.locator("#tab-schedule-settings").click();
     await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
-    await page.getByRole("button", { name: "日程を生成する" }).click();
+    await regenerateAllSchedules(page);
     await expect(page.locator("#generation-status")).toContainText("この端末へ保存しました");
     expect(requests.map(({ kind }) => kind)).toEqual(["schedule_creation", "schedule_creation"]);
     expect(requests[0]?.token).toBeTruthy();
@@ -439,7 +450,7 @@ test("複合応答に表または日程が欠ける場合は保存しない", as
   });
 
   await page.locator("#tab-schedule-settings").click();
-  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await regenerateAllSchedules(page);
 
   await expect(page.locator("#generation-status")).toContainText("生成結果を読み取れませんでした");
   await page.locator("#tab-day2").click();
