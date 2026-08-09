@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from enum import StrEnum
 from hashlib import sha256
 from typing import Annotated, Literal, Self
@@ -97,6 +98,24 @@ class PlacementTemplateSlot(ContractModel):
     section_no: Annotated[int, Field(gt=0)]
     court_index: Annotated[int, Field(ge=0, le=15)]
     match_position: CanonicalMatchPosition
+
+
+class CanonicalRefereeAssignment(ContractModel):
+    match_position: CanonicalMatchPosition
+    kind: Literal["organizer", "team"]
+    organizer_reason: str | None = None
+    source_match_position: CanonicalMatchPosition | None = None
+    fallback_reasons: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_assignment(self) -> Self:
+        if self.kind == "team" and self.source_match_position is None:
+            raise ValueError("チーム審判には供給元試合位置が必要です")
+        if self.kind == "organizer" and self.source_match_position is not None:
+            raise ValueError("主催者審判に供給元試合位置は指定できません")
+        if self.fallback_reasons != tuple(sorted(self.fallback_reasons)):
+            raise ValueError("審判フォールバック理由は安定順で保存してください")
+        return self
 
 
 class PlacementTemplateObjective(ContractModel):
@@ -268,6 +287,23 @@ def manifest_digest(manifest: PlacementTemplateManifest) -> str:
 
     payload = manifest.model_dump(mode="json", exclude={"catalog_sha256"})
     return sha256_hex(payload)
+
+
+def placement_referee_signature(
+    assignments: Iterable[CanonicalRefereeAssignment],
+) -> str:
+    """canonical試合位置順の審判割当てSHA-256を返す。"""
+
+    records = sorted(
+        assignments,
+        key=lambda item: (
+            item.match_position.pool_index,
+            item.match_position.rank_range_start,
+            item.match_position.rank_range_end,
+            item.match_position.logical_order,
+        ),
+    )
+    return sha256_hex([item.model_dump(mode="json") for item in records])
 
 
 def _is_sha256(value: str) -> bool:
