@@ -22,3 +22,4 @@ build/
 .aws-sam/
 samconfig.toml
 benchmark-results/
+.worktrees/
