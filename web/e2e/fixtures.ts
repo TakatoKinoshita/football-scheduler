@@ -770,6 +770,210 @@ export function scheduleViewTournamentFixture() {
   return structuredClone(document);
 }
 
+export function sameRankWebFixture(
+  teamCount: 16 | 17,
+  options: { resolved?: boolean } = {},
+) {
+  const resolved = options.resolved ?? true;
+  const document = scheduleViewTournamentFixture() as unknown as {
+    tournament: { input: Record<string, unknown>; result: Record<string, unknown> };
+  };
+  const teams = Array.from({ length: teamCount }, (_, index) => ({
+    id: `team-${String(index + 1).padStart(2, "0")}`,
+    name: `チーム${String(index + 1)}`,
+  }));
+  const blockCount = 4;
+  const q = Math.floor(teamCount / blockCount);
+  const r = teamCount % blockCount;
+  let cursor = 0;
+  const blocks = Array.from({ length: blockCount }, (_, index) => {
+    const size = q + (index < r ? 1 : 0);
+    const teamIds = teams.slice(cursor, cursor + size).map((team) => team.id);
+    cursor += size;
+    return { id: String.fromCharCode(65 + index), team_ids: teamIds };
+  });
+  const leagueMatches: Array<Record<string, unknown>> = [];
+  const logicalRounds: Array<Record<string, unknown>> = [];
+  for (const block of blocks) {
+    for (let home = 0; home < block.team_ids.length; home += 1) {
+      for (let away = home + 1; away < block.team_ids.length; away += 1) {
+        const id = `LG-${block.id}-M${String(leagueMatches.length + 1)}`;
+        leagueMatches.push({
+          id,
+          phase: "league",
+          round: `${block.id}ブロック`,
+          possible_home_team_ids: [block.team_ids[home]],
+          possible_away_team_ids: [block.team_ids[away]],
+          prerequisite_match_ids: [],
+          organizer_referee_required: false,
+        });
+        logicalRounds.push({
+          block_id: block.id,
+          round_no: logicalRounds.filter((round) => round.block_id === block.id).length + 1,
+          match_ids: [id],
+        });
+      }
+    }
+  }
+  const clock = (section: number, end = false): string => {
+    const minutes = 9 * 60 + 30 + (section - 1) * 15 + (end ? 15 : 0);
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}:00`;
+  };
+  const standingsRows = blocks.flatMap((block) =>
+    block.team_ids.map((teamId, index) => ({
+      block_id: block.id,
+      rank: index + 1,
+      team_id: teamId,
+      played: block.team_ids.length - 1,
+      wins: block.team_ids.length - index - 1,
+      draws: 0,
+      losses: index,
+      goals_for: block.team_ids.length - index - 1,
+      goals_against: index,
+      goal_difference: block.team_ids.length - 2 * index - 1,
+      points: 3 * (block.team_ids.length - index - 1),
+      tie_break: "勝点",
+      head_to_head: null,
+    })),
+  );
+  const teamByRank = new Map(
+    standingsRows.map((row) => [`${row.block_id}:${String(row.rank)}`, row.team_id]),
+  );
+  const groups = Array.from({ length: q }, (_, index) => {
+    const rank = index + 1;
+    const participants = blocks.map((block) => {
+      const entry = { type: "league_rank", block_id: block.id, rank };
+      const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
+      return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
+    });
+    const matches: Array<Record<string, unknown>> = [];
+    for (let home = 0; home < participants.length; home += 1) {
+      for (let away = home + 1; away < participants.length; away += 1) {
+        const id = `SR-${String(rank)}-M${String(matches.length + 1)}`;
+        matches.push({
+          id,
+          phase: "same_rank_league",
+          group_id: `same-rank-${String(rank)}`,
+          round: `第${String(matches.length + 1)}ラウンド`,
+          round_no: matches.length + 1,
+          home: participants[home]!.entry,
+          away: participants[away]!.entry,
+          home_team: participants[home]!.team,
+          away_team: participants[away]!.team,
+        });
+      }
+    }
+    return {
+      id: `same-rank-${String(rank)}`,
+      display_name: `${String(rank)}位グループ`,
+      source_block_ranks: [rank],
+      overall_rank_range: [(rank - 1) * blockCount + 1, rank * blockCount],
+      participants,
+      logical_rounds: matches.map((match, roundIndex) => ({
+        group_id: `same-rank-${String(rank)}`,
+        round_no: roundIndex + 1,
+        match_ids: [match.id],
+      })),
+      matches,
+    };
+  });
+  if (r > 0) {
+    const rank = q + 1;
+    const block = blocks[0]!;
+    const entry = { type: "league_rank", block_id: block.id, rank };
+    const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
+    groups.push({
+      id: `same-rank-${String(rank)}`,
+      display_name: `${String(rank)}位グループ`,
+      source_block_ranks: [rank],
+      overall_rank_range: [q * blockCount + 1, teamCount],
+      participants: [{ entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null }],
+      logical_rounds: [],
+      matches: [],
+    });
+  }
+  const sameRankMatches = groups.flatMap((group) => group.matches);
+  const automaticStandings = r === 1 ? [{
+    group_id: `same-rank-${String(q + 1)}`,
+    overall_rank: teamCount,
+    entry: groups.at(-1)!.participants[0]!.entry,
+    team: groups.at(-1)!.participants[0]!.team,
+  }] : [];
+  document.tournament.input.teams = teams;
+  document.tournament.input.league = { block_count: blockCount, assignment_mode: "random" };
+  document.tournament.input.final_stage = {
+    format: "same_rank_league",
+    uneven_policy: "strict_same_rank",
+  };
+  document.tournament.input.day = {
+    id: "day1", start_time: "09:30", game_duration_minutes: 15,
+    margin_minutes: 0, max_sections: 40, breaks: [],
+  };
+  document.tournament.input.day2 = {
+    id: "day2", start_time: "09:30", game_duration_minutes: 35,
+    margin_minutes: 10, max_sections: 80, end_time: null, breaks: [],
+  };
+  document.tournament.result = {
+    schema_version: "0.2.0",
+    status: "OPTIMAL",
+    league_plan: {
+      schema_version: "0.2.0", assignment_mode: "random", random_seed: 20260803,
+      blocks, logical_rounds: logicalRounds, matches: leagueMatches,
+    },
+    ...(resolved ? {
+      league_results: leagueMatches.map((match) => ({
+        match_id: match.id, home_score: 1, away_score: 0,
+      })),
+      league_standings: {
+        schema_version: "0.2.0", status: "COMPLETE", standings: standingsRows, draws: [],
+      },
+    } : {}),
+    slots: leagueMatches.map((match, index) => ({
+      day_id: "day1", section_no: index + 1, court_id: "court-a", match_id: match.id,
+      referee_assignment: { kind: "organizer" },
+    })),
+    section_timings: leagueMatches.map((_, index) => ({
+      day_id: "day1", section_no: index + 1, start_time: clock(index + 1),
+      match_end_time: clock(index + 1, true), break_after_minutes: 0,
+    })),
+    expected_end_time: clock(leagueMatches.length, true),
+    metrics: {
+      used_sections: leagueMatches.length,
+      league_team_referee_counts: teams.map((team) => ({ team_id: team.id, count: 0 })),
+      league_team_referee_count_min: 0,
+      league_team_referee_count_max: 0,
+      league_team_referee_count_difference: 0,
+    },
+    validation: { valid: true, diagnostics: [], summary: {} },
+    same_rank_plan: {
+      schema_version: "0.2.0", format: "same_rank_league", status: "COMPLETE",
+      participant_resolution: resolved ? "resolved" : "provisional",
+      uneven_policy: "strict_same_rank", team_count: teamCount, block_count: blockCount,
+      random_seed: 20260803, groups, automatic_standings: automaticStandings,
+      warnings: r > 0 ? [
+        { code: "SAME_RANK_UNEVEN_BLOCKS", message: "ブロック人数に端数があります。", group_id: null, details: {} },
+        ...(r === 1 ? [{
+          code: "SAME_RANK_SINGLETON_GROUP", message: "1チームの順位を自動確定します。",
+          group_id: `same-rank-${String(q + 1)}`, details: {},
+        }] : []),
+      ] : [],
+    },
+    day2_schedule: {
+      schema_version: "0.2.0", schedule_scope: "day2_same_rank_league",
+      participant_resolution: resolved ? "resolved" : "provisional", status: "OPTIMAL",
+      same_rank_matches: sameRankMatches,
+      slots: sameRankMatches.map((match, index) => ({
+        day_id: "day2", section_no: index + 1, court_id: "court-a", match_id: match.id,
+        referee_assignment: { kind: "organizer", organizer_reason: "fallback", fallback_reasons: [] },
+      })),
+      section_timings: [], expected_end_time: null, team_schedules: [],
+      metrics: { used_sections: sameRankMatches.length, organizer_referee_count: sameRankMatches.length, referee_counts: [] },
+      diagnostics: [],
+    },
+  };
+  return structuredClone(document);
+}
+
 export function tournamentResultsFixture() {
   const document = structuredClone(scheduleViewTournamentFixture()) as unknown as {
     tournament: { result: Record<string, unknown> };

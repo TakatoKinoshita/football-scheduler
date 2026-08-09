@@ -33,6 +33,7 @@ export const LIMITS = {
   teams: 32,
   courts: 16,
   matches: 512,
+  slots: 2_048,
   sections: 128,
 } as const;
 
@@ -893,6 +894,288 @@ function validateDay2ScheduleResult(
   }
 }
 
+function leagueRankKey(value: unknown): string {
+  const entry = objectValue(value, "同順位リーグの順位枠を読み取れませんでした。");
+  if (
+    entry.type !== "league_rank" ||
+    typeof entry.block_id !== "string" ||
+    !Number.isInteger(entry.rank) ||
+    Number(entry.rank) < 1
+  ) {
+    throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの順位枠が不正です。");
+  }
+  return `${entry.block_id}:${String(entry.rank)}`;
+}
+
+function validateSameRankState(
+  result: JsonObject,
+  input: JsonObject,
+  teams: JsonObject[],
+  blocks: JsonObject[],
+  standings: JsonObject[] | undefined,
+): void {
+  const plan = objectValue(result.same_rank_plan, "同順位リーグ計画を読み取れませんでした。");
+  const finalStage = objectValue(input.final_stage, "決勝方式を読み取れませんでした。");
+  const teamCount = teams.length;
+  const blockCount = blocks.length;
+  const q = Math.floor(teamCount / blockCount);
+  const r = teamCount % blockCount;
+  const policy = finalStage.uneven_policy;
+  if (
+    finalStage.format !== "same_rank_league" ||
+    (policy !== "strict_same_rank" && policy !== "merge_bottom") ||
+    (r === 0 && policy !== "strict_same_rank") ||
+    plan.schema_version !== SCHEMA_VERSION ||
+    plan.format !== "same_rank_league" ||
+    plan.status !== "COMPLETE" ||
+    plan.team_count !== teamCount ||
+    plan.block_count !== blockCount ||
+    plan.uneven_policy !== policy ||
+    !Number.isInteger(plan.random_seed)
+  ) {
+    throw new ImportValidationError("INVALID_DOCUMENT", "同順位リーグの構成が大会設定と一致しません。");
+  }
+  const resolution = plan.participant_resolution;
+  if (
+    (resolution !== "provisional" && resolution !== "resolved") ||
+    (resolution === "resolved") !== (standings !== undefined)
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "同順位リーグの仮・確定状態が予選順位と一致しません。",
+    );
+  }
+  const blockSizes = new Map(
+    blocks.map((block) => [
+      String(block.id),
+      stringArray(block.team_ids, `${String(block.id)}ブロックのチーム一覧`).length,
+    ]),
+  );
+  const validRankKeys = new Set(
+    [...blockSizes].flatMap(([blockId, size]) =>
+      Array.from({ length: size }, (_, index) => `${blockId}:${String(index + 1)}`)
+    ),
+  );
+  const teamByRank = new Map(
+    (standings ?? []).map((row) => [
+      `${String(row.block_id)}:${String(row.rank)}`,
+      String(row.team_id),
+    ]),
+  );
+  const expectedGroups: Array<{
+    id: string;
+    ranks: number[];
+    range: [number, number];
+    size: number;
+  }> = [];
+  if (policy === "strict_same_rank") {
+    for (let rank = 1; rank <= q; rank += 1) {
+      expectedGroups.push({
+        id: `same-rank-${String(rank)}`,
+        ranks: [rank],
+        range: [(rank - 1) * blockCount + 1, rank * blockCount],
+        size: blockCount,
+      });
+    }
+    if (r > 0) {
+      expectedGroups.push({
+        id: `same-rank-${String(q + 1)}`,
+        ranks: [q + 1],
+        range: [q * blockCount + 1, teamCount],
+        size: r,
+      });
+    }
+  } else {
+    for (let rank = 1; rank < q; rank += 1) {
+      expectedGroups.push({
+        id: `same-rank-${String(rank)}`,
+        ranks: [rank],
+        range: [(rank - 1) * blockCount + 1, rank * blockCount],
+        size: blockCount,
+      });
+    }
+    expectedGroups.push({
+      id: "same-rank-bottom",
+      ranks: [q, q + 1],
+      range: [(q - 1) * blockCount + 1, teamCount],
+      size: blockCount + r,
+    });
+  }
+  const groups = arrayValue(plan.groups, "同順位グループ", LIMITS.teams);
+  if (groups.length !== expectedGroups.length) {
+    throw new ImportValidationError("INVALID_REFERENCE", "同順位グループ数が端数処理方針と一致しません。");
+  }
+  const allEntries = new Set<string>();
+  const allMatches = new Map<string, JsonObject>();
+  for (const [index, group] of groups.entries()) {
+    const expected = expectedGroups[index]!;
+    const range = Array.isArray(group.overall_rank_range) ? group.overall_rank_range : [];
+    const sourceRanks = Array.isArray(group.source_block_ranks)
+      ? group.source_block_ranks.map(Number)
+      : [];
+    const participants = arrayValue(group.participants, "同順位グループ参加枠", LIMITS.teams);
+    if (
+      group.id !== expected.id ||
+      typeof group.display_name !== "string" ||
+      group.display_name.length === 0 ||
+      JSON.stringify(sourceRanks) !== JSON.stringify(expected.ranks) ||
+      JSON.stringify(range) !== JSON.stringify(expected.range) ||
+      participants.length !== expected.size
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位グループの順位範囲または人数が不正です。");
+    }
+    const groupEntries = new Set<string>();
+    for (const participant of participants) {
+      const key = leagueRankKey(participant.entry);
+      const team = participant.team == null ? undefined : objectValue(participant.team, "参加チーム参照が不正です。");
+      if (
+        !validRankKeys.has(key) ||
+        groupEntries.has(key) ||
+        allEntries.has(key) ||
+        !expected.ranks.includes(Number(key.split(":").at(-1))) ||
+        (resolution === "provisional" && team !== undefined) ||
+        (resolution === "resolved" &&
+          (team?.type !== "concrete_team" || teamByRank.get(key) !== team.team_id))
+      ) {
+        throw new ImportValidationError("INVALID_REFERENCE", "同順位グループの参加順位枠が不正です。");
+      }
+      groupEntries.add(key);
+      allEntries.add(key);
+    }
+    const matches = arrayValue(group.matches, "同順位リーグ試合", LIMITS.matches);
+    if (matches.length !== expected.size * (expected.size - 1) / 2) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位グループの総当たり試合数が不正です。");
+    }
+    const pairs = new Set<string>();
+    const groupMatchIds = new Set<string>();
+    for (const match of matches) {
+      const home = leagueRankKey(match.home);
+      const away = leagueRankKey(match.away);
+      const pair = [home, away].sort().join("|");
+      if (
+        typeof match.id !== "string" || allMatches.has(match.id) ||
+        match.phase !== "same_rank_league" || match.group_id !== group.id || home === away ||
+        !groupEntries.has(home) || !groupEntries.has(away) || pairs.has(pair)
+      ) {
+        throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの対戦参照が不正です。");
+      }
+      pairs.add(pair);
+      allMatches.set(match.id, match);
+      groupMatchIds.add(match.id);
+    }
+    const rounds = arrayValue(group.logical_rounds, "同順位リーグ論理ラウンド", LIMITS.matches);
+    const roundMatches = rounds.flatMap((round) => {
+      if (round.group_id !== group.id || !Number.isInteger(round.round_no)) {
+        throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの論理ラウンドが不正です。");
+      }
+      return stringArray(round.match_ids, "同順位リーグ論理ラウンドの試合");
+    });
+    if (
+      new Set(roundMatches).size !== matches.length ||
+      roundMatches.some((id) => !groupMatchIds.has(id))
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの論理ラウンドに重複または欠落があります。");
+    }
+  }
+  if (allEntries.size !== teamCount || [...validRankKeys].some((key) => !allEntries.has(key))) {
+    throw new ImportValidationError("INVALID_REFERENCE", "同順位グループが全参加順位枠を覆っていません。");
+  }
+  const warningCodes = arrayValue(plan.warnings, "同順位リーグ警告", LIMITS.teams).map((warning) => {
+    if (
+      !new Set(["SAME_RANK_UNEVEN_BLOCKS", "SAME_RANK_SINGLETON_GROUP"]).has(String(warning.code)) ||
+      typeof warning.message !== "string"
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ警告が不正です。");
+    }
+    return String(warning.code);
+  });
+  const expectedWarnings = [
+    ...(r > 0 ? ["SAME_RANK_UNEVEN_BLOCKS"] : []),
+    ...(policy === "strict_same_rank" && r === 1 ? ["SAME_RANK_SINGLETON_GROUP"] : []),
+  ];
+  if (JSON.stringify(warningCodes) !== JSON.stringify(expectedWarnings)) {
+    throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ警告が端数構成と一致しません。");
+  }
+  const automatic = arrayValue(plan.automatic_standings, "自動確定順位", LIMITS.teams);
+  if (automatic.length !== (policy === "strict_same_rank" && r === 1 ? 1 : 0)) {
+    throw new ImportValidationError("INVALID_REFERENCE", "1チームグループの自動順位が不正です。");
+  }
+
+  if (result.day2_schedule !== undefined) {
+    const schedule = objectValue(result.day2_schedule, "同順位リーグ日程を読み取れませんでした。");
+    if (
+      schedule.schema_version !== SCHEMA_VERSION ||
+      schedule.schedule_scope !== "day2_same_rank_league" ||
+      schedule.participant_resolution !== resolution ||
+      !new Set(["OPTIMAL", "FEASIBLE"]).has(String(schedule.status))
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ日程の状態が計画と一致しません。");
+    }
+    const scheduled = arrayValue(schedule.same_rank_matches, "日程内の同順位リーグ試合", LIMITS.matches);
+    if (
+      scheduled.length !== allMatches.size ||
+      scheduled.some((match) => !allMatches.has(String(match.id)))
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ計画と日程の試合が一致しません。");
+    }
+    const slotted = new Set<string>();
+    for (const slot of arrayValue(schedule.slots, "同順位リーグ日程スロット", LIMITS.slots)) {
+      if (slot.match_id === null) continue;
+      if (typeof slot.match_id !== "string" || !allMatches.has(slot.match_id) || slotted.has(slot.match_id)) {
+        throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ日程の試合配置が不正です。");
+      }
+      slotted.add(slot.match_id);
+    }
+    if (slotted.size !== allMatches.size) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ日程に未配置の試合があります。");
+    }
+  } else if (result.integrated_validation !== undefined) {
+    throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ日程なしでは統合検証を復元できません。");
+  }
+
+  const rawResults = result.same_rank_league_results === undefined
+    ? []
+    : arrayValue(result.same_rank_league_results, "同順位リーグ結果", LIMITS.matches);
+  const resultIds = new Set<string>();
+  for (const matchResult of rawResults) {
+    const match = allMatches.get(String(matchResult.match_id));
+    const homeTeam = match === undefined || match.home_team == null
+      ? undefined
+      : objectValue(match.home_team, "同順位リーグのホームチームが不正です。");
+    const awayTeam = match === undefined || match.away_team == null
+      ? undefined
+      : objectValue(match.away_team, "同順位リーグのアウェーチームが不正です。");
+    if (
+      match === undefined || resultIds.has(String(matchResult.match_id)) ||
+      resolution !== "resolved" || matchResult.home_team_id !== homeTeam?.team_id ||
+      matchResult.away_team_id !== awayTeam?.team_id ||
+      matchResult.penalty_score_home != null || matchResult.penalty_score_away != null
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグ結果の対戦またはPK項目が不正です。");
+    }
+    nonNegativeInteger(matchResult.regular_score_home, "同順位リーグのホーム得点");
+    nonNegativeInteger(matchResult.regular_score_away, "同順位リーグのアウェー得点");
+    resultIds.add(String(matchResult.match_id));
+  }
+  if (result.same_rank_standings !== undefined) {
+    if (resultIds.size !== allMatches.size) {
+      throw new ImportValidationError("INVALID_REFERENCE", "全試合結果がないため同順位リーグ順位を復元できません。");
+    }
+    const final = objectValue(result.same_rank_standings, "同順位リーグ順位を読み取れませんでした。");
+    const rows = arrayValue(final.standings, "同順位リーグ順位", LIMITS.teams);
+    const ranks = rows.map((row) => nonNegativeInteger(row.rank, "同順位リーグ総合順位"));
+    const rankedTeams = rows.map((row) => String(row.team_id));
+    if (
+      final.schema_version !== SCHEMA_VERSION || final.status !== "COMPLETE" ||
+      JSON.stringify([...ranks].sort((a, b) => a - b)) !==
+        JSON.stringify(Array.from({ length: teamCount }, (_, index) => index + 1)) ||
+      new Set(rankedTeams).size !== teamCount || rankedTeams.some((id) => !teams.some((team) => team.id === id))
+    ) {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの総合順位に重複または欠落があります。");
+    }
+  }
+}
+
 function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: JsonObject): void {
   const planValue = result.league_plan;
   if (planValue === undefined) {
@@ -900,10 +1183,13 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       result.league_results !== undefined ||
       result.league_standings !== undefined ||
       result.tournament_plan !== undefined ||
+      result.same_rank_plan !== undefined ||
       result.day2_schedule !== undefined ||
       result.integrated_validation !== undefined ||
       result.tournament_results !== undefined ||
-      result.final_standings !== undefined
+      result.final_standings !== undefined ||
+      result.same_rank_league_results !== undefined ||
+      result.same_rank_standings !== undefined
     ) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
@@ -1131,7 +1417,9 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   }
 
   if (result.league_standings === undefined) {
-    if (result.tournament_plan !== undefined) {
+    if (result.same_rank_plan !== undefined) {
+      validateSameRankState(result, input, teams, blocks, undefined);
+    } else if (result.tournament_plan !== undefined) {
       const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
       const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
       const tournamentPlan = objectValue(
@@ -1148,7 +1436,12 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       );
       validateDay2ScheduleResult(result, input, teams, tournamentPlan, undefined);
       validateTournamentResultsState(result, tournamentPlan);
-    } else if (result.day2_schedule !== undefined || result.integrated_validation !== undefined) {
+    } else if (
+      result.day2_schedule !== undefined ||
+      result.integrated_validation !== undefined ||
+      result.same_rank_league_results !== undefined ||
+      result.same_rank_standings !== undefined
+    ) {
       throw new ImportValidationError(
         "INVALID_REFERENCE",
         "トーナメント表がないため、2日目日程を復元できませんでした。",
@@ -1211,7 +1504,9 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       throw new ImportValidationError("INVALID_REFERENCE", "抽選記録の内容が不正です。");
     }
   }
-  if (result.tournament_plan !== undefined) {
+  if (result.same_rank_plan !== undefined) {
+    validateSameRankState(result, input, teams, blocks, rows);
+  } else if (result.tournament_plan !== undefined) {
     const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
     const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
     const tournamentPlan = objectValue(
@@ -1232,7 +1527,9 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
     result.day2_schedule !== undefined ||
     result.integrated_validation !== undefined ||
     result.tournament_results !== undefined ||
-    result.final_standings !== undefined
+    result.final_standings !== undefined ||
+    result.same_rank_league_results !== undefined ||
+    result.same_rank_standings !== undefined
   ) {
     throw new ImportValidationError(
       "INVALID_REFERENCE",
@@ -1693,12 +1990,31 @@ function validateCurrentTournamentPlan(
   validLeagueRanks: Set<string>,
   expectedTournamentCount: number | undefined,
 ): void {
+  const teamCount = teamIds.size;
+  const tournamentCount = expectedTournamentCount ?? 0;
+  const blockIds = new Set([...validLeagueRanks].map((key) => key.slice(0, key.lastIndexOf(":"))));
+  const blockCount = blockIds.size;
+  const allowedBlocks = new Map<string, readonly number[]>([
+    ["8:2", [2, 4]],
+    ["16:2", [2, 4, 8]],
+    ["24:3", [2, 4, 8]],
+    ["32:2", [2, 4, 8, 16]],
+    ["32:4", [2, 4, 8]],
+  ]).get(`${String(teamCount)}:${String(tournamentCount)}`);
+  const participantCount = tournamentCount > 0 ? teamCount / tournamentCount : 0;
+  const blockSize = blockCount > 0 ? teamCount / blockCount : 0;
+  const rankBandWidth = tournamentCount > 0 ? blockSize / tournamentCount : 0;
   if (
     plan.format !== "placement_tournament"
     || plan.tournament_count !== expectedTournamentCount
     || plan.odd_split_policy !== undefined
     || !Array.isArray(plan.pools)
     || plan.pools.length !== expectedTournamentCount
+    || allowedBlocks === undefined
+    || !allowedBlocks.includes(blockCount)
+    || !Number.isInteger(participantCount)
+    || !Number.isInteger(blockSize)
+    || !Number.isInteger(rankBandWidth)
   ) {
     throw new ImportValidationError("INVALID_DOCUMENT", "順位決定トーナメントの構成が不正です。");
   }
@@ -1744,24 +2060,24 @@ function validateCurrentTournamentPlan(
     ) {
       throw new ImportValidationError("INVALID_DOCUMENT", "順位帯の識別情報が不正です。");
     }
-    const participantCount = nonNegativeInteger(pool.participant_count, "順位帯参加数");
-    if (![4, 8, 16].includes(participantCount)) {
+    const poolParticipantCount = nonNegativeInteger(pool.participant_count, "順位帯参加数");
+    if (![4, 8, 16].includes(poolParticipantCount) || poolParticipantCount !== participantCount) {
       throw new ImportValidationError("INVALID_DOCUMENT", "順位帯参加数が対応範囲外です。");
     }
     const poolRange = Array.isArray(pool.pool_rank_range) ? pool.pool_rank_range : [];
     const overallRange = Array.isArray(pool.overall_rank_range) ? pool.overall_rank_range : [];
     if (
       poolRange[0] !== 1
-      || poolRange[1] !== participantCount
+      || poolRange[1] !== poolParticipantCount
       || overallRange[0] !== expectedOverallStart
-      || overallRange[1] !== expectedOverallStart + participantCount - 1
+      || overallRange[1] !== expectedOverallStart + poolParticipantCount - 1
     ) {
       throw new ImportValidationError("INVALID_REFERENCE", "順位帯の順位範囲に欠落があります。");
     }
-    expectedOverallStart += participantCount;
+    expectedOverallStart += poolParticipantCount;
 
     const seeds = arrayValue(pool.seeds, "順位帯シード", LIMITS.teams);
-    if (seeds.length !== participantCount) {
+    if (seeds.length !== poolParticipantCount) {
       throw new ImportValidationError("INVALID_REFERENCE", "順位帯参加数とシード数が一致しません。");
     }
     const seedRanks = new Set<string>();
@@ -1772,9 +2088,12 @@ function validateCurrentTournamentPlan(
       const seedNo = nonNegativeInteger(seed.seed_no, "シード番号");
       const blockRank = nonNegativeInteger(seed.block_rank, "ブロック順位");
       const rankKey = `${String(seed.block_id)}:${String(blockRank)}`;
+      const bandStart = index * rankBandWidth + 1;
+      const bandEnd = (index + 1) * rankBandWidth;
       if (
-        seedNo < 1 || seedNo > participantCount || seedNumbers.has(seedNo)
-        || blockRank < 1 || seedRanks.has(rankKey) || !validLeagueRanks.has(rankKey)
+        seedNo < 1 || seedNo > poolParticipantCount || seedNumbers.has(seedNo)
+        || blockRank < bandStart || blockRank > bandEnd
+        || seedRanks.has(rankKey) || !validLeagueRanks.has(rankKey)
         || allSeedRanks.has(rankKey)
       ) {
         throw new ImportValidationError("DUPLICATE_ID", "順位帯シードの内容が不正です。");
@@ -1804,9 +2123,15 @@ function validateCurrentTournamentPlan(
         allSeedTeams.add(seed.team_id);
       }
     }
+    for (const blockId of blockIds) {
+      const count = [...seedRanks].filter((key) => key.startsWith(`${blockId}:`)).length;
+      if (count !== rankBandWidth) {
+        throw new ImportValidationError("INVALID_REFERENCE", "順位帯のブロック順位幅が不正です。");
+      }
+    }
 
     const matches = arrayValue(pool.matches, "順位帯試合", LIMITS.matches);
-    if (matches.length !== expectedTournamentMatchCount(participantCount)) {
+    if (matches.length !== expectedTournamentMatchCount(poolParticipantCount)) {
       throw new ImportValidationError("INVALID_REFERENCE", "完全順位決定に必要な試合数と一致しません。");
     }
     const matchIds = uniqueIds(matches, "順位帯試合");
@@ -1839,7 +2164,7 @@ function validateCurrentTournamentPlan(
       throw error;
     }
     const placements = arrayValue(pool.placements, "順位帯最終順位", LIMITS.teams);
-    if (placements.length !== participantCount) {
+    if (placements.length !== poolParticipantCount) {
       throw new ImportValidationError("INVALID_REFERENCE", "順位帯最終順位に不足があります。");
     }
     for (const [placementIndex, placement] of placements.entries()) {

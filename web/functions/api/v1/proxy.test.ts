@@ -165,4 +165,25 @@ describe("Cloudflare Pages API proxy", () => {
     const [, options] = fetchMock.mock.calls[0] ?? [];
     expect(new Headers(options?.headers).get("x-turnstile-action")).toBe("create_day2");
   });
+
+  it.each([
+    ["same_rank_league_plan", "generate_same_rank_league"],
+    ["same_rank_league_results", "calculate_same_rank_results"],
+    ["same_rank_day2_schedule", "generate_same_rank_day2_schedule"],
+  ])("同順位リーグの%s actionをAWSへ転送する", async (requestKind, action) => {
+    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
+      new Response('{"status":"COMPLETE"}', { status: 200 }),
+    );
+    const response = await proxyScheduleRequest(
+      request(JSON.stringify({ request_kind: requestKind }), {
+        "x-turnstile-action": action,
+      }),
+      environment,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(200);
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(options?.headers).get("x-turnstile-action")).toBe(action);
+  });
 });

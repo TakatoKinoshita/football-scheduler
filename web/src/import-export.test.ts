@@ -6,11 +6,12 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
-import { scheduleViewTournamentFixture } from "../e2e/fixtures";
+import { sameRankWebFixture, scheduleViewTournamentFixture } from "../e2e/fixtures";
 import {
   LEGACY_SCHEMA_VERSION,
   SCHEMA_VERSION,
   createTournamentDocument,
+  type TournamentDocument,
 } from "./types";
 
 function validDocument() {
@@ -261,6 +262,91 @@ function provisionalDay2Document() {
   return document;
 }
 
+function sameRankDay2Document() {
+  const document = scheduleViewTournamentFixture();
+  document.tournament.input.final_stage = {
+    format: "same_rank_league",
+    uneven_policy: "strict_same_rank",
+  } as unknown as typeof document.tournament.input.final_stage;
+  const result = document.tournament.result as Record<string, unknown>;
+  delete result.tournament_plan;
+  delete result.day2_schedule;
+  delete result.integrated_validation;
+  const leaguePlan = result.league_plan as Record<string, unknown>;
+  const blocks = leaguePlan.blocks as Array<{ id: string; team_ids: string[] }>;
+  const groups = [1, 2].map((rank) => {
+    const participants = blocks.map((block) => ({
+      entry: { type: "league_rank", block_id: block.id, rank },
+      team: null,
+    }));
+    const matches: Array<Record<string, unknown>> = [];
+    for (let home = 0; home < participants.length; home += 1) {
+      for (let away = home + 1; away < participants.length; away += 1) {
+        const id = `SR-${String(rank)}-M${String(matches.length + 1)}`;
+        matches.push({
+          id,
+          phase: "same_rank_league",
+          group_id: `same-rank-${String(rank)}`,
+          round: `第${String(matches.length + 1)}ラウンド`,
+          round_no: matches.length + 1,
+          home: participants[home]!.entry,
+          away: participants[away]!.entry,
+          home_team: null,
+          away_team: null,
+        });
+      }
+    }
+    return {
+      id: `same-rank-${String(rank)}`,
+      display_name: `${String(rank)}位グループ`,
+      source_block_ranks: [rank],
+      overall_rank_range: [(rank - 1) * blocks.length + 1, rank * blocks.length],
+      participants,
+      logical_rounds: matches.map((match, index) => ({
+        group_id: `same-rank-${String(rank)}`,
+        round_no: index + 1,
+        match_ids: [match.id],
+      })),
+      matches,
+    };
+  });
+  const plan = {
+    schema_version: "0.2.0",
+    format: "same_rank_league",
+    status: "COMPLETE",
+    participant_resolution: "provisional",
+    uneven_policy: "strict_same_rank",
+    team_count: 8,
+    block_count: 4,
+    random_seed: 20260803,
+    groups,
+    automatic_standings: [],
+    warnings: [],
+  };
+  const matches = groups.flatMap((group) => group.matches);
+  result.same_rank_plan = plan;
+  result.day2_schedule = {
+    schema_version: "0.2.0",
+    schedule_scope: "day2_same_rank_league",
+    participant_resolution: "provisional",
+    status: "OPTIMAL",
+    same_rank_matches: structuredClone(matches),
+    slots: matches.map((match, index) => ({
+      day_id: "day2",
+      section_no: Math.floor(index / 2) + 1,
+      court_id: index % 2 === 0 ? "court-a" : "court-b",
+      match_id: match.id,
+      referee_assignment: { kind: "organizer", organizer_reason: "first_section", fallback_reasons: [] },
+    })),
+    section_timings: [],
+    expected_end_time: "14:00:00",
+    team_schedules: [],
+    metrics: { used_sections: 6, organizer_referee_count: 12, referee_counts: [] },
+    diagnostics: [],
+  };
+  return document;
+}
+
 describe("大会JSONの入出力", () => {
   it("schema 0.2.0文書を書き出して同じ内容で読み込む", () => {
     const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
@@ -278,6 +364,47 @@ describe("大会JSONの入出力", () => {
       uneven_policy: "strict_same_rank",
     };
 
+    expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))
+      .toEqual(document);
+  });
+
+  it("同順位リーグの仮計画と仮日程を同じ内容で復元する", () => {
+    const document = sameRankDay2Document();
+    expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))
+      .toEqual(document);
+  });
+
+  it("同順位グループの順位範囲改ざんを拒否する", () => {
+    const document = sameRankDay2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = result.same_rank_plan as Record<string, unknown>;
+    const groups = plan.groups as Array<Record<string, unknown>>;
+    groups[0]!.overall_rank_range = [1, 5];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/順位範囲/);
+  });
+
+  it("割り切れる同順位リーグへ端数警告を混在させた文書を拒否する", () => {
+    const document = sameRankDay2Document();
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = result.same_rank_plan as Record<string, unknown>;
+    plan.warnings = [{
+      code: "SAME_RANK_UNEVEN_BLOCKS",
+      message: "不正な警告",
+      group_id: null,
+      details: {},
+    }];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/警告/);
+  });
+
+  it("16チーム4ブロックの警告なし同順位リーグをJSON往復する", () => {
+    const document = sameRankWebFixture(16) as unknown as TournamentDocument;
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("17チーム4ブロックのsingletonと2警告をJSON往復する", () => {
+    const document = sameRankWebFixture(17) as unknown as TournamentDocument;
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
