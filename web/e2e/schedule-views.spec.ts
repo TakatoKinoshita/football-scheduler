@@ -12,7 +12,12 @@ import {
   standingsResult,
   tournamentFixture,
 } from "./fixtures";
-import { importDocument, mockExternalServices, openApp } from "./helpers";
+import {
+  importDocument,
+  mockExternalServices,
+  openApp,
+  scheduleCreationResponse,
+} from "./helpers";
 
 async function openScheduleViewFixture(page: import("@playwright/test").Page): Promise<void> {
   const fixture = scheduleViewTournamentFixture();
@@ -37,7 +42,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   page,
 }) => {
   await openScheduleViewFixture(page);
-  await page.locator('.step[data-step="4"]').click();
+  await page.locator("#tab-day1").click();
   await expect(page.locator("#day1-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 
   const blockDisclosure = page.locator("#day1-blocks-view");
@@ -103,19 +108,19 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await page.evaluate(async () => navigator.serviceWorker.ready);
   await page.reload();
   await expect(page.locator("#save-state")).not.toHaveText("読み込み中…");
-  await page.locator('.step[data-step="4"]').click();
+  await page.locator("#tab-day1").click();
   await expect(page.locator("#day1-schedule-view-toggle").getByLabel("コート別")).toBeChecked();
   await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
   expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
   await page.context().setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator("#save-state")).not.toHaveText("読み込み中…");
-  await page.locator('.step[data-step="4"]').click();
+  await page.locator("#tab-day1").click();
   await expect(page.locator("#day1-schedule-view-toggle").getByLabel("コート別")).toBeChecked();
   await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
 });
 
-test("旧ルールの1日目日程を保持して警告し、2日目の再作成だけを無効化する", async ({
+test("旧ルールの1日目日程を保持して警告し、統合生成で再作成できる", async ({
   page,
 }) => {
   const fixture = structuredClone(scheduleViewTournamentFixture());
@@ -130,19 +135,21 @@ test("旧ルールの1日目日程を保持して警告し、2日目の再作成
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, fixture);
-  await page.locator('.step[data-step="4"]').click();
+  await page.locator("#tab-day1").click();
 
   const day1Warning = page.locator("#result-content .legacy-schedule-warning");
   await expect(day1Warning).toContainText("旧ルールの日程");
   await expect(day1Warning).toContainText("1件");
   await expect(page.locator("#day1-schedule-view")).toBeVisible();
-  await expect(page.locator("#generate-day2")).toBeDisabled();
-  await expect(page.locator("#day2-review")).toContainText("1日目日程を再作成");
+  await page.locator("#tab-schedule-settings").click();
+  await expect(page.locator("#generate")).toBeEnabled();
+  await expect(page.locator("#generation-review")).toContainText("8チーム");
 
+  await page.locator("#tab-day1").click();
   await page.emulateMedia({ media: "print" });
   await expect(day1Warning).toBeVisible();
   await page.emulateMedia({ media: "screen" });
-  await page.locator('.step[data-step="5"]').click();
+  await page.locator("#tab-day2").click();
   await expect(page.locator("#day2-schedule-view")).toBeVisible();
   await page.emulateMedia({ media: "print" });
   await expect(
@@ -306,20 +313,18 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(
-        {
-          status: invalidResponse.status,
-          tournament_plan: tournamentPlan,
-          day2_schedule: invalidResponse,
-        },
-      ),
+      body: JSON.stringify(scheduleCreationResponse({
+        ...result,
+        tournament_plan: tournamentPlan,
+        day2_schedule: invalidResponse,
+      }, "day2_only")),
     });
   });
 
-  await page.getByRole("button", { name: "2日目を作成する" }).click();
+  await page.locator("#tab-schedule-settings").click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
-  await expect(page.locator("#day2-status")).toContainText("安全確認に失敗しました");
-  await expect(page.locator("#day2-status")).toContainText("既存の結果と入力は変更していません");
+  await expect(page.locator("#generation-status")).toContainText("安全に確認できなかった");
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
 });
 
@@ -570,13 +575,14 @@ test("2日目設定を変更すると日程とブラケットの派生番号を�
   );
   await expect(semifinal).toContainText("A①");
 
+  await page.locator("#tab-schedule-settings").click();
   await page.locator("#day2-margin-minutes").fill("15");
   await page.locator("#day2-margin-minutes").blur();
 
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
   await expect(semifinal).toContainText("PT-1-SF1");
   await expect(semifinal).not.toContainText("A①");
-  await expect(page.locator("#day2-status")).toContainText("以前の日程を取り消しました");
+  await expect(page.locator("#generation-status")).toContainText("以前の2日目日程を取り消しました");
 });
 
 for (const viewport of [
