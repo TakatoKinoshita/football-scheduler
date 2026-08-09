@@ -28,6 +28,7 @@ PLACEMENT_OBJECTIVES: tuple[str, ...] = (
     "team_court_change_count",
     "court_usage_difference",
 )
+Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class PlacementTemplateStatus(StrEnum):
@@ -153,7 +154,43 @@ class PlacementTemplateShardReference(ContractModel):
     pool_size: Annotated[int, Field(gt=1)]
     file: NonEmptyText
     entry_count: Annotated[int, Field(gt=0)]
-    sha256: NonEmptyText
+    sha256: Sha256Digest
+
+
+class PlacementTemplateShard(ContractModel):
+    format_version: Literal[1] = TEMPLATE_FORMAT_VERSION
+    ruleset_id: Literal["placement-schedule-v1"] = PLACEMENT_RULESET_ID
+    pool_count: Annotated[int, Field(gt=0)]
+    pool_size: Annotated[int, Field(gt=1)]
+    entries: tuple[PlacementTemplateEntry, ...]
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_entries(self) -> Self:
+        topology = (self.pool_count, self.pool_size)
+        if topology not in SUPPORTED_PLACEMENT_TOPOLOGIES:
+            raise ValueError("未対応のテンプレートshardです")
+        if len(self.entries) != 272:
+            raise ValueError("各トポロジーのshardには272キーが必要です")
+        entry_ids = [entry.key.catalog_id for entry in self.entries]
+        if len(set(entry_ids)) != len(entry_ids):
+            raise ValueError("テンプレートshardのキーが重複しています")
+        if any((entry.key.pool_count, entry.key.pool_size) != topology for entry in self.entries):
+            raise ValueError("テンプレートshardとentryのトポロジーが一致しません")
+        if any(not entry.sha256 for entry in self.entries):
+            raise ValueError("テンプレートentryにSHA-256が必要です")
+        expected_ids = {
+            key.catalog_id
+            for key in expected_placement_template_keys()
+            if (key.pool_count, key.pool_size) == topology
+        }
+        if set(entry_ids) != expected_ids:
+            raise ValueError("テンプレートshardのキー範囲が一致しません")
+        if self.sha256 and (
+            not _is_sha256(self.sha256) or self.sha256 != placement_shard_digest(self)
+        ):
+            raise ValueError("テンプレートshardのSHA-256が一致しません")
+        return self
 
 
 class PlacementTemplateManifest(ContractModel):
@@ -164,7 +201,22 @@ class PlacementTemplateManifest(ContractModel):
     ortools_version: NonEmptyText
     total_entry_count: Literal[1360] = 1360
     shards: tuple[PlacementTemplateShardReference, ...]
-    catalog_sha256: NonEmptyText
+    catalog_sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> Self:
+        topologies = [(item.pool_count, item.pool_size) for item in self.shards]
+        if tuple(topologies) != SUPPORTED_PLACEMENT_TOPOLOGIES:
+            raise ValueError("manifestのshard順またはトポロジー範囲が一致しません")
+        if sum(item.entry_count for item in self.shards) != self.total_entry_count:
+            raise ValueError("manifestのentry件数が一致しません")
+        if len({item.file for item in self.shards}) != len(self.shards):
+            raise ValueError("manifestのshardファイルが重複しています")
+        if self.catalog_sha256 and (
+            not _is_sha256(self.catalog_sha256) or self.catalog_sha256 != manifest_digest(self)
+        ):
+            raise ValueError("catalog root SHA-256が一致しません")
+        return self
 
 
 def expected_placement_template_keys() -> tuple[PlacementTemplateKey, ...]:
@@ -201,3 +253,21 @@ def sha256_hex(value: object) -> str:
 def placement_entry_digest(entry: PlacementTemplateEntry) -> str:
     payload = entry.model_dump(mode="json", exclude={"sha256"})
     return sha256_hex(payload)
+
+
+def placement_shard_digest(shard: PlacementTemplateShard) -> str:
+    """shardの自己digestを除いたcanonical parsed JSONのSHA-256を返す。"""
+
+    payload = shard.model_dump(mode="json", exclude={"sha256"})
+    return sha256_hex(payload)
+
+
+def manifest_digest(manifest: PlacementTemplateManifest) -> str:
+    """root digestを除いたmanifestのcanonical parsed JSONのSHA-256を返す。"""
+
+    payload = manifest.model_dump(mode="json", exclude={"catalog_sha256"})
+    return sha256_hex(payload)
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
