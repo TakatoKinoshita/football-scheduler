@@ -34,6 +34,19 @@ from football_scheduler.models import (
     SolverStatus,
     TeamRefereeCount,
 )
+from football_scheduler.placement_template_contract import (
+    PLACEMENT_OBJECTIVES,
+    CanonicalMatchPosition,
+    CanonicalRefereeAssignment,
+    PlacementTemplateEntry,
+    PlacementTemplateKey,
+    PlacementTemplateStatus,
+    placement_referee_signature,
+)
+from football_scheduler.placement_template_runtime import (
+    PlacementTemplateCatalogError,
+    load_placement_template_entry,
+)
 from football_scheduler.timekeeping import (
     DayTimingError,
     expected_end_time,
@@ -263,6 +276,10 @@ class Day2ScheduleError(ValueError):
         self.code, self.message, self.details = code, message, details
 
 
+class _TemplateTopologyError(ValueError):
+    """入力計画とテンプレートの対応を一意に復元できない。"""
+
+
 @dataclass(frozen=True, slots=True)
 class _PathModel:
     matches: tuple[ScheduledTournamentMatch, ...]
@@ -302,9 +319,308 @@ class _SolvedLayout:
 def generate_day2_schedule(
     request: Day2ScheduleRequest | Mapping[str, object],
 ) -> Day2Schedule:
-    """公開境界。テンプレート導入前は安定化したソルバーへ委譲する。"""
+    """公開境界。検証済みテンプレートを優先し、破損時だけ既存solverへ戻す。"""
 
-    return _generate_day2_schedule_with_solver(request)
+    data = (
+        request
+        if isinstance(request, Day2ScheduleRequest)
+        else Day2ScheduleRequest.model_validate(request)
+    )
+    try:
+        validate_tournament_plan_invariants(data.tournament_plan, data.league_plan)
+    except TournamentPlanInvariantError as exc:
+        raise Day2ScheduleError(
+            "TOURNAMENT_SOURCE_INVALID",
+            "順位決定トーナメント計画と予選ブロックの対応を確認できませんでした。2日目を再作成してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
+    path_model = _build_path_model(data.tournament_plan)
+    if not path_model.matches:
+        return _generate_day2_schedule_with_solver(data)
+    if data.referees.organizer_capacity == 0:
+        return _failed_schedule(
+            data,
+            path_model.matches,
+            SolverStatus.INFEASIBLE,
+            "ORGANIZER_CAPACITY_INSUFFICIENT",
+            "主催者審判の必要数が同一セクションの上限を超えます。コート数または審判設定を見直してください。",
+            organizer_capacity=0,
+        )
+
+    try:
+        horizon = _resolve_day2_horizon(data, path_model)
+    except Day2ScheduleError:
+        raise
+    if len(path_model.matches) > horizon * len(data.courts):
+        return _failed_schedule(
+            data,
+            path_model.matches,
+            SolverStatus.INFEASIBLE,
+            "INSUFFICIENT_SLOTS",
+            "利用可能なコートとセクションだけでは、2日目の全試合を配置できません。",
+            required_matches=len(path_model.matches),
+            available_slots=horizon * len(data.courts),
+        )
+
+    try:
+        key = _placement_template_key(data)
+        entry = load_placement_template_entry(key)
+        return _generate_day2_schedule_from_template(data, path_model, horizon, entry)
+    except PlacementTemplateCatalogError as exc:
+        return _schedule_with_template_fallback(data, exc.reason)
+    except _TemplateTopologyError:
+        return _schedule_with_template_fallback(data, "catalog_topology_inconsistent")
+
+
+def _resolve_day2_horizon(data: Day2ScheduleRequest, path_model: _PathModel) -> int:
+    try:
+        horizon = resolve_max_sections(
+            data.day,
+            min(_MAX_SECTIONS, max(1, len(path_model.matches) * 2)),
+        )
+    except DayTimingError as exc:
+        raise Day2ScheduleError(exc.code, exc.message, **exc.details) from exc
+    if horizon > _MAX_SECTIONS:
+        raise Day2ScheduleError(
+            "SECTION_LIMIT_EXCEEDED",
+            f"セクション数が上限の{_MAX_SECTIONS}を超えています。",
+            actual=horizon,
+            maximum=_MAX_SECTIONS,
+        )
+    return horizon
+
+
+def _placement_template_key(data: Day2ScheduleRequest) -> PlacementTemplateKey:
+    pools = data.tournament_plan.pools
+    pool_sizes = {pool.participant_count for pool in pools}
+    pool_indexes = {pool.pool_index for pool in pools}
+    if len(pool_sizes) != 1 or pool_indexes != set(range(1, len(pools) + 1)):
+        raise _TemplateTopologyError("順位帯の人数またはindexが正規形ではありません")
+    try:
+        return PlacementTemplateKey.normalized(
+            pool_count=len(pools),
+            pool_size=next(iter(pool_sizes)),
+            court_count=len(data.courts),
+            organizer_capacity=data.referees.organizer_capacity,
+            day2_fallback=data.referees.day2_fallback,
+        )
+    except ValueError as exc:
+        raise _TemplateTopologyError("テンプレートキーを正規化できません") from exc
+
+
+def _generate_day2_schedule_from_template(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+    entry: PlacementTemplateEntry,
+) -> Day2Schedule:
+    key = _placement_template_key(data)
+    if entry.key != key:
+        raise _TemplateTopologyError("要求キーとテンプレートentryが一致しません")
+    if entry.status is PlacementTemplateStatus.PROVEN_INFEASIBLE:
+        return _failed_schedule(
+            data,
+            path_model.matches,
+            SolverStatus.INFEASIBLE,
+            "TOURNAMENT_SCHEDULE_INFEASIBLE",
+            "指定された時間・休憩・審判条件では、2日目の日程を作成できません。",
+            required_matches=len(path_model.matches),
+            available_slots=horizon * len(data.courts),
+            required_final_match_id=path_model.matches[path_model.primary_final_index].id,
+            required_final_rule="last_occupied_section",
+            maximum_sections=horizon,
+            court_count=len(data.courts),
+            organizer_capacity=data.referees.organizer_capacity,
+        )
+    if entry.used_sections is None:
+        raise _TemplateTopologyError("利用可能テンプレートに使用セクション数がありません")
+    if horizon < entry.used_sections:
+        return _failed_schedule(
+            data,
+            path_model.matches,
+            SolverStatus.INFEASIBLE,
+            "TOURNAMENT_SCHEDULE_INFEASIBLE",
+            "指定された時間・休憩・審判条件では、2日目の日程を作成できません。",
+            required_matches=len(path_model.matches),
+            available_slots=horizon * len(data.courts),
+            required_final_match_id=path_model.matches[path_model.primary_final_index].id,
+            required_final_rule="last_occupied_section",
+            minimum_sections=entry.used_sections,
+            maximum_sections=horizon,
+            court_count=len(data.courts),
+            organizer_capacity=data.referees.organizer_capacity,
+        )
+
+    position_by_match_id = _canonical_positions(data)
+    match_id_by_position = {
+        position: match_id for match_id, position in position_by_match_id.items()
+    }
+    if len(match_id_by_position) != len(position_by_match_id):
+        raise _TemplateTopologyError("トーナメント計画のcanonical位置が重複しています")
+    if set(position_by_match_id) != {match.id for match in path_model.matches}:
+        raise _TemplateTopologyError("canonical位置が全試合を覆っていません")
+    template_positions = {slot.match_position for slot in entry.slots}
+    if len(entry.slots) != len(path_model.matches) or template_positions != set(
+        match_id_by_position
+    ):
+        raise _TemplateTopologyError("テンプレート配置が全試合を一度ずつ覆っていません")
+    coordinates = {(slot.section_no, slot.court_index) for slot in entry.slots}
+    if len(coordinates) != len(entry.slots):
+        raise _TemplateTopologyError("テンプレート配置のslotが重複しています")
+
+    match_by_coordinate = {
+        (slot.section_no, slot.court_index): match_id_by_position[slot.match_position]
+        for slot in entry.slots
+    }
+    slots = tuple(
+        Slot(
+            day_id=data.day.id,
+            section_no=section_no,
+            court_id=court.id,
+            match_id=match_by_coordinate.get((section_no, court_index)),
+            referee_assignment=None,
+        )
+        for section_no in range(1, entry.used_sections + 1)
+        for court_index, court in enumerate(data.courts)
+    )
+    _validate_template_layout(path_model, slots, entry.used_sections)
+    assignments, invalid_reasons = _assign_referees(data, path_model, slots)
+    slots = tuple(
+        slot.model_copy(update={"referee_assignment": assignments.get(slot.match_id)})
+        if slot.match_id is not None
+        else slot
+        for slot in slots
+    )
+    if invalid_reasons and data.referees.day2_fallback is Day2Fallback.STRICT:
+        raise _TemplateTopologyError("strictテンプレートで審判供給元が不足しています")
+    organizer_by_section = Counter(
+        slot.section_no
+        for slot in slots
+        if slot.match_id is not None
+        and slot.referee_assignment is not None
+        and slot.referee_assignment.kind is RefereeKind.ORGANIZER
+    )
+    if any(count > data.referees.organizer_capacity for count in organizer_by_section.values()):
+        raise _TemplateTopologyError("テンプレートの主催者審判数が能力を超えています")
+    _validate_referee_signature(entry, slots, position_by_match_id)
+
+    routes = _team_routes(path_model, slots)
+    metrics = _audit_template_metrics(data, path_model, slots, routes, entry)
+    result_status = SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE
+    diagnostics = (
+        ()
+        if result_status is SolverStatus.OPTIMAL
+        else (
+            Diagnostic(
+                code="OPTIMALITY_NOT_PROVEN",
+                message="実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。",
+            ),
+        )
+    )
+    return Day2Schedule(
+        participant_resolution=data.tournament_plan.participant_resolution,
+        status=result_status,
+        tournament_matches=path_model.matches,
+        slots=slots,
+        section_timings=section_timings(data.day, entry.used_sections),
+        expected_end_time=expected_end_time(data.day, entry.used_sections),
+        team_schedules=routes,
+        metrics=metrics,
+        diagnostics=diagnostics,
+    )
+
+
+def _canonical_positions(data: Day2ScheduleRequest) -> dict[str, CanonicalMatchPosition]:
+    positions: dict[str, CanonicalMatchPosition] = {}
+    for pool in data.tournament_plan.pools:
+        layout = pool.logical_layout
+        if layout is None:
+            raise _TemplateTopologyError("トーナメント計画にlogical_layoutがありません")
+        for logical_position in layout.match_positions:
+            if logical_position.match_id in positions:
+                raise _TemplateTopologyError("logical_layoutに試合IDの重複があります")
+            positions[logical_position.match_id] = CanonicalMatchPosition(
+                pool_index=pool.pool_index,
+                rank_range_start=logical_position.rank_range[0],
+                rank_range_end=logical_position.rank_range[1],
+                logical_order=logical_position.order,
+            )
+    return positions
+
+
+def _validate_template_layout(
+    path_model: _PathModel,
+    slots: tuple[Slot, ...],
+    used_sections: int,
+) -> None:
+    occupied = [slot for slot in slots if slot.match_id is not None]
+    slot_by_match_id = {slot.match_id: slot for slot in occupied}
+    if len(slot_by_match_id) != len(path_model.matches):
+        raise _TemplateTopologyError("テンプレートの試合配置に不足または重複があります")
+    if {slot.section_no for slot in occupied} != set(range(1, used_sections + 1)):
+        raise _TemplateTopologyError("テンプレートに空の使用セクションがあります")
+    if slot_by_match_id[path_model.matches[path_model.primary_final_index].id].section_no != (
+        used_sections
+    ):
+        raise _TemplateTopologyError("最高順位帯の決勝が最終セクションにありません")
+    for match_id, dependency_ids in path_model.dependencies.items():
+        target_section = slot_by_match_id[match_id].section_no
+        if any(
+            target_section < slot_by_match_id[source_id].section_no + 2
+            for source_id in dependency_ids
+        ):
+            raise _TemplateTopologyError("前提試合との完全休憩セクションが不足しています")
+    matches = path_model.matches
+    for left, right in path_model.conflict_pairs:
+        left_section = slot_by_match_id[matches[left].id].section_no
+        right_section = slot_by_match_id[matches[right].id].section_no
+        if abs(left_section - right_section) <= 1:
+            raise _TemplateTopologyError("参加経路が同一または連続セクションで衝突します")
+
+
+def _validate_referee_signature(
+    entry: PlacementTemplateEntry,
+    slots: tuple[Slot, ...],
+    position_by_match_id: Mapping[str, CanonicalMatchPosition],
+) -> None:
+    canonical: list[CanonicalRefereeAssignment] = []
+    for slot in slots:
+        if slot.match_id is None:
+            continue
+        assignment = slot.referee_assignment
+        if assignment is None:
+            raise _TemplateTopologyError("実試合に審判割当てがありません")
+        canonical.append(
+            CanonicalRefereeAssignment(
+                match_position=position_by_match_id[slot.match_id],
+                kind=assignment.kind.value,
+                organizer_reason=assignment.organizer_reason,
+                source_match_position=(
+                    position_by_match_id[assignment.source_match_id]
+                    if assignment.source_match_id is not None
+                    else None
+                ),
+                fallback_reasons=tuple(sorted(assignment.fallback_reasons)),
+            )
+        )
+    if placement_referee_signature(canonical) != entry.referee_signature:
+        raise _TemplateTopologyError("テンプレートの審判署名が再構築結果と一致しません")
+
+
+def _schedule_with_template_fallback(
+    data: Day2ScheduleRequest,
+    reason: str,
+) -> Day2Schedule:
+    schedule = _generate_day2_schedule_with_solver(data)
+    if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        return schedule
+    warning = Diagnostic(
+        code="PLACEMENT_TEMPLATE_FALLBACK_USED",
+        message="日程テンプレートを利用できなかったため、通常の日程計算で作成しました。",
+        details={"reason": reason},
+    )
+    return schedule.model_copy(update={"diagnostics": (*schedule.diagnostics, warning)})
 
 
 def _generate_day2_schedule_with_solver(
@@ -1225,6 +1541,137 @@ def _audit_metrics(
         placement_tournament_finals=final_metrics,
         non_primary_final_max_gap=layout.solver.value(variables.non_primary_final_max_gap),
         non_primary_final_sum_gap=layout.solver.value(variables.non_primary_final_sum_gap),
+        optimized_objectives=optimized_objectives,
+        objective_stages=tuple(
+            ObjectiveStageMetric(
+                objective=name,
+                value=value,
+                optimality_proven=name in proven_objectives,
+            )
+            for name, value in stage_values
+        ),
+        optimality_proven=all_objectives_proven,
+    )
+
+
+def _audit_template_metrics(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    slots: tuple[Slot, ...],
+    routes: tuple[TeamRouteEntry, ...],
+    entry: PlacementTemplateEntry,
+) -> SolverMetrics:
+    """テンプレート配置から既存の10段階メトリクスを独立再計算する。"""
+
+    occupied = [slot for slot in slots if slot.match_id is not None]
+    positions = {slot.match_id: slot.section_no for slot in occupied if slot.match_id is not None}
+    court_by_match = {
+        slot.match_id: slot.court_id for slot in occupied if slot.match_id is not None
+    }
+    used_sections = max(positions.values(), default=0)
+    final_metrics = tuple(
+        PoolFinalMetric(
+            pool_id=pool_id,
+            section_no=positions[path_model.matches[index].id],
+            final_section_gap=used_sections - positions[path_model.matches[index].id],
+        )
+        for pool_id, index in sorted(path_model.final_index_by_pool.items())
+    )
+    non_primary_gaps = [
+        used_sections - positions[path_model.matches[index].id]
+        for index in path_model.final_indexes[1:]
+    ]
+    waits = [
+        positions[match_id] - positions[source_id] - 1
+        for match_id, source_ids in path_model.dependencies.items()
+        for source_id in source_ids
+    ]
+    court_changes = sum(
+        court_by_match[match_id] != court_by_match[source_id]
+        for match_id, source_ids in path_model.dependencies.items()
+        for source_id in source_ids
+    )
+    court_counts = Counter(slot.court_id for slot in occupied)
+    counts = [court_counts[court.id] for court in data.courts]
+    six_values = {
+        "used_sections": used_sections,
+        "non_primary_final_max_gap": max(non_primary_gaps, default=0),
+        "non_primary_final_sum_gap": sum(non_primary_gaps),
+        "maximum_team_wait_sections": max(waits, default=0),
+        "team_court_change_count": court_changes,
+        "court_usage_difference": max(counts, default=0) - min(counts, default=0),
+    }
+    template_objectives = {objective.objective: objective for objective in entry.objectives}
+    if tuple(template_objectives) != PLACEMENT_OBJECTIVES or any(
+        template_objectives[name].value != value for name, value in six_values.items()
+    ):
+        raise _TemplateTopologyError("テンプレート目的値が実配置の監査値と一致しません")
+
+    referee_then_match_count, adjacent_move_count = _route_transition_counts(routes)
+    league_counts, league_minimum, league_maximum, league_difference, previous_same_court = (
+        _day1_league_audit(data)
+    )
+    stage_values = (
+        ("used_sections", six_values["used_sections"]),
+        ("non_primary_final_max_gap", six_values["non_primary_final_max_gap"]),
+        ("non_primary_final_sum_gap", six_values["non_primary_final_sum_gap"]),
+        ("league_team_referee_count_difference", league_difference),
+        ("maximum_team_wait_sections", six_values["maximum_team_wait_sections"]),
+        ("referee_then_match_count", referee_then_match_count),
+        ("league_previous_same_court_referee_count", previous_same_court),
+        ("adjacent_assignment_court_change_count", adjacent_move_count),
+        ("team_court_change_count", six_values["team_court_change_count"]),
+        ("court_usage_difference", six_values["court_usage_difference"]),
+    )
+    proven_objectives = {
+        name for name in PLACEMENT_OBJECTIVES if template_objectives[name].optimality_proven
+    }
+    proven_objectives.update(
+        {"league_team_referee_count_difference", "league_previous_same_court_referee_count"}
+    )
+    proven_objectives.update(
+        name
+        for name, value in stage_values
+        if name in {"referee_then_match_count", "adjacent_assignment_court_change_count"}
+        and value == 0
+    )
+    optimized_objectives = tuple(name for name, _value in stage_values if name in proven_objectives)
+    all_objectives_proven = len(optimized_objectives) == len(stage_values)
+    organizer_count = sum(
+        slot.referee_assignment is not None
+        and slot.referee_assignment.kind is RefereeKind.ORGANIZER
+        for slot in occupied
+    )
+    fallback_count = sum(
+        slot.referee_assignment is not None
+        and slot.referee_assignment.organizer_reason == "fallback"
+        for slot in occupied
+    )
+    return SolverMetrics(
+        random_seed=data.random_seed,
+        max_time_seconds=data.solver.max_time_seconds,
+        ortools_version=entry.provenance.ortools_version,
+        wall_time_seconds=0,
+        used_sections=used_sections,
+        objective_value=float(used_sections),
+        best_objective_bound=float(used_sections),
+        league_team_referee_counts=league_counts,
+        league_team_referee_count_min=league_minimum,
+        league_team_referee_count_max=league_maximum,
+        league_team_referee_count_difference=league_difference,
+        maximum_team_wait_sections=six_values["maximum_team_wait_sections"],
+        referee_then_match_count=referee_then_match_count,
+        league_previous_same_court_referee_count=previous_same_court,
+        adjacent_assignment_court_change_count=adjacent_move_count,
+        team_court_change_count=six_values["team_court_change_count"],
+        court_usage_difference=six_values["court_usage_difference"],
+        organizer_referee_count=organizer_count,
+        tournament_team_referee_count=len(occupied) - organizer_count,
+        tournament_referee_fallback_count=fallback_count,
+        unused_slot_count=len(slots) - len(occupied),
+        placement_tournament_finals=final_metrics,
+        non_primary_final_max_gap=six_values["non_primary_final_max_gap"],
+        non_primary_final_sum_gap=six_values["non_primary_final_sum_gap"],
         optimized_objectives=optimized_objectives,
         objective_stages=tuple(
             ObjectiveStageMetric(
