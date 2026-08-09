@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from importlib.metadata import version
+from itertools import combinations_with_replacement
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -130,6 +131,14 @@ class StabilizedPlacementTemplateSolver:
         slot_bound = 1 + math.ceil(max(0, match_count - first_section_capacity) / key.court_count)
         dependency_depth = key.pool_size.bit_length() - 1
         dependency_bound = dependency_depth * 2 - 1
+        court_opening_capacity = 0
+        court_opening_bound = 0
+        while court_opening_capacity < match_count:
+            court_opening_bound += 1
+            court_opening_capacity += min(
+                key.court_count,
+                court_opening_bound * key.organizer_capacity,
+            )
         referee_capacity_bound = 0
         if key.day2_fallback is Day2Fallback.STRICT:
             earliest_final_section = max(
@@ -146,7 +155,12 @@ class StabilizedPlacementTemplateSolver:
             )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(
-            lower_horizon=max(slot_bound, dependency_bound, referee_capacity_bound),
+            lower_horizon=max(
+                slot_bound,
+                dependency_bound,
+                court_opening_bound,
+                referee_capacity_bound,
+            ),
             upper_horizon=match_count,
         )
 
@@ -262,31 +276,46 @@ def _strict_referee_capacity_lower_horizon(
 ) -> int:
     """strictで各sectionに置ける試合数の楽観上限からhorizon下限を返す。"""
 
-    active_courts = min(court_count, organizer_capacity)
-    unopened_by_final = final_count
-    capacity = 0
-    capacity_by_section: list[int] = []
-    horizon = 0
-    while capacity < match_count:
-        horizon += 1
-        if horizon >= earliest_final_section and unopened_by_final > 0:
-            ancestor_capacity = capacity_by_section[horizon - 3] if horizon >= 3 else 0
-            maximum_ready_finals = min(
-                final_count,
-                ancestor_capacity // ancestor_matches_per_final,
+    pool_size = ancestor_matches_per_final + 2
+    depth = pool_size.bit_length() - 1
+    initial_courts = min(court_count, organizer_capacity)
+    useful_openings = min(final_count, max(0, court_count - initial_courts))
+    for horizon in range(1, match_count + 1):
+        if horizon < earliest_final_section and useful_openings:
+            continue
+        for opening_sections in combinations_with_replacement(
+            range(earliest_final_section, horizon + 1),
+            useful_openings,
+        ):
+            if any(
+                opening_sections.count(section) > organizer_capacity
+                for section in set(opening_sections)
+            ):
+                continue
+            capacity = initial_courts * horizon + sum(
+                horizon - opening_section + 1 for opening_section in opening_sections
             )
-            opened_finals = final_count - unopened_by_final
-            newly_opened = min(
-                organizer_capacity,
-                unopened_by_final,
-                court_count - active_courts,
-                max(0, maximum_ready_finals - opened_finals),
-            )
-            active_courts += newly_opened
-            unopened_by_final -= newly_opened
-        capacity += active_courts
-        capacity_by_section.append(capacity)
-    return horizon
+            if capacity < match_count:
+                continue
+            deadlines_fit = True
+            for section in range(1, horizon + 1):
+                required = 0
+                for opening_section in opening_sections:
+                    if opening_section <= section:
+                        required += 1
+                    for round_no in range(1, depth):
+                        deadline = opening_section - 2 * (depth - round_no)
+                        if deadline <= section:
+                            required += pool_size // (2**round_no)
+                available = initial_courts * section + sum(
+                    max(0, section - opening_section + 1) for opening_section in opening_sections
+                )
+                if required > available:
+                    deadlines_fit = False
+                    break
+            if deadlines_fit:
+                return horizon
+    return match_count
 
 
 def topology_keys(topology: Topology) -> tuple[PlacementTemplateKey, ...]:

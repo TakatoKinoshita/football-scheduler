@@ -198,14 +198,21 @@ def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() 
 
 
 @pytest.mark.parametrize(
-    ("pool_count", "pool_size", "court_count", "expected"),
-    ((3, 8, 2, 22), (3, 8, 3, 18), (2, 16, 2, 40)),
+    ("pool_count", "pool_size", "court_count", "capacity_expected", "bound_expected"),
+    (
+        (2, 4, 2, 6, 6),
+        (3, 8, 2, 22, 22),
+        (3, 8, 3, 19, 19),
+        (4, 8, 3, 23, 23),
+        (2, 16, 2, 40, 40),
+    ),
 )
 def test_strict_capacity_bound_delays_new_courts_until_finals(
     pool_count: int,
     pool_size: int,
     court_count: int,
-    expected: int,
+    capacity_expected: int,
+    bound_expected: int,
 ) -> None:
     match_count = pool_count * pool_size * (pool_size.bit_length() - 1) // 2
     dependency_bound = (pool_size.bit_length() - 1) * 2 - 1
@@ -220,7 +227,7 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
             earliest_final_section=earliest_final,
             ancestor_matches_per_final=pool_size - 2,
         )
-        == expected
+        == capacity_expected
     )
     key = PlacementTemplateKey(
         pool_count=pool_count,
@@ -230,8 +237,53 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
         day2_fallback=Day2Fallback.STRICT,
     )
     assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
+        bound_expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("pool_count", "pool_size", "court_count", "organizer_capacity", "expected"),
+    (
+        (2, 4, 2, 1, 5),
+        (3, 8, 4, 1, 11),
+        (4, 8, 3, 1, 17),
+        (2, 16, 2, 1, 33),
+    ),
+)
+def test_organizer_bound_accounts_for_opening_new_courts(
+    pool_count: int,
+    pool_size: int,
+    court_count: int,
+    organizer_capacity: int,
+    expected: int,
+) -> None:
+    key = PlacementTemplateKey(
+        pool_count=pool_count,
+        pool_size=pool_size,
+        court_count=court_count,
+        organizer_capacity=organizer_capacity,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+
+    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
         expected
     )
+
+
+def test_dense_strict_candidate_reaches_the_proven_opening_bound() -> None:
+    key = PlacementTemplateKey(
+        pool_count=3,
+        pool_size=8,
+        court_count=4,
+        organizer_capacity=1,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+
+    entry = generate_template_entry(key, solver=solver)
+
+    assert entry.used_sections == 18
+    assert entry.objectives[0].optimality_proven is True
 
 
 def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(

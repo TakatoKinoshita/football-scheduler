@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import time
 from importlib.metadata import version
+from itertools import combinations_with_replacement
 from time import perf_counter
 from typing import Annotated, Any, Literal, Self
 
@@ -768,6 +769,342 @@ def _generate_day2_schedule_with_solver(
     )
 
 
+def _finalize_fixed_horizon_candidate(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+    slots: tuple[Slot, ...],
+    wall_time_seconds: float,
+) -> Day2Schedule | None:
+    assignments, invalid_reasons = _assign_referees(data, path_model, slots)
+    slots = tuple(
+        slot.model_copy(update={"referee_assignment": assignments.get(slot.match_id)})
+        if slot.match_id is not None
+        else slot
+        for slot in slots
+    )
+    organizer_by_section = Counter(
+        slot.section_no
+        for slot in slots
+        if slot.match_id is not None
+        and slot.referee_assignment is not None
+        and slot.referee_assignment.kind is RefereeKind.ORGANIZER
+    )
+    capacity_overruns = {
+        section: count
+        for section, count in organizer_by_section.items()
+        if count > data.referees.organizer_capacity
+    }
+    strict_invalid = bool(invalid_reasons) and (data.referees.day2_fallback is Day2Fallback.STRICT)
+    if strict_invalid or capacity_overruns:
+        return None
+
+    audit_model, audit_variables = _build_cp_model(data, path_model, horizon)
+    match_index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    court_index_by_id = {court.id: index for index, court in enumerate(data.courts)}
+    occupied_coordinates = {
+        (
+            match_index_by_id[slot.match_id],
+            slot.section_no - 1,
+            court_index_by_id[slot.court_id],
+        )
+        for slot in slots
+        if slot.match_id is not None
+    }
+    for coordinate, variable in audit_variables.placement.items():
+        audit_model.add(variable == int(coordinate in occupied_coordinates))
+    audit_solver = _configured_solver(
+        min(10.0, data.solver.max_time_seconds),
+        data.random_seed,
+    )
+    audit_status = _status(audit_solver.solve(audit_model))
+    total_wall_time = wall_time_seconds + audit_solver.wall_time
+    if audit_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        return None
+    layout = _SolvedLayout(
+        solver=audit_solver,
+        status=SolverStatus.FEASIBLE,
+        wall_time_seconds=total_wall_time,
+        optimized_objectives=("used_sections",),
+        primary_bound=float(horizon),
+    )
+    routes = _team_routes(path_model, slots)
+    metrics = _audit_metrics(
+        data,
+        path_model,
+        slots,
+        routes,
+        layout,
+        audit_variables,
+    )
+    return Day2Schedule(
+        participant_resolution=data.tournament_plan.participant_resolution,
+        status=(SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE),
+        tournament_matches=path_model.matches,
+        slots=slots,
+        section_timings=section_timings(data.day, horizon),
+        expected_end_time=expected_end_time(data.day, horizon),
+        team_schedules=routes,
+        metrics=metrics,
+        diagnostics=(
+            ()
+            if metrics.optimality_proven
+            else (
+                Diagnostic(
+                    code="OPTIMALITY_NOT_PROVEN",
+                    message="実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。",
+                ),
+            )
+        ),
+    )
+
+
+def _dense_template_candidate(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+) -> tuple[tuple[Slot, ...], float] | None:
+    """飽和する最小horizonを、空きのない順列モデルで構成する。"""
+
+    common_contract = (
+        data.referees.organizer_capacity >= 1
+        and len(data.tournament_plan.pools) >= 2
+        and len({pool.participant_count for pool in data.tournament_plan.pools}) == 1
+        and len(path_model.matches) >= 8
+    )
+    if not common_contract:
+        return None
+
+    pool_count = len(data.tournament_plan.pools)
+    pool_size = data.tournament_plan.pools[0].participant_count
+    fixed_final_coordinates: dict[int, tuple[int, int]] = {}
+    organizer_opening_coordinates: dict[int, list[tuple[int, int]]] = {}
+    if data.referees.day2_fallback is Day2Fallback.STRICT:
+        initial_courts = min(len(data.courts), data.referees.organizer_capacity)
+        depth = pool_size.bit_length() - 1
+        useful_openings = min(
+            pool_count,
+            max(0, len(data.courts) - initial_courts),
+        )
+        earliest_final = max(
+            2 * depth - 1,
+            (pool_size - 2 + data.referees.organizer_capacity - 1)
+            // data.referees.organizer_capacity
+            + 2,
+        )
+        opening_sections: tuple[int, ...] | None = None
+        for candidate in combinations_with_replacement(
+            range(earliest_final, horizon + 1),
+            useful_openings,
+        ):
+            if any(
+                candidate.count(section) > data.referees.organizer_capacity
+                for section in set(candidate)
+            ):
+                continue
+            capacity = initial_courts * horizon + sum(
+                horizon - section + 1 for section in candidate
+            )
+            if capacity != len(path_model.matches):
+                continue
+            if all(
+                sum(
+                    (
+                        int(opening <= section)
+                        + sum(
+                            pool_size // (2**round_no)
+                            for round_no in range(1, depth)
+                            if opening - 2 * (depth - round_no) <= section
+                        )
+                    )
+                    for opening in candidate
+                )
+                <= initial_courts * section
+                + sum(max(0, section - opening + 1) for opening in candidate)
+                for section in range(1, horizon + 1)
+            ):
+                opening_sections = candidate
+                break
+        if opening_sections is None:
+            return None
+        active_coordinates = [
+            (section, court_index)
+            for court_index in range(initial_courts)
+            for section in range(horizon)
+        ] + [
+            (section, court_index)
+            for court_index, opening_section in enumerate(
+                opening_sections,
+                initial_courts,
+            )
+            for section in range(opening_section - 1, horizon)
+        ]
+        non_primary_finals = list(path_model.final_indexes[1:])
+        if not opening_sections:
+            opening_finals: list[int] = []
+        elif opening_sections[-1] == horizon:
+            opening_finals = [
+                *non_primary_finals[: len(opening_sections) - 1],
+                path_model.primary_final_index,
+            ]
+        elif len(opening_sections) <= len(non_primary_finals):
+            opening_finals = non_primary_finals[: len(opening_sections)]
+        else:
+            return None
+        fixed_final_coordinates.update(
+            {
+                final_index: (opening_section - 1, court_index)
+                for final_index, (court_index, opening_section) in zip(
+                    opening_finals,
+                    enumerate(opening_sections, initial_courts),
+                    strict=True,
+                )
+            }
+        )
+    elif data.referees.day2_fallback is Day2Fallback.ORGANIZER:
+        active_court_count = min(
+            len(data.courts),
+            horizon * data.referees.organizer_capacity,
+        )
+        active_coordinates = [
+            (section, court_index)
+            for court_index in range(active_court_count)
+            for section in range(
+                court_index // data.referees.organizer_capacity,
+                horizon,
+            )
+        ]
+        surplus = len(active_coordinates) - len(path_model.matches)
+        if not 0 <= surplus < active_court_count:
+            return None
+        removed = {
+            (horizon - 1, court_index)
+            for court_index in range(active_court_count - surplus, active_court_count)
+        }
+        active_coordinates = [
+            coordinate for coordinate in active_coordinates if coordinate not in removed
+        ]
+        for court_index in range(active_court_count):
+            court_coordinates = [
+                coordinate for coordinate in active_coordinates if coordinate[1] == court_index
+            ]
+            if court_coordinates:
+                first = min(court_coordinates)
+                organizer_opening_coordinates.setdefault(first[0], []).append(first)
+    else:
+        return None
+    active_coordinates.sort()
+    model = cp_model.CpModel()
+    match_count = len(path_model.matches)
+    match_at_slot = [
+        model.new_int_var(0, match_count - 1, f"dense_slot_{slot}") for slot in range(match_count)
+    ]
+    slot_by_match = [
+        model.new_int_var(0, match_count - 1, f"dense_match_{match}")
+        for match in range(match_count)
+    ]
+    model.add_inverse(match_at_slot, slot_by_match)
+    slot_sections = [section + 1 for section, _court in active_coordinates]
+    section_by_match = [
+        model.new_int_var(1, horizon, f"dense_section_{match}") for match in range(match_count)
+    ]
+    for match_index in range(match_count):
+        model.add_element(
+            slot_by_match[match_index],
+            slot_sections,
+            section_by_match[match_index],
+        )
+
+    index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
+        target = index_by_id[match_id]
+        for dependency_id in sorted(dependency_ids):
+            model.add(section_by_match[target] >= section_by_match[index_by_id[dependency_id]] + 2)
+    for left, right in sorted(path_model.conflict_pairs):
+        distance = model.new_int_var(0, horizon - 1, f"dense_gap_{left}_{right}")
+        model.add_abs_equality(
+            distance,
+            section_by_match[left] - section_by_match[right],
+        )
+        model.add(distance >= 2)
+
+    for final_index, coordinate in fixed_final_coordinates.items():
+        model.add(slot_by_match[final_index] == active_coordinates.index(coordinate))
+    model.add(section_by_match[path_model.primary_final_index] == horizon)
+    final_in_section: dict[tuple[int, int], cp_model.IntVar] = {}
+    for section in range(1, horizon + 1):
+        for final_index in path_model.final_indexes:
+            present = model.new_bool_var(f"dense_final_{final_index}_s{section}")
+            final_in_section[final_index, section] = present
+            model.add(section_by_match[final_index] == section).only_enforce_if(present)
+            model.add(section_by_match[final_index] != section).only_enforce_if(present.negated())
+        model.add(
+            sum(final_in_section[final_index, section] for final_index in path_model.final_indexes)
+            <= data.referees.organizer_capacity
+        )
+    for section, coordinates in organizer_opening_coordinates.items():
+        opening_slot_indexes = [active_coordinates.index(coordinate) for coordinate in coordinates]
+        final_uses_opening: dict[int, cp_model.IntVar] = {}
+        for final_index in path_model.final_indexes:
+            opening_matches: list[cp_model.IntVar] = []
+            for slot_index in opening_slot_indexes:
+                occupies_opening = model.new_bool_var(
+                    f"dense_final_{final_index}_opening_{slot_index}"
+                )
+                model.add(slot_by_match[final_index] == slot_index).only_enforce_if(
+                    occupies_opening
+                )
+                model.add(slot_by_match[final_index] != slot_index).only_enforce_if(
+                    occupies_opening.negated()
+                )
+                opening_matches.append(occupies_opening)
+            uses_opening = model.new_bool_var(f"dense_final_{final_index}_opens_s{section + 1}")
+            model.add(uses_opening == sum(opening_matches))
+            final_uses_opening[final_index] = uses_opening
+
+        extra_finals: list[cp_model.IntVar] = []
+        for final_index in path_model.final_indexes:
+            extra = model.new_bool_var(f"dense_final_{final_index}_extra_organizer_s{section + 1}")
+            present = final_in_section[final_index, section + 1]
+            uses_opening = final_uses_opening[final_index]
+            model.add(extra <= present)
+            model.add(extra + uses_opening <= 1)
+            model.add(extra >= present - uses_opening)
+            extra_finals.append(extra)
+        model.add(len(coordinates) + sum(extra_finals) <= data.referees.organizer_capacity)
+
+    solver = _configured_solver(
+        min(60.0, data.solver.max_time_seconds),
+        data.random_seed,
+    )
+    if match_count >= 64:
+        solver.parameters.cp_model_presolve = False
+    status = _status(solver.solve(model))
+    if status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        return None
+
+    match_by_coordinate = {
+        coordinate: solver.value(match_at_slot[slot_index])
+        for slot_index, coordinate in enumerate(active_coordinates)
+    }
+    slots = tuple(
+        Slot(
+            day_id=data.day.id,
+            section_no=section + 1,
+            court_id=court.id,
+            match_id=(
+                path_model.matches[match_by_coordinate[section, court_index]].id
+                if (section, court_index) in match_by_coordinate
+                else None
+            ),
+            referee_assignment=None,
+        )
+        for section in range(horizon)
+        for court_index, court in enumerate(data.courts)
+    )
+    return slots, solver.wall_time
+
+
 def _generate_day2_schedule_at_fixed_horizon(
     data: Day2ScheduleRequest,
     horizon: int,
@@ -779,12 +1116,26 @@ def _generate_day2_schedule_at_fixed_horizon(
     """
 
     path_model = _build_path_model(data.tournament_plan)
+    dense_candidate = _dense_template_candidate(data, path_model, horizon)
+    if dense_candidate is not None:
+        dense_slots, dense_wall_time = dense_candidate
+        finalized = _finalize_fixed_horizon_candidate(
+            data,
+            path_model,
+            horizon,
+            dense_slots,
+            dense_wall_time,
+        )
+        if finalized is not None:
+            return finalized
+
     started = perf_counter()
     model, variables = _build_cp_model(
         data,
         path_model,
         horizon,
         exact_referee_constraints=True,
+        feasibility_only=True,
     )
     model.add(variables.used_sections == horizon)
     total_wall_time = 0.0
@@ -828,60 +1179,15 @@ def _generate_day2_schedule_at_fixed_horizon(
             )
 
         slots = _extract_slots(data, path_model, variables, solver)
-        assignments, invalid_reasons = _assign_referees(data, path_model, slots)
-        slots = tuple(
-            slot.model_copy(update={"referee_assignment": assignments.get(slot.match_id)})
-            if slot.match_id is not None
-            else slot
-            for slot in slots
+        candidate = _finalize_fixed_horizon_candidate(
+            data,
+            path_model,
+            horizon,
+            slots,
+            total_wall_time,
         )
-        organizer_by_section = Counter(
-            slot.section_no
-            for slot in slots
-            if slot.match_id is not None
-            and slot.referee_assignment is not None
-            and slot.referee_assignment.kind is RefereeKind.ORGANIZER
-        )
-        capacity_overruns = {
-            section: count
-            for section, count in organizer_by_section.items()
-            if count > data.referees.organizer_capacity
-        }
-        strict_invalid = bool(invalid_reasons) and (
-            data.referees.day2_fallback is Day2Fallback.STRICT
-        )
-        if not strict_invalid and not capacity_overruns:
-            layout = _SolvedLayout(
-                solver=solver,
-                status=SolverStatus.FEASIBLE,
-                wall_time_seconds=total_wall_time,
-                optimized_objectives=("used_sections",),
-                primary_bound=float(horizon),
-            )
-            routes = _team_routes(path_model, slots)
-            metrics = _audit_metrics(data, path_model, slots, routes, layout, variables)
-            return Day2Schedule(
-                participant_resolution=data.tournament_plan.participant_resolution,
-                status=(
-                    SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE
-                ),
-                tournament_matches=path_model.matches,
-                slots=slots,
-                section_timings=section_timings(data.day, horizon),
-                expected_end_time=expected_end_time(data.day, horizon),
-                team_schedules=routes,
-                metrics=metrics,
-                diagnostics=(
-                    ()
-                    if metrics.optimality_proven
-                    else (
-                        Diagnostic(
-                            code="OPTIMALITY_NOT_PROVEN",
-                            message="実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。",
-                        ),
-                    )
-                ),
-            )
+        if candidate is not None:
+            return candidate
 
         selected_variables = [
             variable
@@ -1153,6 +1459,7 @@ def _build_cp_model(
     horizon: int,
     *,
     exact_referee_constraints: bool = False,
+    feasibility_only: bool = False,
 ) -> tuple[cp_model.CpModel, _ModelVariables]:
     model = cp_model.CpModel()
     match_count, court_count = len(path_model.matches), len(data.courts)
@@ -1160,6 +1467,7 @@ def _build_cp_model(
     placement: dict[tuple[int, int, int], cp_model.IntVar] = {}
     match_in_section: dict[tuple[int, int], cp_model.IntVar] = {}
     match_on_court: dict[tuple[int, int], cp_model.IntVar] = {}
+    index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
     for match_index in range(match_count):
         for section in sections:
             section_var = model.new_bool_var(f"m{match_index}_s{section}")
@@ -1171,12 +1479,13 @@ def _build_cp_model(
                 court_vars.append(slot)
             model.add(sum(court_vars) == section_var)
         model.add(sum(match_in_section[match_index, section] for section in sections) == 1)
-        for court in courts:
-            court_var = model.new_bool_var(f"m{match_index}_c{court}")
-            match_on_court[match_index, court] = court_var
-            model.add(
-                court_var == sum(placement[match_index, section, court] for section in sections)
-            )
+        if not feasibility_only:
+            for court in courts:
+                court_var = model.new_bool_var(f"m{match_index}_c{court}")
+                match_on_court[match_index, court] = court_var
+                model.add(
+                    court_var == sum(placement[match_index, section, court] for section in sections)
+                )
 
     for section in sections:
         for court in courts:
@@ -1192,7 +1501,30 @@ def _build_cp_model(
     used_sections = model.new_int_var(1, horizon, "used_sections")
     model.add(used_sections == sum(active))
 
+    dependency_ancestors: dict[str, frozenset[str]] = {}
+
+    def ancestors(match_id: str) -> frozenset[str]:
+        cached = dependency_ancestors.get(match_id)
+        if cached is not None:
+            return cached
+        values: set[str] = set()
+        for dependency_id in sorted(path_model.dependencies.get(match_id, ())):
+            values.add(dependency_id)
+            values.update(ancestors(dependency_id))
+        result = frozenset(values)
+        dependency_ancestors[match_id] = result
+        return result
+
+    ordered_dependency_pairs = {
+        tuple(sorted((index_by_id[match.id], index_by_id[ancestor_id])))
+        for match in path_model.matches
+        for ancestor_id in ancestors(match.id)
+    }
     for left, right in sorted(path_model.conflict_pairs):
+        # 祖先・子孫は下の依存制約により2section以上離れるため、同じ
+        # conflict制約をsectionごとに重ねない。
+        if (left, right) in ordered_dependency_pairs:
+            continue
         for section in sections:
             model.add(match_in_section[left, section] + match_in_section[right, section] <= 1)
         for section in range(horizon - 1):
@@ -1208,7 +1540,6 @@ def _build_cp_model(
         referee_constraint_builder(model, placement, match_in_section, data, path_model, horizon)
 
     section_number: dict[int, cp_model.IntVar] = {}
-    index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
     for match_index in range(match_count):
         value = model.new_int_var(1, horizon, f"section_number_{match_index}")
         section_number[match_index] = value
@@ -1221,22 +1552,35 @@ def _build_cp_model(
         for dependency_id in sorted(dependency_ids):
             model.add(section_number[target] >= section_number[index_by_id[dependency_id]] + 2)
 
+    for earlier, later in zip(
+        path_model.final_indexes[1:-1],
+        path_model.final_indexes[2:],
+        strict=True,
+    ):
+        model.add(section_number[earlier] <= section_number[later])
+
     model.add(section_number[path_model.primary_final_index] == used_sections)
-    non_primary_final_gaps: list[cp_model.IntVar] = []
-    for final_index in path_model.final_indexes[1:]:
-        gap = model.new_int_var(0, horizon, f"final_gap_{final_index}")
-        model.add(gap == used_sections - section_number[final_index])
-        non_primary_final_gaps.append(gap)
-    non_primary_final_max_gap = model.new_int_var(0, horizon, "non_primary_final_max_gap")
-    non_primary_final_sum_gap = model.new_int_var(
-        0, horizon * max(1, len(non_primary_final_gaps)), "non_primary_final_sum_gap"
-    )
-    if non_primary_final_gaps:
-        model.add_max_equality(non_primary_final_max_gap, non_primary_final_gaps)
-        model.add(non_primary_final_sum_gap == sum(non_primary_final_gaps))
+    if feasibility_only:
+        non_primary_final_max_gap = model.new_constant(0)
+        non_primary_final_sum_gap = model.new_constant(0)
     else:
-        model.add(non_primary_final_max_gap == 0)
-        model.add(non_primary_final_sum_gap == 0)
+        non_primary_final_gaps: list[cp_model.IntVar] = []
+        for final_index in path_model.final_indexes[1:]:
+            gap = model.new_int_var(0, horizon, f"final_gap_{final_index}")
+            model.add(gap == used_sections - section_number[final_index])
+            non_primary_final_gaps.append(gap)
+        non_primary_final_max_gap = model.new_int_var(0, horizon, "non_primary_final_max_gap")
+        non_primary_final_sum_gap = model.new_int_var(
+            0,
+            horizon * max(1, len(non_primary_final_gaps)),
+            "non_primary_final_sum_gap",
+        )
+        if non_primary_final_gaps:
+            model.add_max_equality(non_primary_final_max_gap, non_primary_final_gaps)
+            model.add(non_primary_final_sum_gap == sum(non_primary_final_gaps))
+        else:
+            model.add(non_primary_final_max_gap == 0)
+            model.add(non_primary_final_sum_gap == 0)
 
     # 第1セクションは全試合が主催者審判になる。
     model.add(
@@ -1248,6 +1592,22 @@ def _build_cp_model(
         model.add(
             sum(match_in_section[index, section] for index in final_indexes)
             <= data.referees.organizer_capacity
+        )
+
+    if feasibility_only:
+        zero = model.new_constant(0)
+        return model, _ModelVariables(
+            placement=placement,
+            match_in_section=match_in_section,
+            match_on_court=match_on_court,
+            section_number=section_number,
+            active_sections=active,
+            used_sections=used_sections,
+            maximum_wait=zero,
+            non_primary_final_max_gap=non_primary_final_max_gap,
+            non_primary_final_sum_gap=non_primary_final_sum_gap,
+            court_change_count=zero,
+            court_usage_difference=zero,
         )
 
     wait_vars: list[cp_model.IntVar] = []
@@ -1329,6 +1689,24 @@ def _add_strict_referee_constraints(
     )
     match_indexes = range(len(path_model.matches))
     court_indexes = range(len(data.courts))
+    # strictでは入力コート間に規則上の差がない。最初に使用される順へ
+    # canonical化して、同一配置のコート置換を探索しない。
+    opened: dict[tuple[int, int], cp_model.IntVar] = {}
+    for court_index in court_indexes:
+        for section in range(horizon):
+            occupied = sum(placement[index, section, court_index] for index in match_indexes)
+            current = model.new_bool_var(f"strict_opened_s{section}_c{court_index}")
+            opened[section, court_index] = current
+            if section == 0:
+                model.add(current == occupied)
+            else:
+                previous = opened[section - 1, court_index]
+                model.add(current >= previous)
+                model.add(current >= occupied)
+                model.add(current <= previous + occupied)
+            if court_index > 0:
+                model.add(current <= opened[section, court_index - 1])
+
     last_match: dict[tuple[int, int, int], cp_model.IntVar] = {}
     for match_index in match_indexes:
         for court_index in court_indexes:
