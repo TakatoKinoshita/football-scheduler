@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test } from "@playwright/test";
 
 import {
@@ -15,6 +17,18 @@ async function openScheduleViewFixture(page: import("@playwright/test").Page): P
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, fixture);
+}
+
+async function downloadTournamentDocument(
+  page: import("@playwright/test").Page,
+): Promise<{ tournament: { input: unknown; result: unknown } }> {
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "ファイルへ保存" }).click();
+  const downloadPath = await (await downloadPromise).path();
+  expect(downloadPath).not.toBeNull();
+  return JSON.parse(await readFile(downloadPath!, "utf8")) as {
+    tournament: { input: unknown; result: unknown };
+  };
 }
 
 test("1日目は時間順を既定にし、コート別への切替を再読込み後も保持する", async ({
@@ -416,6 +430,119 @@ test("mirroredな8チームは上下とも本番水平版となり、A4縦と局
   )).toHaveCount(2);
 });
 
+test("水平・垂直の共有選択を端末に保存し、再描画・JSON・印刷へ安全に反映する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const fixture = horizontalBracketTournamentFixture(8, { withTournamentResults: true });
+  await importDocument(page, fixture);
+
+  const toggle = page.locator("#tournament-bracket-view-toggle");
+  const horizontal = toggle.getByLabel("水平版");
+  const vertical = toggle.getByLabel("垂直版");
+  await expect(toggle).toBeEnabled();
+  await expect(horizontal).toBeChecked();
+  await horizontal.focus();
+  await horizontal.press("ArrowRight");
+  await expect(vertical).toBeChecked();
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.vertical",
+  )).toHaveCount(2);
+  await expect(page.locator(
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="upper"]',
+  )).toHaveCount(1);
+  await expect(page.locator(
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="lower"]',
+  )).toHaveCount(1);
+  expect(await page.evaluate(() =>
+    localStorage.getItem("football-scheduler:tournament-bracket-view:v1")
+  )).toBe("vertical");
+  await expect(page.locator(
+    '#tournament-plan-view .bracket-exploration-match[aria-label*="PK 4-3"]',
+  )).toHaveCount(1);
+
+  const otherDocument = horizontalBracketTournamentFixture(16);
+  await importDocument(page, otherDocument);
+  await expect(page.locator("#tournament-bracket-view-toggle").getByLabel("垂直版"))
+    .toBeChecked();
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.vertical",
+  )).toHaveCount(2);
+
+  const verticalExport = await downloadTournamentDocument(page);
+  await page.locator("#tournament-bracket-view-toggle").getByLabel("水平版").check();
+  const horizontalExport = await downloadTournamentDocument(page);
+  expect(horizontalExport.tournament.input).toEqual(verticalExport.tournament.input);
+  expect(horizontalExport.tournament.result).toEqual(verticalExport.tournament.result);
+  await page.locator("#tournament-bracket-view-toggle").getByLabel("垂直版").check();
+
+  await page.evaluate(() => {
+    document.body.dataset.printScope = "day2";
+  });
+  await page.emulateMedia({ media: "print" });
+  await expect(toggle).toBeHidden();
+  expect(await page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.vertical",
+  ).evaluateAll((figures) => figures.map((figure) => getComputedStyle(figure).page)))
+    .toEqual(["bracket", "bracket"]);
+  await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => {
+    document.body.dataset.printScope = "bracket";
+  });
+  await page.emulateMedia({ media: "print" });
+  expect(await page.locator("#tournament-plan-view .tournament-pool").evaluateAll(
+    (pools) => pools.map((pool) => getComputedStyle(pool).page),
+  )).toEqual(["bracket", "bracket"]);
+  await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => {
+    delete document.body.dataset.printScope;
+  });
+
+  await page.reload();
+  await expect(page.locator("#save-state")).not.toHaveText("読み込み中…");
+  await expect(page.locator("#tournament-bracket-view-toggle").getByLabel("垂直版"))
+    .toBeChecked();
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket.exploration.vertical",
+  )).toHaveCount(2);
+});
+
+test("対応・非対応プールを個別に判定し、全プール非対応では切替を無効化する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  const mixed = horizontalBracketTournamentFixture(8);
+  const lower = mixed.tournament.result.tournament_plan.lower as Record<string, unknown>;
+  delete lower.logical_layout;
+  await importDocument(page, mixed);
+
+  const toggle = page.locator("#tournament-bracket-view-toggle");
+  await expect(toggle).toBeEnabled();
+  await toggle.getByLabel("垂直版").check();
+  await expect(page.locator(
+    '#tournament-plan-view .tournament-bracket.exploration.vertical[data-pool="upper"]',
+  )).toHaveCount(1);
+  await expect(page.locator(
+    '#tournament-plan-view .tournament-bracket[data-pool="lower"]:not(.exploration)',
+  )).toHaveCount(1);
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-pool .tournament-bracket-fallback",
+  )).toHaveText(/配置情報/u);
+
+  await importDocument(page, scheduleViewTournamentFixture());
+  await expect(page.locator("#tournament-bracket-view-toggle")).toHaveAttribute("disabled", "");
+  await expect(page.locator("#tournament-bracket-view-toggle").getByLabel("垂直版"))
+    .toBeChecked();
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket-fallback",
+  )).toHaveCount(2);
+  await expect(page.locator(
+    "#tournament-plan-view .tournament-bracket-fallback",
+  ).first()).toContainText("参加数");
+});
+
 test("mirroredな16チームは上位・下位を独立に本番水平版へ選択する", async ({
   page,
 }) => {
@@ -480,6 +607,11 @@ for (const viewport of [
     expect(secondCourtBox!.y).toBeGreaterThanOrEqual(firstCourtBox!.y + firstCourtBox!.height);
 
     for (const label of await page.locator("#day2-schedule-view-toggle label").all()) {
+      const box = await label.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+    for (const label of await page.locator("#tournament-bracket-view-toggle label").all()) {
       const box = await label.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(44);

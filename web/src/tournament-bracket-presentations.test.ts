@@ -10,7 +10,12 @@ import { isTournamentBracketExplorationModel } from "./tournament-bracket-explor
 import { renderTournamentBracketExploration } from "./tournament-bracket-exploration-renderer";
 import {
   defaultTournamentBracketPresentation,
+  loadTournamentBracketViewMode,
+  saveTournamentBracketViewMode,
+  selectTournamentBracketPresentation,
+  TOURNAMENT_BRACKET_VIEW_STORAGE_KEY,
   tournamentBracketPresentations,
+  type TournamentBracketViewStorage,
 } from "./tournament-bracket-presentations";
 import type { JsonObject } from "./types";
 
@@ -97,6 +102,45 @@ describe("本番トーナメント表presentation", () => {
       .toBe("horizontal");
     expect(defaultTournamentBracketPresentation(inputForPlan(mixed, "lower")).id)
       .toBe("standard");
+  });
+
+  it("mirroredな8・16チームで端末の水平・垂直選択を使う", () => {
+    for (const plan of [fixturePlan(upperEightJson), fixturePlan(upperSixteenJson)]) {
+      expect(selectTournamentBracketPresentation(inputForPlan(plan), "horizontal"))
+        .toEqual({ presentation: tournamentBracketPresentations.horizontal });
+      expect(selectTournamentBracketPresentation(inputForPlan(plan), "vertical"))
+        .toEqual({ presentation: tournamentBracketPresentations.vertical });
+    }
+
+    const provisional = fixturePlan(upperEightJson);
+    provisional.participant_resolution = "provisional";
+    expect(selectTournamentBracketPresentation(inputForPlan(provisional), "vertical"))
+      .toEqual({ presentation: tournamentBracketPresentations.vertical });
+  });
+
+  it("非対応形状を理由付きで標準版へフォールバックする", () => {
+    const unsupportedCount = fixturePlan(upperEightJson);
+    (unsupportedCount.upper as JsonObject).participant_count = 7;
+    (unsupportedCount.upper as JsonObject).logical_layout = null;
+    expect(selectTournamentBracketPresentation(inputForPlan(unsupportedCount), "vertical"))
+      .toMatchObject({
+        presentation: tournamentBracketPresentations.standard,
+        fallbackReason: expect.stringContaining("参加数"),
+      });
+
+    const missingLayout = fixturePlan(upperEightJson);
+    delete (missingLayout.upper as JsonObject).logical_layout;
+    expect(selectTournamentBracketPresentation(inputForPlan(missingLayout), "horizontal"))
+      .toMatchObject({
+        presentation: tournamentBracketPresentations.standard,
+        fallbackReason: expect.stringContaining("配置情報"),
+      });
+
+    expect(selectTournamentBracketPresentation(inputForPlan(legacyPermutedPlan()), "vertical"))
+      .toMatchObject({
+        presentation: tournamentBracketPresentations.standard,
+        fallbackReason: expect.stringContaining("対応形状"),
+      });
   });
 
   it("不正なlogical_layoutを標準版へ黙ってフォールバックしない", () => {
@@ -211,5 +255,38 @@ describe("本番トーナメント表presentation", () => {
     expect(visibleLabels).not.toContain("PK");
     expect(visibleLabels).not.toContain("勝者");
     expect(visibleLabels).not.toContain("1位確定");
+  });
+});
+
+describe("トーナメント表表示設定の端末保存", () => {
+  it("水平版を既定にし、選択を大会データと別のキーへ保存する", () => {
+    const values = new Map<string, string>();
+    const storage: TournamentBracketViewStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+
+    expect(loadTournamentBracketViewMode(storage)).toBe("horizontal");
+    expect(saveTournamentBracketViewMode("vertical", storage)).toBe(true);
+    expect(values).toEqual(new Map([[TOURNAMENT_BRACKET_VIEW_STORAGE_KEY, "vertical"]]));
+    expect(loadTournamentBracketViewMode(storage)).toBe("vertical");
+    values.set(TOURNAMENT_BRACKET_VIEW_STORAGE_KEY, "invalid");
+    expect(loadTournamentBracketViewMode(storage)).toBe("horizontal");
+  });
+
+  it("storageの読書き例外を画面操作へ伝播させない", () => {
+    const failingStorage: TournamentBracketViewStorage = {
+      getItem: () => {
+        throw new DOMException("blocked");
+      },
+      setItem: () => {
+        throw new DOMException("blocked");
+      },
+    };
+
+    expect(loadTournamentBracketViewMode(failingStorage)).toBe("horizontal");
+    expect(saveTournamentBracketViewMode("vertical", failingStorage)).toBe(false);
   });
 });

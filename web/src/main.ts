@@ -55,7 +55,12 @@ import {
   TournamentBracketError,
   type TournamentBracketScheduleDetails,
 } from "./tournament-bracket";
-import { defaultTournamentBracketPresentation } from "./tournament-bracket-presentations";
+import {
+  loadTournamentBracketViewMode,
+  saveTournamentBracketViewMode,
+  selectTournamentBracketPresentation,
+  type TournamentBracketViewMode,
+} from "./tournament-bracket-presentations";
 import {
   bindTournamentParticipants,
   tournamentParticipantResolution,
@@ -579,12 +584,42 @@ function createScheduleViewToggle(
   return fieldset;
 }
 
+function createTournamentBracketViewToggle(
+  mode: TournamentBracketViewMode,
+  disabled: boolean,
+  onChange: (mode: TournamentBracketViewMode) => void,
+): HTMLFieldSetElement {
+  const fieldset = window.document.createElement("fieldset");
+  fieldset.id = "tournament-bracket-view-toggle";
+  fieldset.className = "schedule-view-toggle tournament-bracket-view-toggle no-print";
+  fieldset.disabled = disabled;
+  appendTextElement(fieldset, "legend", "トーナメント表の表示");
+  for (const [value, label] of [
+    ["horizontal", "水平版"],
+    ["vertical", "垂直版"],
+  ] as const) {
+    const wrapper = window.document.createElement("label");
+    const input = window.document.createElement("input");
+    input.type = "radio";
+    input.name = "tournament-bracket-view";
+    input.value = value;
+    input.checked = mode === value;
+    input.addEventListener("change", () => {
+      if (input.checked) onChange(value);
+    });
+    wrapper.append(input, window.document.createTextNode(label));
+    fieldset.append(wrapper);
+  }
+  return fieldset;
+}
+
 const storage = new TournamentStorage();
 const autosave = new AutosaveController((value) => storage.saveDraft(value));
 let documentState = createTournamentDocument();
 let currentStep: WizardStep = 1;
 let day1ScheduleViewMode = loadScheduleViewMode("day1");
 let day2ScheduleViewMode = loadScheduleViewMode("day2");
+let tournamentBracketViewMode = loadTournamentBracketViewMode();
 let legacyCompatibility = false;
 let organizerCapacityTouched = false;
 let turnstileToken = "";
@@ -1735,6 +1770,10 @@ function renderTournamentPlan(
         [...scheduleByMatchId].map(([matchId, details]) => [matchId, details.displayNumber]),
       );
 
+  const poolSections: HTMLElement[] = [];
+  const renderBrackets: Array<() => void> = [];
+  let selectablePoolCount = 0;
+
   for (const [field, heading] of [
     ["upper", "上位トーナメント"],
     ["lower", "下位トーナメント"],
@@ -1750,28 +1789,57 @@ function renderTournamentPlan(
     );
 
     if (tournamentBracketVisible) {
+      const bracketHost = window.document.createElement("div");
+      bracketHost.className = "tournament-bracket-host";
+      poolSection.append(bracketHost);
+      const bracketInput = {
+        plan,
+        pool: field,
+        teamNames,
+        ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
+        results,
+        ...(finalStandings === undefined ? {} : { finalStandings }),
+      };
       try {
-        const bracketInput = {
-          plan,
-          pool: field,
-          teamNames,
-          ...(scheduleByMatchId === undefined ? {} : { scheduleByMatchId }),
-          results,
-          ...(finalStandings === undefined ? {} : { finalStandings }),
-        };
-        const presentation = defaultTournamentBracketPresentation(bracketInput);
-        const bracketModel = buildTournamentBracketModel(bracketInput, presentation.layout);
-        poolSection.append(presentation.render(bracketModel, `${heading}表`));
-      } catch (error) {
-        appendTextElement(
-          poolSection,
-          "p",
-          error instanceof TournamentBracketError
-            ? `ブラケット図を表示できませんでした。${error.message} 画面を再読み込みしてください。`
-            : "ブラケット図を表示できませんでした。画面を再読み込みしてください。",
-          "notice tournament-bracket-error",
+        const selection = selectTournamentBracketPresentation(
+          bracketInput,
+          tournamentBracketViewMode,
         );
+        if (selection.fallbackReason === undefined) selectablePoolCount += 1;
+      } catch {
+        // 不正な論理配置は、下の描画処理で利用者向けエラーとして表示する。
       }
+      renderBrackets.push(() => {
+        bracketHost.replaceChildren();
+        try {
+          const selection = selectTournamentBracketPresentation(
+            bracketInput,
+            tournamentBracketViewMode,
+          );
+          if (selection.fallbackReason !== undefined) {
+            appendTextElement(
+              bracketHost,
+              "p",
+              selection.fallbackReason,
+              "notice tournament-bracket-fallback",
+            );
+          }
+          const bracketModel = buildTournamentBracketModel(
+            bracketInput,
+            selection.presentation.layout,
+          );
+          bracketHost.append(selection.presentation.render(bracketModel, `${heading}表`));
+        } catch (error) {
+          appendTextElement(
+            bracketHost,
+            "p",
+            error instanceof TournamentBracketError
+              ? `ブラケット図を表示できませんでした。${error.message} 画面を再読み込みしてください。`
+              : "ブラケット図を表示できませんでした。画面を再読み込みしてください。",
+            "notice tournament-bracket-error",
+          );
+        }
+      });
     }
 
     const placementDisclosure = createResultDisclosure(
@@ -1788,8 +1856,22 @@ function renderTournamentPlan(
     }
     placementDisclosure.append(placements);
     poolSection.append(placementDisclosure);
-    section.append(poolSection);
+    poolSections.push(poolSection);
   }
+
+  if (tournamentBracketVisible && poolSections.length > 0) {
+    section.append(createTournamentBracketViewToggle(
+      tournamentBracketViewMode,
+      selectablePoolCount === 0,
+      (mode) => {
+        tournamentBracketViewMode = mode;
+        saveTournamentBracketViewMode(mode);
+        for (const renderBracket of renderBrackets) renderBracket();
+      },
+    ));
+  }
+  section.append(...poolSections);
+  for (const renderBracket of renderBrackets) renderBracket();
 
   for (const warning of asObjectArray(plan.warnings)) {
     appendTextElement(section, "p", String(warning.message ?? "組合せに注意事項があります。"), "notice");

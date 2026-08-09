@@ -60,6 +60,11 @@ body {
   margin-bottom: .8rem;
 }
 
+.preview-capture .tournament-bracket-scroll {
+  max-width: none;
+  overflow: visible;
+}
+
 .preview-error {
   padding: 1rem;
   border: 1px solid #a33;
