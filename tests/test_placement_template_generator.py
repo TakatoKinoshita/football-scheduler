@@ -155,21 +155,6 @@ def test_smallest_real_candidate_is_hydrated_and_independently_validated() -> No
     assert entry.sha256 == placement_entry_digest(entry)
 
 
-def test_strict_referee_supply_strengthens_the_proven_horizon_lower_bound() -> None:
-    key = PlacementTemplateKey(
-        pool_count=2,
-        pool_size=4,
-        court_count=3,
-        organizer_capacity=1,
-        day2_fallback=Day2Fallback.STRICT,
-    )
-
-    bounds = StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key)
-
-    # 8試合中2決勝以外の6試合は、第1sectionで開いた1コート列上に必要。
-    assert bounds.lower_horizon == 6
-
-
 def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(
     tmp_path: Path,
 ) -> None:

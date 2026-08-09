@@ -51,7 +51,7 @@ from football_scheduler.timekeeping import expected_end_time, section_timings
 from football_scheduler.tournament import generate_tournament_plan
 from football_scheduler.validator import validate_day2_schedule
 
-GENERATOR_VERSION = "placement-template-generator-v4"
+GENERATOR_VERSION = "placement-template-generator-v6"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"
@@ -130,13 +130,9 @@ class StabilizedPlacementTemplateSolver:
         slot_bound = 1 + math.ceil(max(0, match_count - first_section_capacity) / key.court_count)
         dependency_depth = key.pool_size.bit_length() - 1
         dependency_bound = dependency_depth * 2 - 1
-        strict_referee_bound = 0
-        if key.day2_fallback is Day2Fallback.STRICT:
-            final_count = key.pool_count
-            strict_referee_bound = math.ceil((match_count - final_count) / key.organizer_capacity)
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(
-            lower_horizon=max(slot_bound, dependency_bound, strict_referee_bound),
+            lower_horizon=max(slot_bound, dependency_bound),
             upper_horizon=match_count,
         )
 

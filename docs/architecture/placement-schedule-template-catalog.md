@@ -58,7 +58,8 @@ catalogの欠落、version不一致、digest不一致、canonical位置不整合
 各CP-SATは`num_search_workers=1`で実行する。通常は1トポロジーを1プロセスが担当し、独立した
 トポロジーを2〜3プロセスまで並列化する。中断後は`--resume`でdigest検証済みcheckpointを
 再利用する。同一コート数で理論下限が同じ場合は、より厳しい主催者能力・strict設定で下限を
-達成した配置を、hydrateと独立検証に合格したキーへ再利用する。
+達成した配置を、hydrateと独立検証に合格したキーへ再利用する。追加コートが未使用でも同じ
+下限を達成する場合は、コート使用差を再集計したうえでコート数が多いキーにも再利用できる。
 
 ```console
 uv run python scripts/generate_placement_templates.py --topology 2x4 --workers 1 --resume
@@ -75,6 +76,10 @@ generatorは理論下限から固定horizonを増やし、審判条件を満た�
 セクション数の最小性は必ず証明される。下位目的は非負下限0へ到達した辞書順の段階までを証明済み
 とし、最初の未証明段階以降は未証明として保存する。候補はcanonical位置から再度hydrateし、
 独立validatorに合格した場合だけcheckpointへatomicに保存する。
+
+strictでは、コートごとの直前実試合をsection間の状態としてCPモデル内で追跡する。直前試合の
+勝者が当該sectionの試合または他の審判候補と衝突する配置をモデル自身が除外するため、全候補を
+事後列挙しなくても固定horizonの実行不能をCP-SATの`INFEASIBLE`として証明できる。
 
 日程規則、canonical位置、template format、固定するOR-Tools条件を変えた場合は、rulesetまたは
 format versionを更新し、全shardを新規生成する。旧checkpointや一部shardを新rulesetへ混在させない。
