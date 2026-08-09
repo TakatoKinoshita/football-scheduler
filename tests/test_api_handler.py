@@ -120,6 +120,28 @@ def test_day2_schedule_success_returns_http_200(
     assert json.loads(response["body"])["participant_resolution"] == "provisional"
 
 
+def test_day2_creation_action_returns_both_results_with_http_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = {
+        "status": "OPTIMAL",
+        "tournament_plan": {"status": "COMPLETE"},
+        "day2_schedule": {"status": "OPTIMAL"},
+    }
+    monkeypatch.setattr(api_handler.application, "handle_request", lambda _: expected)
+
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"day2_creation"}',
+            headers={"x-turnstile-action": "create_day2"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == expected
+
+
 def test_tournament_results_action_returns_http_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,6 +297,26 @@ def test_turnstile_action_must_match_request_kind(
     assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
 
 
+def test_day2_creation_rejects_legacy_day2_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_handler.application,
+        "handle_request",
+        lambda _: pytest.fail("application must not run"),
+    )
+    response = api_handler.lambda_handler(
+        _event(
+            '{"request_kind":"day2_creation"}',
+            headers={"x-turnstile-action": "generate_day2_schedule"},
+        ),
+        object(),
+    )
+
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
+
+
 @pytest.mark.parametrize(
     ("code", "expected_status"),
     [
@@ -288,6 +330,7 @@ def test_turnstile_action_must_match_request_kind(
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),
         ("TOURNAMENT_REFEREE_UNAVAILABLE", 422),
+        ("DAY2_VALIDATION_FAILED", 500),
         ("SCHEDULE_GENERATION_FAILED", 500),
     ],
 )

@@ -15,6 +15,11 @@ export async function mockExternalServices(
       contentType: "application/javascript",
       body: `
         if (window.turnstile === undefined) {
+          window.__e2eTurnstileTokenCounter = 0;
+          function nextTurnstileToken() {
+            window.__e2eTurnstileTokenCounter += 1;
+            return "e2e-turnstile-token-" + window.__e2eTurnstileTokenCounter;
+          }
           window.turnstile = {
             render: function (element, options) {
               window.__e2eTurnstileOptions = options;
@@ -28,7 +33,7 @@ export async function mockExternalServices(
               element.append(marker);
               if (${completeTurnstile}) {
                 setTimeout(function () {
-                  options.callback("e2e-turnstile-token");
+                  options.callback(nextTurnstileToken());
                 }, 0);
               }
               return widgetId;
@@ -36,7 +41,7 @@ export async function mockExternalServices(
             reset: function (widgetId) {
               var options = window.__e2eTurnstileOptionsById[widgetId];
               setTimeout(function () {
-                options.callback("e2e-turnstile-token");
+                options.callback(nextTurnstileToken());
               }, 0);
             }
           };

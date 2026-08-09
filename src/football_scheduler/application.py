@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
 from pydantic import ValidationError
 
 from football_scheduler.day1_league import prepare_day1_league_schedule
+from football_scheduler.day2_creation import Day2CreationRequest
 from football_scheduler.day2_schedule import (
     Day2ScheduleError,
     Day2ScheduleRequest,
@@ -35,6 +36,7 @@ from football_scheduler.league_results import (
 from football_scheduler.solver import solve_schedule
 from football_scheduler.tournament import (
     TournamentGenerationError,
+    TournamentPlan,
     TournamentPlanRequest,
     generate_tournament_plan,
 )
@@ -86,41 +88,16 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
                 calculate_league_standings(LeagueStandingsRequest.model_validate(payload))
             )
         if payload.get("request_kind") == "tournament_plan":
-            _validate_tournament_plan_limits(payload)
-            return _to_json_object(
-                generate_tournament_plan(TournamentPlanRequest.model_validate(payload))
-            )
+            return _generate_tournament_plan_response(payload)
         if payload.get("request_kind") == "tournament_results":
             _validate_tournament_results_limits(payload)
             return _to_json_object(
                 calculate_tournament_standings(TournamentResultsRequest.model_validate(payload))
             )
+        if payload.get("request_kind") == "day2_creation":
+            return _generate_day2_creation_response(payload)
         if payload.get("request_kind") == "day2_schedule":
-            _validate_day2_schedule_limits(payload)
-            request_data = _apply_solver_time_limit(payload)
-            request = Day2ScheduleRequest.model_validate(request_data)
-            day1_document = _build_day1_source_validation_document(request_data)
-            day1_validation = _to_json_object(validate_schedule(day1_document))
-            if day1_validation.get("valid") is not True:
-                raise _RequestError(
-                    "DAY1_SCHEDULE_INVALID",
-                    "既存の1日目日程が大会規則の検証に合格しません。1日目日程を再作成してください。",
-                    diagnostics=list(day1_validation.get("diagnostics", [])),
-                )
-            schedule = generate_day2_schedule(request)
-            result_data = _to_json_object(schedule)
-            if result_data.get("status") not in {"OPTIMAL", "FEASIBLE"}:
-                return result_data
-            day2_document = _build_day2_validation_document(request_data, result_data)
-            validation = _to_json_object(validate_day2_schedule(day2_document))
-            integrated_validation = _integrated_validation(day1_validation, validation)
-            return _json_round_trip(
-                {
-                    **result_data,
-                    "validation": validation,
-                    "integrated_validation": integrated_validation,
-                }
-            )
+            return _generate_day2_schedule_response(payload)
 
         request_data, response_metadata, fallback_request_data = _resolve_request(payload)
         _validate_limits(request_data)
@@ -169,6 +146,160 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
             "SCHEDULE_GENERATION_FAILED",
             "日程の生成中に予期しない問題が発生しました。入力を保存してから、もう一度お試しください。",
         )
+
+
+def _generate_tournament_plan_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_tournament_plan_limits(payload)
+    return _to_json_object(generate_tournament_plan(TournamentPlanRequest.model_validate(payload)))
+
+
+def _generate_day2_schedule_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_day2_schedule_limits(payload)
+    request_data = _apply_solver_time_limit(payload)
+    request = Day2ScheduleRequest.model_validate(request_data)
+    day1_document = _build_day1_source_validation_document(request_data)
+    day1_validation = _to_json_object(validate_schedule(day1_document))
+    if day1_validation.get("valid") is not True:
+        raise _RequestError(
+            "DAY1_SCHEDULE_INVALID",
+            "既存の1日目日程が大会規則の検証に合格しません。1日目日程を再作成してください。",
+            diagnostics=list(day1_validation.get("diagnostics", [])),
+        )
+    schedule = generate_day2_schedule(request)
+    result_data = _to_json_object(schedule)
+    if result_data.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+        return result_data
+    day2_document = _build_day2_validation_document(request_data, result_data)
+    validation = _to_json_object(validate_day2_schedule(day2_document))
+    integrated_validation = _integrated_validation(day1_validation, validation)
+    return _json_round_trip(
+        {
+            **result_data,
+            "validation": validation,
+            "integrated_validation": integrated_validation,
+        }
+    )
+
+
+def _generate_day2_creation_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    prepared = _run_day2_creation_stage(
+        "tournament_plan",
+        {"COMPLETE"},
+        lambda: _prepare_day2_creation(payload),
+    )
+    if prepared.get("status") != "COMPLETE":
+        return prepared
+    request = Day2CreationRequest.model_validate(prepared["request"])
+
+    tournament_response = _run_day2_creation_stage(
+        "tournament_plan",
+        {"COMPLETE"},
+        lambda: _generate_tournament_plan_response(_to_json_object(request.tournament_request())),
+    )
+    if tournament_response.get("status") != "COMPLETE":
+        return tournament_response
+
+    schedule_response = _run_day2_creation_stage(
+        "day2_schedule",
+        {"OPTIMAL", "FEASIBLE"},
+        lambda: _generate_day2_schedule_from_creation(request, tournament_response),
+    )
+    if schedule_response.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+        return schedule_response
+    if (
+        not isinstance(schedule_response.get("validation"), Mapping)
+        or schedule_response["validation"].get("valid") is not True
+        or not isinstance(schedule_response.get("integrated_validation"), Mapping)
+        or schedule_response["integrated_validation"].get("valid") is not True
+    ):
+        return _error_response(
+            "DAY2_VALIDATION_FAILED",
+            "生成した2日目日程が大会規則の安全確認に合格しませんでした。入力を保存して、もう一度お試しください。",
+            {"operation_stage": "integrated_validation"},
+        )
+    return _json_round_trip(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "status": schedule_response["status"],
+            "tournament_plan": tournament_response,
+            "day2_schedule": schedule_response,
+        }
+    )
+
+
+def _prepare_day2_creation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_day2_creation_limits(payload)
+    request_data = _apply_solver_time_limit(payload)
+    request = Day2CreationRequest.model_validate(request_data)
+    return {
+        "status": "COMPLETE",
+        "request": _to_json_object(request),
+    }
+
+
+def _generate_day2_schedule_from_creation(
+    request: Day2CreationRequest,
+    tournament_response: Mapping[str, Any],
+) -> dict[str, Any]:
+    tournament_plan = TournamentPlan.model_validate(tournament_response)
+    return _generate_day2_schedule_response(
+        _to_json_object(request.schedule_request(tournament_plan))
+    )
+
+
+def _run_day2_creation_stage(
+    operation_stage: str,
+    success_statuses: set[str],
+    operation: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        response = operation()
+    except _RequestError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except TournamentGenerationError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except Day2ScheduleError as exc:
+        response = _error_response(exc.code, exc.message, exc.details)
+    except ValidationError as exc:
+        response = _error_response(
+            "INPUT_SCHEMA_INVALID",
+            "大会設定の一部を読み取れませんでした。項目別の説明に沿って修正してください。",
+            {"errors": _pydantic_errors(exc)},
+        )
+    except (TypeError, ValueError) as exc:
+        response = _error_response(
+            "INPUT_SCHEMA_INVALID",
+            "大会設定を読み取れませんでした。入力内容を確認してください。",
+            {"reason": _safe_exception_reason(exc)},
+        )
+    except Exception:
+        response = _error_response(
+            "SCHEDULE_GENERATION_FAILED",
+            "日程の生成中に予期しない問題が発生しました。入力を保存してから、もう一度お試しください。",
+        )
+    if response.get("status") in success_statuses:
+        return response
+    return _with_operation_stage(response, operation_stage)
+
+
+def _with_operation_stage(response: Mapping[str, Any], operation_stage: str) -> dict[str, Any]:
+    staged = _json_round_trip(response)
+    diagnostics = staged.get("diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics or not isinstance(diagnostics[0], dict):
+        diagnostics = [
+            {
+                "code": "SCHEDULE_GENERATION_FAILED",
+                "message": "2日目を作成できませんでした。入力を確認して、もう一度お試しください。",
+            }
+        ]
+        staged["diagnostics"] = diagnostics
+    first = diagnostics[0]
+    details = first.get("details")
+    if not isinstance(details, dict):
+        details = {}
+        first["details"] = details
+    details["operation_stage"] = operation_stage
+    return staged
 
 
 def _resolve_request(
@@ -419,6 +550,11 @@ def _validate_day2_schedule_limits(request: Mapping[str, Any]) -> None:
                 actual=maximum,
                 maximum=MAX_SECTIONS,
             )
+
+
+def _validate_day2_creation_limits(request: Mapping[str, Any]) -> None:
+    _validate_tournament_plan_limits(request)
+    _validate_day2_schedule_limits(request)
 
 
 def _validate_tournament_results_limits(request: Mapping[str, Any]) -> None:

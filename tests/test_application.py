@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from time import monotonic
 from typing import Any
@@ -94,6 +96,41 @@ def _day1_league_request(
     }
     if manual_blocks is not None:
         request["league"]["manual_blocks"] = manual_blocks
+    return request
+
+
+def _day2_creation_request(
+    day1_request: dict[str, Any],
+    day1_result: dict[str, Any],
+    *,
+    standings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request: dict[str, Any] = {
+        "schema_version": "0.1.0",
+        "request_kind": "day2_creation",
+        "teams": day1_request["teams"],
+        "courts": day1_request["courts"],
+        "league_plan": day1_result["league_plan"],
+        "odd_split_policy": "upper",
+        "day1_schedule": {
+            "day": day1_request["day"],
+            "slots": day1_result["slots"],
+        },
+        "day": {
+            "id": "day2",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 10,
+        },
+        "referees": {
+            "organizer_capacity": len(day1_request["courts"]),
+            "tournament_fallback": "organizer",
+        },
+        "random_seed": 20260803,
+        "solver": {"max_time_seconds": 5},
+    }
+    if standings is not None:
+        request["league_standings"] = standings
     return request
 
 
@@ -837,6 +874,168 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
     assert invalid_day1["status"] == "error"
     assert invalid_day1["diagnostics"][0]["code"] == "DAY1_SCHEDULE_INVALID"
     assert "1日目日程" in invalid_day1["diagnostics"][0]["message"]
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> None:
+    team_count = 2 if resolved else 4
+    day1_request = _day1_league_request(
+        team_count=team_count,
+        block_count=1,
+        court_count=2,
+    )
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
+    standings = None
+    if resolved:
+        standings = application.handle_request(
+            {
+                "request_kind": "league_standings",
+                "league_plan": day1["league_plan"],
+                "results": [
+                    {"match_id": match["id"], "home_score": 1, "away_score": 0}
+                    for match in day1["league_plan"]["matches"]
+                ],
+                "random_seed": 20260803,
+            }
+        )
+
+    creation_request = _day2_creation_request(day1_request, day1, standings=standings)
+    combined = application.handle_request(creation_request)
+    assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
+
+    tournament_request = {
+        "request_kind": "tournament_plan",
+        "league_plan": day1["league_plan"],
+        "odd_split_policy": "upper",
+        "random_seed": 20260803,
+    }
+    if standings is not None:
+        tournament_request["league_standings"] = standings
+    tournament = application.handle_request(tournament_request)
+    schedule_request = {
+        key: value
+        for key, value in creation_request.items()
+        if key not in {"league_standings", "odd_split_policy"}
+    }
+    schedule = application.handle_request(
+        {
+            **schedule_request,
+            "request_kind": "day2_schedule",
+            "tournament_plan": tournament,
+        }
+    )
+
+    assert combined["tournament_plan"] == tournament
+    for field in (
+        "participant_resolution",
+        "slots",
+        "section_timings",
+        "tournament_matches",
+        "team_schedules",
+        "validation",
+        "integrated_validation",
+    ):
+        assert combined["day2_schedule"][field] == schedule[field]
+    assert combined["day2_schedule"]["validation"]["valid"] is True
+    assert combined["day2_schedule"]["integrated_validation"]["valid"] is True
+
+
+def test_day2_creation_reports_tournament_failure_without_partial_result() -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1 = application.handle_request(day1_request)
+    standings = application.handle_request(
+        {
+            "request_kind": "league_standings",
+            "league_plan": day1["league_plan"],
+            "results": [
+                {"match_id": match["id"], "home_score": 0, "away_score": 0}
+                for match in day1["league_plan"]["matches"]
+            ],
+            "random_seed": 20260803,
+        }
+    )
+    standings["standings"].pop()
+
+    result = application.handle_request(
+        _day2_creation_request(day1_request, day1, standings=standings)
+    )
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "TOURNAMENT_SOURCE_INVALID"
+    assert result["diagnostics"][0]["details"]["operation_stage"] == "tournament_plan"
+    assert "tournament_plan" not in result
+    assert "day2_schedule" not in result
+
+
+def test_day2_creation_reports_schedule_failure_without_partial_result() -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1 = application.handle_request(day1_request)
+    request = _day2_creation_request(day1_request, day1)
+    request["day"] = {**request["day"], "max_sections": 1}
+    request["referees"] = {**request["referees"], "organizer_capacity": 1}
+
+    result = application.handle_request(request)
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["details"]["operation_stage"] == "day2_schedule"
+    assert "tournament_plan" not in result
+    assert "day2_schedule" not in result
+
+
+def test_day2_creation_rejects_failed_independent_validation_without_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day1_request = _day1_league_request(team_count=4, block_count=1, court_count=2)
+    day1 = application.handle_request(day1_request)
+    monkeypatch.setattr(
+        application,
+        "validate_day2_schedule",
+        lambda _: {"valid": False, "diagnostics": []},
+    )
+
+    result = application.handle_request(_day2_creation_request(day1_request, day1))
+
+    assert result["status"] == "error"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "DAY2_VALIDATION_FAILED"
+    assert diagnostic["details"]["operation_stage"] == "integrated_validation"
+    assert "tournament_plan" not in result
+    assert "day2_schedule" not in result
+
+
+def test_maximum_day2_creation_is_reproducible_and_under_production_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day1_request = _day1_league_request(team_count=32, block_count=8, court_count=4)
+    day1 = application.handle_request(day1_request)
+    assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
+    request = _day2_creation_request(day1_request, day1)
+    request["solver"] = {"max_time_seconds": 30}
+    monkeypatch.setenv("SOLVER_MAX_TIME_SECONDS", "20")
+    request_bytes = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
+    assert len(request_bytes) <= application.MAX_REQUEST_BYTES
+
+    hashes: list[str] = []
+    for _attempt in range(2):
+        started = monotonic()
+        result = application.handle_request(request)
+        assert monotonic() - started < 28
+        assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+        assert result["day2_schedule"]["validation"]["valid"] is True
+        assert result["day2_schedule"]["integrated_validation"]["valid"] is True
+        stable = deepcopy(result)
+        stable["day2_schedule"]["metrics"].pop("wall_time_seconds", None)
+        encoded = json.dumps(
+            stable,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        assert len(encoded) <= application.MAX_REQUEST_BYTES
+        hashes.append(hashlib.sha256(encoded).hexdigest())
+
+    assert len(set(hashes)) == 1
 
 
 def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -> None:

@@ -12,6 +12,8 @@ function turnstileAction(input: JsonObject): string {
       return "generate_tournament";
     case "tournament_results":
       return "calculate_tournament_results";
+    case "day2_creation":
+      return "create_day2";
     case "day2_schedule":
       return "generate_day2_schedule";
     default:
@@ -137,6 +139,15 @@ export function calculateTournamentStandings(
 
 /** 確定したトーナメント表を、2日目の時刻・コート・審判へ配置する。 */
 export function generateDay2Schedule(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}
+
+/** 1つの安全確認でトーナメント表と2日目日程を一括生成する。 */
+export function createDay2(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

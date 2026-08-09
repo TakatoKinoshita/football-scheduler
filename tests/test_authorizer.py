@@ -67,6 +67,7 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
         "calculate_standings",
         "generate_tournament",
         "calculate_tournament_results",
+        "create_day2",
         "generate_day2_schedule",
     ],
 )

@@ -287,20 +287,23 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   await importDocument(page, fixture);
   await page.unroute("**/api/v1/schedules:generate");
   await page.route("**/api/v1/schedules:generate", async (route) => {
-    const request = route.request().postDataJSON() as { request_kind?: unknown };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        request.request_kind === "tournament_plan" ? tournamentPlan : invalidResponse,
+        {
+          status: invalidResponse.status,
+          tournament_plan: tournamentPlan,
+          day2_schedule: invalidResponse,
+        },
       ),
     });
   });
 
   await page.getByRole("button", { name: "2日目を作成する" }).click();
 
-  await expect(page.locator("#day2-status")).toContainText("保存せず");
-  await expect(page.locator("#day2-status")).toContainText("日程を再作成");
+  await expect(page.locator("#day2-status")).toContainText("安全確認に失敗しました");
+  await expect(page.locator("#day2-status")).toContainText("既存の結果と入力は変更していません");
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
 });
 

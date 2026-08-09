@@ -20,6 +20,7 @@ _EXPECTED_ACTIONS = frozenset(
         "calculate_standings",
         "generate_tournament",
         "calculate_tournament_results",
+        "create_day2",
         "generate_day2_schedule",
     }
 )

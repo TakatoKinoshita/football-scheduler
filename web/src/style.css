@@ -102,7 +102,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .danger { color: var(--danger); background: white; border-color: var(--danger); }
 .file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .turnstile-box { min-height: 66px; margin-bottom: 1rem; color: var(--muted); }
-.day2-turnstile-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .status-message { min-height: 1.65em; margin-bottom: 0; font-weight: 700; }
 
 .results { border-top: 7px solid var(--green); }
@@ -206,7 +205,6 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   main { width: min(100% - 1rem, 1100px); margin-top: 1rem; }
   .steps { grid-template-columns: 1fr 1fr; }
   .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list { grid-template-columns: 1fr; }
-  .day2-turnstile-group { grid-template-columns: 1fr; }
   .manual-block-team-row { grid-template-columns: 1fr; }
   .schedule-view-toggle label { flex: 1 1 8rem; }
   .field-wide { grid-column: auto; }

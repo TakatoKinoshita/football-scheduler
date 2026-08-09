@@ -84,9 +84,11 @@ npm run dev
 生成APIは通常画面から`request_kind: "day1_league"`を付けた大会設定を受け付ける。
 `random`、`seeded_snake`、`manual`のブロック分けを利用でき、完成済み試合を含む従来の
 `ScheduleRequest` JSONも互換経路として受け付ける。順位確定は`league_standings`、2日目の
-組合せ作成は任意の`league_standings`を持つ`tournament_plan`、2日目配置は`day2_schedule`として同じ保護されたAPIへ
-独立して要求する。2日目の全結果検証と総合順位確定は`tournament_results`で要求する。
-Turnstileのactionは各`request_kind`と一致する場合だけ受理する。
+一括作成は任意の`league_standings`を持つ`day2_creation`として同じ保護されたAPIへ要求する。
+`day2_creation`は1つのTurnstile tokenでトーナメント表と日程を順番に生成し、両方の独立検証が
+成功した場合だけ返す。後方互換用の`tournament_plan`と`day2_schedule`も引き続き受け付ける。
+2日目の全結果検証と総合順位確定は`tournament_results`で要求する。Turnstileのactionは
+`day2_creation`の`create_day2`を含め、各`request_kind`と一致する場合だけ受理する。
 サーバー側へ大会データは永続保存しない。
 
 `manual`では手順2に全チームの割当て先を表示し、固定したいチームだけA、B…の各ブロックを

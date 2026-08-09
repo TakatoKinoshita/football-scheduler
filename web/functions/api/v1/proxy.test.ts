@@ -146,4 +146,23 @@ describe("Cloudflare Pages API proxy", () => {
       "calculate_tournament_results",
     );
   });
+
+  it("2日目一括作成のTurnstile actionをAWSへ転送する", async () => {
+    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
+      new Response('{"status":"OPTIMAL"}', { status: 200 }),
+    );
+
+    const response = await proxyScheduleRequest(
+      request('{"request_kind":"day2_creation"}', {
+        "x-turnstile-action": "create_day2",
+      }),
+      environment,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(options?.headers).get("x-turnstile-action")).toBe("create_day2");
+  });
 });

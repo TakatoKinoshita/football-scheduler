@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   API_PATH,
   calculateTournamentStandings,
+  createDay2,
   generateDay2Schedule,
   generateSchedule,
   generateTournamentPlan,
@@ -114,6 +115,29 @@ describe("日程生成API", () => {
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
       "generate_day2_schedule",
     );
+  });
+
+  it("2日目一括作成をcreate_day2 actionで1回送る", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "OPTIMAL",
+          tournament_plan: { status: "COMPLETE" },
+          day2_schedule: { status: "OPTIMAL" },
+        }),
+        { status: 200 },
+      ),
+    );
+    const input = { request_kind: "day2_creation" };
+
+    await expect(createDay2(input, "single-use-token", fetchMock)).resolves.toMatchObject({
+      status: "OPTIMAL",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-turnstile-token")).toBe("single-use-token");
+    expect(headers.get("x-turnstile-action")).toBe("create_day2");
   });
 
   it("最終順位確定も同じ保護されたAPIへ送る", async () => {

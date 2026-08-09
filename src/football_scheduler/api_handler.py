@@ -17,6 +17,7 @@ _ACTION_BY_REQUEST_KIND = {
     "league_standings": "calculate_standings",
     "tournament_plan": "generate_tournament",
     "tournament_results": "calculate_tournament_results",
+    "day2_creation": "create_day2",
     "day2_schedule": "generate_day2_schedule",
 }
 _HEADERS = {

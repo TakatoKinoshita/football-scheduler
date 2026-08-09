@@ -41,7 +41,10 @@ Cloudflare dashboardで次を確認する。
 - Workers & PagesのFree planを利用し、Direct Upload projectを作成済みである。
 - production branchは`main`として作成している。
 - Pages Functionsの利用上限到達時は`fail closed`である。
-- Turnstile widgetのhostnameにPagesの公開hostnameを登録し、actionは`generate_schedule`である。
+- Turnstile widgetのhostnameにPagesの公開hostnameを登録している。画面から渡すactionは
+  `generate_schedule`、`calculate_standings`、`create_day2`、
+  `calculate_tournament_results`であり、後方互換APIでは`generate_tournament`と
+  `generate_day2_schedule`も許可する。
 - Pages Writeだけを対象accountへ許可したAPI tokenを発行している。
 - `_routes.json`のincludeは`/api/*`だけである。
 
@@ -120,7 +123,8 @@ API GatewayのCloudWatch roleはregion内のaccount共通設定である。既�
 1. Cloudflareへログインした管理者がDirect UploadのPages projectを作成する。初回作成には
    `cd web && npx wrangler pages project create`を利用できる。
 2. Pages Write権限だけを持つAPI tokenを作る。
-3. Turnstile widgetを作り、公開hostnameとactionを設定する。
+3. Turnstile widgetを作り、公開hostnameを設定する。actionは画面側で操作ごとに指定し、
+   authorizerで照合するため、widgetやsite keyをactionごとに作り分けない。
    widgetにはローカル検証用の`localhost`と`127.0.0.1`も登録できるが、本番authorizerは
    `PUBLIC_APPLICATION_URL`のhostnameだけを許可し、ローカルhostnameを受け付けない。
 4. Pages projectのSettings > Runtimeでfail closedを選ぶ。
@@ -267,7 +271,9 @@ bootstrapで定義したECRの直近10 image保持とS3の30日expirationに委�
 
 browserはAPI keyを持たず、同一originのPages Functionだけを呼ぶ。Pages Functionは1 MB上限を
 確認し、origin確認secretとusage keyをAWSへ付与する。Lambda adapterでもdecoded body sizeを
-再確認する。Turnstile tokenは単回利用なのでLambda authorizerで1度だけ検証する。
+再確認する。Turnstile tokenは単回利用なのでLambda authorizerで1度だけ検証する。2日目作成は
+`request_kind: "day2_creation"`とaction `create_day2`を使い、1 token・1 APIリクエストで
+トーナメント表と日程を生成する。既存の`tournament_plan`／`day2_schedule`は互換経路として残す。
 
 ## 5. 監視と費用
 
