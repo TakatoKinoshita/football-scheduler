@@ -10,23 +10,13 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, model_validator
 
-from football_scheduler.final_stage import PlacementTournamentFinalStage
+from football_scheduler.final_stage import (
+    PlacementTournamentFinalStage,
+    validate_final_stage_input,
+)
 from football_scheduler.league import LeaguePlan
 from football_scheduler.league_results import LeagueStandings
 from football_scheduler.models import ContractModel, Identifier, NonEmptyText
-
-
-class OddSplitPolicy(StrEnum):
-    """奇数人数ブロックの中央順位をどちらへ振り分けるか。"""
-
-    UPPER = "upper"
-    LOWER = "lower"
-    ALTERNATE = "alternate"
-
-
-class TournamentPool(StrEnum):
-    UPPER = "upper"
-    LOWER = "lower"
 
 
 class ParticipantResolution(StrEnum):
@@ -92,7 +82,7 @@ class TournamentSeed(ContractModel):
 
 
 class SeedDrawRecord(ContractModel):
-    pool: TournamentPool
+    pool_id: Identifier
     block_rank: Annotated[int, Field(gt=0)]
     candidates: tuple[Identifier, ...] = ()
     decided_order: tuple[Identifier, ...] = ()
@@ -121,7 +111,8 @@ class SeedDrawRecord(ContractModel):
 
 class TournamentMatch(ContractModel):
     id: Identifier
-    phase: Literal["upper_tournament", "lower_tournament"]
+    phase: Literal["placement_tournament"] = "placement_tournament"
+    pool_id: Identifier
     round: NonEmptyText
     round_no: Annotated[int, Field(gt=0)]
     home: TournamentEntry
@@ -196,14 +187,9 @@ class TournamentLogicalLayout(ContractModel):
         return self
 
 
-class ByeAdvance(ContractModel):
-    entry: TournamentEntry
-    result: Literal["advance_by_bye"] = "advance_by_bye"
-    next_match_id: Identifier
-
-
 class TournamentPlacement(ContractModel):
     rank: Annotated[int, Field(gt=0)]
+    pool_rank: Annotated[int, Field(gt=0)]
     entry: TournamentEntry
 
 
@@ -214,17 +200,38 @@ class TournamentEvaluation(ContractModel):
 
 
 class TournamentPoolPlan(ContractModel):
-    pool: TournamentPool
-    participant_count: Annotated[int, Field(ge=0)]
+    pool_id: Identifier
+    pool_index: Annotated[int, Field(gt=0)]
+    display_name: NonEmptyText
+    participant_count: Annotated[int, Field(gt=1)]
+    pool_rank_range: tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
+    overall_rank_range: tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
     seeds: tuple[TournamentSeed, ...]
     matches: tuple[TournamentMatch, ...]
-    byes: tuple[ByeAdvance, ...]
     placements: tuple[TournamentPlacement, ...]
     evaluation: TournamentEvaluation
     logical_layout: TournamentLogicalLayout | None = None
 
     @model_validator(mode="after")
     def validate_logical_layout(self) -> Self:
+        if self.participant_count & (self.participant_count - 1):
+            raise ValueError("順位帯の参加数は2のべき乗である必要があります")
+        if self.pool_rank_range != (1, self.participant_count):
+            raise ValueError("順位帯内の順位範囲が参加数と一致しません")
+        overall_start, overall_end = self.overall_rank_range
+        if overall_end - overall_start + 1 != self.participant_count:
+            raise ValueError("大会全体順位範囲が参加数と一致しません")
+        if len(self.seeds) != self.participant_count:
+            raise ValueError("順位帯のシード数が参加数と一致しません")
+        if any(match.pool_id != self.pool_id for match in self.matches):
+            raise ValueError("試合の順位帯IDが計画と一致しません")
+        expected_ranks = list(range(overall_start, overall_end + 1))
+        if [placement.rank for placement in self.placements] != expected_ranks:
+            raise ValueError("順位帯の全体順位に不足または重複があります")
+        if [placement.pool_rank for placement in self.placements] != list(
+            range(1, self.participant_count + 1)
+        ):
+            raise ValueError("順位帯内順位に不足または重複があります")
         layout = self.logical_layout
         if layout is None:
             return self
@@ -259,7 +266,7 @@ class TournamentPoolPlan(ContractModel):
                 )
             ]
 
-        root_range = (1, self.participant_count)
+        root_range = self.overall_rank_range
         expected_opening_entries = tuple(
             entry for match in ordered_matches(root_range) for entry in (match.home, match.away)
         )
@@ -319,7 +326,7 @@ class TournamentPoolPlan(ContractModel):
 class TournamentWarning(ContractModel):
     code: Identifier
     message: NonEmptyText
-    pool: TournamentPool
+    pool_id: Identifier
     match_ids: tuple[Identifier, ...] = ()
 
 
@@ -330,14 +337,27 @@ class TournamentPlan(ContractModel):
     participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     tournament_count: Annotated[int, Field(gt=0)]
     random_seed: int
-    upper: TournamentPoolPlan
-    lower: TournamentPoolPlan
+    pools: tuple[TournamentPoolPlan, ...]
     seed_draws: tuple[SeedDrawRecord, ...]
     warnings: tuple[TournamentWarning, ...]
 
     @model_validator(mode="after")
     def validate_resolution(self) -> Self:
-        seeds = (*self.upper.seeds, *self.lower.seeds)
+        if len(self.pools) != self.tournament_count:
+            raise ValueError("トーナメント数と順位帯の数が一致しません")
+        if [pool.pool_index for pool in self.pools] != list(range(1, self.tournament_count + 1)):
+            raise ValueError("順位帯の順序が連続していません")
+        if len({pool.pool_id for pool in self.pools}) != len(self.pools):
+            raise ValueError("順位帯IDが重複しています")
+        expected_start = 1
+        for pool in self.pools:
+            if pool.overall_rank_range[0] != expected_start:
+                raise ValueError("順位帯の大会全体順位範囲に欠落または重複があります")
+            expected_start = pool.overall_rank_range[1] + 1
+        match_ids = [match.id for pool in self.pools for match in pool.matches]
+        if len(set(match_ids)) != len(match_ids):
+            raise ValueError("順位決定トーナメントの試合IDが重複しています")
+        seeds = tuple(seed for pool in self.pools for seed in pool.seeds)
         resolved = [seed.team_id is not None for seed in seeds]
         explicit_resolution = "participant_resolution" in self.model_fields_set
         if self.participant_resolution is ParticipantResolution.PROVISIONAL:
@@ -353,8 +373,10 @@ class TournamentPlan(ContractModel):
         elif not all(resolved):
             raise ValueError("確定トーナメントの参加チームが不足しています")
         for draw in self.seed_draws:
-            pool = self.upper if draw.pool is TournamentPool.UPPER else self.lower
-            draw_seeds = [seed for seed in pool.seeds if seed.block_rank == draw.block_rank]
+            draw_pool = next((item for item in self.pools if item.pool_id == draw.pool_id), None)
+            if draw_pool is None:
+                raise ValueError("シード抽選が未知の順位帯を参照しています")
+            draw_seeds = [seed for seed in draw_pool.seeds if seed.block_rank == draw.block_rank]
             expected_rank_keys = {(seed.block_id, seed.block_rank) for seed in draw_seeds}
             candidate_rank_keys = {
                 (entry.block_id, entry.rank) for entry in draw.candidate_rank_refs
@@ -427,90 +449,28 @@ class _RankSlot:
 
 
 class _BracketBuilder:
-    def __init__(self, pool: TournamentPool, random_seed: int) -> None:
-        self.pool = pool
+    def __init__(
+        self,
+        pool_id: str,
+        pool_index: int,
+        overall_rank_start: int,
+        random_seed: int,
+    ) -> None:
+        self.pool_id = pool_id
+        self.pool_index = pool_index
+        self.overall_rank_start = overall_rank_start
         self.random_seed = random_seed
-        self.prefix = "UT" if pool is TournamentPool.UPPER else "LT"
-        self.phase: Literal["upper_tournament", "lower_tournament"] = (
-            "upper_tournament" if pool is TournamentPool.UPPER else "lower_tournament"
-        )
+        self.prefix = f"PT-{pool_index}"
         self.matches: list[TournamentMatch] = []
         self.placements: list[TournamentPlacement] = []
-        self.bye_entries: list[TournamentEntry] = []
         self.audits: list[_MatchAudit] = []
         self._id_counts: dict[tuple[str, int, int], int] = {}
 
     def build(self, entries: list[_EntryState]) -> None:
-        if len(entries) >= 2 and len(entries) & (len(entries) - 1) == 0:
-            positioned_entries = self._position_power_of_two_entries(entries)
-            self._build_canonical_power_of_two(positioned_entries, 1, 1)
-            return
-        self._build_group(entries, 1, 1)
-
-    def finalized_byes(self) -> tuple[ByeAdvance, ...]:
-        byes: list[ByeAdvance] = []
-        for entry in self.bye_entries:
-            next_match = next(
-                (match.id for match in self.matches if match.home == entry or match.away == entry),
-                None,
-            )
-            if next_match is None:
-                raise RuntimeError("不戦通過の接続先を特定できません")
-            byes.append(ByeAdvance(entry=entry, next_match_id=next_match))
-        return tuple(byes)
-
-    def _build_group(self, entries: list[_EntryState], rank_start: int, round_no: int) -> None:
-        count = len(entries)
-        if count == 0:
-            return
-        if count == 1:
-            self.placements.append(TournamentPlacement(rank=rank_start, entry=entries[0].ref))
-            return
-        if count & (count - 1) == 0:
-            self._build_power_of_two(entries, rank_start, round_no)
-            return
-
-        main_size = 1 << (count.bit_length() - 1)
-        preliminary_count = count - main_size
-        bye_count = count - 2 * preliminary_count
-        bye_entries = entries[:bye_count]
-        preliminary_entries = entries[bye_count:]
-        for entry in bye_entries:
-            self.bye_entries.append(entry.ref)
-
-        winners, losers = self._play_opening_matches(
-            preliminary_entries,
-            rank_start,
-            rank_start + count - 1,
-            round_no,
-            "PRELIM",
-            "予備戦",
-        )
-        self._build_group([*bye_entries, *winners], rank_start, round_no + 1)
-        self._build_group(
-            losers,
-            rank_start + main_size,
-            round_no + 1,
-        )
-
-    def _build_power_of_two(
-        self, entries: list[_EntryState], rank_start: int, round_no: int
-    ) -> None:
-        count = len(entries)
-        rank_end = rank_start + count - 1
-        label = (
-            "優勝決定戦"
-            if rank_start == 1 and count == 2
-            else f"{rank_start}位決定戦"
-            if count == 2
-            else f"{rank_start}〜{rank_end}位 順位決定"
-        )
-        winners, losers = self._play_opening_matches(
-            entries, rank_start, rank_end, round_no, "RANK", label
-        )
-        half = count // 2
-        self._build_group(winners, rank_start, round_no + 1)
-        self._build_group(losers, rank_start + half, round_no + 1)
+        if len(entries) < 2 or len(entries) & (len(entries) - 1):
+            raise RuntimeError("順位決定トーナメントの参加数は2のべき乗である必要があります")
+        positioned_entries = self._position_power_of_two_entries(entries)
+        self._build_canonical_power_of_two(positioned_entries, self.overall_rank_start, 1)
 
     def _position_power_of_two_entries(self, entries: list[_EntryState]) -> list[_EntryState]:
         """競技上の最適化を初戦位置へ閉じ込めた固定エントリー順を返す。"""
@@ -522,7 +482,7 @@ class _BracketBuilder:
         assignment = _best_pair_assignment(
             higher_entries,
             lower_entries,
-            f"{self.random_seed}:{self.pool}:RANK:1:{count}:1",
+            f"{self.random_seed}:{self.pool_id}:RANK:1:{count}:1",
         )
         opening_pairs = [
             (home, lower_entries[lower_index])
@@ -537,7 +497,7 @@ class _BracketBuilder:
         ]
         positioned_nodes = _position_opening_nodes(
             nodes,
-            f"{self.random_seed}:{self.pool}:canonical:{count}",
+            f"{self.random_seed}:{self.pool_id}:canonical:{count}",
         )
         positioned_pairs: list[tuple[_EntryState, _EntryState]] = []
         for node in positioned_nodes:
@@ -555,7 +515,13 @@ class _BracketBuilder:
 
         count = len(entries)
         if count == 1:
-            self.placements.append(TournamentPlacement(rank=rank_start, entry=entries[0].ref))
+            self.placements.append(
+                TournamentPlacement(
+                    rank=rank_start,
+                    pool_rank=rank_start - self.overall_rank_start + 1,
+                    entry=entries[0].ref,
+                )
+            )
             return
         rank_end = rank_start + count - 1
         label = (
@@ -616,7 +582,7 @@ class _BracketBuilder:
         assignment = _best_pair_assignment(
             left,
             right,
-            f"{self.random_seed}:{self.pool}:{kind}:{rank_start}:{rank_end}:{round_no}",
+            f"{self.random_seed}:{self.pool_id}:{kind}:{rank_start}:{rank_end}:{round_no}",
         )
         winners: list[_EntryState] = []
         losers: list[_EntryState] = []
@@ -630,7 +596,7 @@ class _BracketBuilder:
         if kind == "RANK" and len(winners) >= 2:
             order = _best_next_round_order(
                 winners,
-                f"{self.random_seed}:{self.pool}:{rank_start}:{rank_end}:{round_no}:next",
+                f"{self.random_seed}:{self.pool_id}:{rank_start}:{rank_end}:{round_no}:next",
             )
             winners = [winners[index] for index in order]
             losers = [losers[index] for index in order]
@@ -650,7 +616,7 @@ class _BracketBuilder:
         self.matches.append(
             TournamentMatch(
                 id=match_id,
-                phase=self.phase,
+                pool_id=self.pool_id,
                 round=label,
                 round_no=round_no,
                 home=home.ref,
@@ -692,7 +658,7 @@ class _BracketBuilder:
 def generate_tournament_plan(
     request: TournamentPlanRequest | dict[str, object],
 ) -> TournamentPlan:
-    """順位枠を上下へ分け、1位から最下位まで決まる表を返す。"""
+    """順位帯ごとの完全順位決定表を生成する。"""
 
     data = (
         request
@@ -700,25 +666,52 @@ def generate_tournament_plan(
         else TournamentPlanRequest.model_validate(request)
     )
     slots_by_block = _validate_source(data.league_plan, data.league_standings)
-    upper_rows, lower_rows = _split_rank_slots(
-        data.league_plan, slots_by_block, OddSplitPolicy.UPPER
+    team_count = sum(len(block.team_ids) for block in data.league_plan.blocks)
+    block_count = len(data.league_plan.blocks)
+    validate_final_stage_input(
+        data.final_stage.model_dump(mode="json"),
+        team_count=team_count,
+        block_count=block_count,
     )
-    upper_seeds, upper_draws = _seed_pool(TournamentPool.UPPER, upper_rows, data.random_seed)
-    lower_seeds, lower_draws = _seed_pool(TournamentPool.LOWER, lower_rows, data.random_seed)
-    upper, upper_warnings = _generate_pool(TournamentPool.UPPER, upper_seeds, data.random_seed)
-    lower, lower_warnings = _generate_pool(TournamentPool.LOWER, lower_seeds, data.random_seed)
+    tournament_count = data.final_stage.tournament_count
+    participant_count = team_count // tournament_count
+    block_size = team_count // block_count
+    band_width = block_size // tournament_count
+    pools: list[TournamentPoolPlan] = []
+    draws: list[SeedDrawRecord] = []
+    warnings: list[TournamentWarning] = []
+    for pool_index in range(1, tournament_count + 1):
+        pool_id = f"placement-{pool_index}"
+        rank_start = (pool_index - 1) * band_width + 1
+        rank_end = pool_index * band_width
+        rows = [
+            row
+            for block in data.league_plan.blocks
+            for row in slots_by_block[block.id]
+            if rank_start <= row.rank <= rank_end
+        ]
+        seeds, pool_draws = _seed_pool(pool_id, rows, data.random_seed)
+        pool, pool_warnings = _generate_pool(
+            pool_id,
+            pool_index,
+            participant_count,
+            seeds,
+            data.random_seed,
+        )
+        pools.append(pool)
+        draws.extend(pool_draws)
+        warnings.extend(pool_warnings)
     return TournamentPlan(
         participant_resolution=(
             ParticipantResolution.RESOLVED
             if data.league_standings is not None
             else ParticipantResolution.PROVISIONAL
         ),
-        tournament_count=data.final_stage.tournament_count,
+        tournament_count=tournament_count,
         random_seed=data.random_seed,
-        upper=upper,
-        lower=lower,
-        seed_draws=(*upper_draws, *lower_draws),
-        warnings=(*upper_warnings, *lower_warnings),
+        pools=tuple(pools),
+        seed_draws=tuple(draws),
+        warnings=tuple(warnings),
     )
 
 
@@ -794,33 +787,8 @@ def _source_error(reason: str, **details: object) -> TournamentGenerationError:
     )
 
 
-def _split_rank_slots(
-    plan: LeaguePlan,
-    slots_by_block: dict[str, list[_RankSlot]],
-    policy: OddSplitPolicy,
-) -> tuple[list[_RankSlot], list[_RankSlot]]:
-    upper: list[_RankSlot] = []
-    lower: list[_RankSlot] = []
-    odd_index = 0
-    for block in plan.blocks:
-        slots = slots_by_block[block.id]
-        count = len(slots)
-        if count % 2 == 0:
-            upper_count = count // 2
-        elif policy is OddSplitPolicy.UPPER:
-            upper_count = (count + 1) // 2
-        elif policy is OddSplitPolicy.LOWER:
-            upper_count = count // 2
-        else:
-            upper_count = (count + 1) // 2 if odd_index % 2 == 0 else count // 2
-            odd_index += 1
-        upper.extend(slots[:upper_count])
-        lower.extend(slots[upper_count:])
-    return upper, lower
-
-
 def _seed_pool(
-    pool: TournamentPool,
+    pool_id: str,
     rows: list[_RankSlot],
     random_seed: int,
 ) -> tuple[tuple[TournamentSeed, ...], tuple[SeedDrawRecord, ...]]:
@@ -835,7 +803,7 @@ def _seed_pool(
             candidates,
             key=lambda row: (
                 sha256(
-                    f"{random_seed}:seed:{pool.value}:{rank}:{row.block_id}:{row.rank}".encode()
+                    f"{random_seed}:seed:{pool_id}:{rank}:{row.block_id}:{row.rank}".encode()
                 ).digest(),
                 row.block_id,
             ),
@@ -844,7 +812,7 @@ def _seed_pool(
         if len(candidates) > 1:
             draws.append(
                 SeedDrawRecord(
-                    pool=pool,
+                    pool_id=pool_id,
                     block_rank=rank,
                     candidates=tuple(
                         sorted(row.team_id for row in candidates if row.team_id is not None)
@@ -872,11 +840,15 @@ def _seed_pool(
 
 
 def _generate_pool(
-    pool: TournamentPool,
+    pool_id: str,
+    pool_index: int,
+    participant_count: int,
     seeds: tuple[TournamentSeed, ...],
     random_seed: int,
 ) -> tuple[TournamentPoolPlan, tuple[TournamentWarning, ...]]:
-    builder = _BracketBuilder(pool, random_seed)
+    overall_rank_start = (pool_index - 1) * participant_count + 1
+    overall_rank_end = pool_index * participant_count
+    builder = _BracketBuilder(pool_id, pool_index, overall_rank_start, random_seed)
     entries = [
         _EntryState(ref=seed.entry, block_ids=frozenset({seed.block_id}), has_played=False)
         for seed in seeds
@@ -898,28 +870,32 @@ def _generate_pool(
             TournamentWarning(
                 code="SAME_BLOCK_FIRST_MATCH_UNAVOIDABLE",
                 message="初戦の同一ブロック対戦をすべて避けられないため、対戦数が最少になる組合せを採用しました。",
-                pool=pool,
+                pool_id=pool_id,
                 match_ids=first_conflicts,
             ),
         )
     plan = TournamentPoolPlan(
-        pool=pool,
+        pool_id=pool_id,
+        pool_index=pool_index,
+        display_name=f"第{pool_index}順位決定トーナメント",
         participant_count=len(seeds),
+        pool_rank_range=(1, participant_count),
+        overall_rank_range=(overall_rank_start, overall_rank_end),
         seeds=seeds,
         matches=matches,
-        byes=builder.finalized_byes(),
         placements=tuple(sorted(builder.placements, key=lambda placement: placement.rank)),
         evaluation=evaluation,
-        logical_layout=_build_logical_layout(matches, len(seeds)),
+        logical_layout=_build_logical_layout(matches, (overall_rank_start, overall_rank_end)),
     )
     return plan, warnings
 
 
 def _build_logical_layout(
-    matches: tuple[TournamentMatch, ...], participant_count: int
+    matches: tuple[TournamentMatch, ...], overall_rank_range: tuple[int, int]
 ) -> TournamentLogicalLayout | None:
     """既存の組合せを変えず、2のべき乗の表から表示順だけを導出する。"""
 
+    participant_count = overall_rank_range[1] - overall_rank_range[0] + 1
     if participant_count < 2 or participant_count & (participant_count - 1):
         return None
 
@@ -943,7 +919,7 @@ def _build_logical_layout(
             key=lambda match: position_by_id[match.id].order,
         )
 
-    root_range = (1, participant_count)
+    root_range = overall_rank_range
     opening_entry_order = tuple(
         entry for match in ordered_matches(root_range) for entry in (match.home, match.away)
     )

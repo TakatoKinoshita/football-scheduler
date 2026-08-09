@@ -589,8 +589,7 @@ def _validate_day2_schedule_limits(request: Mapping[str, Any]) -> None:
     tournament_plan = request.get("tournament_plan")
     tournament_match_count = 0
     if isinstance(tournament_plan, Mapping):
-        for pool_name in ("upper", "lower"):
-            pool = tournament_plan.get(pool_name)
+        for pool in _mapping_sequence(tournament_plan.get("pools")):
             if not isinstance(pool, Mapping):
                 continue
             _validate_sequence_limit(
@@ -636,8 +635,7 @@ def _validate_tournament_results_limits(request: Mapping[str, Any]) -> None:
         return
     tournament_match_count = 0
     tournament_team_count = 0
-    for pool_name in ("upper", "lower"):
-        pool = tournament_plan.get(pool_name)
+    for pool in _mapping_sequence(tournament_plan.get("pools")):
         if not isinstance(pool, Mapping):
             continue
         matches = pool.get("matches")
@@ -679,6 +677,12 @@ def _validate_sequence_limit(
             actual=len(value),
             maximum=maximum,
         )
+
+
+def _mapping_sequence(value: object) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return ()
+    return tuple(item for item in value if isinstance(item, Mapping))
 
 
 def _build_validation_document(

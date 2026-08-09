@@ -440,7 +440,7 @@ def test_league_standings_request_reports_missing_results() -> None:
     assert result["diagnostics"][0]["code"] == "LEAGUE_RESULTS_INCOMPLETE"
 
 
-def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> None:
+def test_tournament_plan_request_returns_complete_ordered_pools() -> None:
     generated_request = _day1_league_request(team_count=8, block_count=2)
     generated = application.handle_request(generated_request)
     standings = application.handle_request(
@@ -466,10 +466,9 @@ def test_tournament_plan_request_returns_complete_upper_and_lower_tables() -> No
     )
 
     assert result["status"] == "COMPLETE"
-    assert result["upper"]["participant_count"] == 4
-    assert result["lower"]["participant_count"] == 4
-    assert len(result["upper"]["matches"]) == 4
-    assert len(result["lower"]["matches"]) == 4
+    assert [pool["pool_id"] for pool in result["pools"]] == ["placement-1", "placement-2"]
+    assert all(pool["participant_count"] == 4 for pool in result["pools"])
+    assert all(len(pool["matches"]) == 4 for pool in result["pools"])
 
 
 def test_tournament_results_request_returns_overall_final_standings() -> None:
@@ -497,8 +496,8 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
     )
     team_by_rank = {
         (seed["block_id"], seed["block_rank"]): seed["team_id"]
-        for pool_name in ("upper", "lower")
-        for seed in tournament[pool_name]["seeds"]
+        for pool in tournament["pools"]
+        for seed in pool["seeds"]
     }
     results = []
     winners: dict[str, str] = {}
@@ -511,8 +510,8 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
             return winners[entry["match_id"]]
         return losers[entry["match_id"]]
 
-    for pool_name in ("upper", "lower"):
-        for match in tournament[pool_name]["matches"]:
+    for pool in tournament["pools"]:
+        for match in pool["matches"]:
             home = match["home"]
             away = match["away"]
             home_team = resolved_team(home)
@@ -539,15 +538,15 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
 
     assert outcome["status"] == "COMPLETE"
     assert [row["rank"] for row in outcome["standings"]] == list(range(1, 9))
-    assert [row["pool"] for row in outcome["standings"]] == [
-        "upper",
-        "upper",
-        "upper",
-        "upper",
-        "lower",
-        "lower",
-        "lower",
-        "lower",
+    assert [row["pool_id"] for row in outcome["standings"]] == [
+        "placement-1",
+        "placement-1",
+        "placement-1",
+        "placement-1",
+        "placement-2",
+        "placement-2",
+        "placement-2",
+        "placement-2",
     ]
 
 
@@ -568,7 +567,7 @@ def test_tournament_plan_request_returns_provisional_table_without_standings() -
     assert result["participant_resolution"] == "provisional"
     assert all(
         seed["team_id"] is None and seed["team"] is None
-        for pool in (result["upper"], result["lower"])
+        for pool in result["pools"]
         for seed in pool["seeds"]
     )
 
@@ -905,9 +904,9 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
     assert result["validation"]["valid"] is True
     assert result["integrated_validation"]["valid"] is True
     assert any(slot["match_id"] is not None for slot in result["slots"])
-    assert result["metrics"]["upper_tournament_final_section"] is not None
-    assert result["metrics"]["lower_tournament_final_section"] is not None
-    assert result["metrics"]["lower_tournament_final_section_gap"] is not None
+    assert len(result["metrics"]["placement_tournament_finals"]) == 2
+    assert result["metrics"]["placement_tournament_finals"][0]["final_section_gap"] == 0
+    assert result["metrics"]["non_primary_final_max_gap"] is not None
 
     invalid_day1 = application.handle_request(
         {
@@ -1133,9 +1132,11 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
     occupied_sections = [
         slot["section_no"] for slot in result["slots"] if slot["match_id"] is not None
     ]
-    assert result["metrics"]["upper_tournament_final_section"] == max(occupied_sections)
-    assert result["metrics"]["lower_tournament_final_section"] is not None
-    assert result["metrics"]["lower_tournament_final_section_gap"] >= 0
+    assert result["metrics"]["placement_tournament_finals"][0]["section_no"] == max(
+        occupied_sections
+    )
+    assert len(result["metrics"]["placement_tournament_finals"]) == 2
+    assert result["metrics"]["non_primary_final_max_gap"] >= 0
 
 
 def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:

@@ -14,7 +14,6 @@ from football_scheduler.tournament import (
     ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
-    TournamentPool,
     TournamentPoolPlan,
     WinnerOfRef,
 )
@@ -53,7 +52,7 @@ class TournamentMatchResult(ContractModel):
 
 class FinalStanding(ContractModel):
     rank: Annotated[int, Field(gt=0)]
-    pool: TournamentPool
+    pool_id: Identifier
     pool_rank: Annotated[int, Field(gt=0)]
     team_id: Identifier
     entry: TournamentEntry
@@ -91,7 +90,7 @@ def calculate_tournament_standings(
             "リーグ順位を確定してから2日目の試合結果を入力してください。",
         )
 
-    pools = (plan.upper, plan.lower)
+    pools = plan.pools
     all_matches = [match for pool in pools for match in pool.matches]
     match_ids = [match.id for match in all_matches]
     duplicated_plan_ids = sorted(
@@ -195,16 +194,14 @@ def calculate_tournament_standings(
         resolve_match(match.id)
 
     standings: list[FinalStanding] = []
-    upper_count = plan.upper.participant_count
     for pool in pools:
         _validate_placements(pool)
-        rank_offset = 0 if pool.pool is TournamentPool.UPPER else upper_count
         for placement in sorted(pool.placements, key=lambda item: item.rank):
             standings.append(
                 FinalStanding(
-                    rank=rank_offset + placement.rank,
-                    pool=pool.pool,
-                    pool_rank=placement.rank,
+                    rank=placement.rank,
+                    pool_id=pool.pool_id,
+                    pool_rank=placement.pool_rank,
                     team_id=resolve_entry(placement.entry),
                     entry=placement.entry,
                 )
@@ -234,16 +231,16 @@ def calculate_tournament_standings(
 
 
 def _team_by_rank(
-    pools: tuple[TournamentPoolPlan, TournamentPoolPlan],
+    pools: tuple[TournamentPoolPlan, ...],
 ) -> dict[tuple[str, int], str]:
     mapping: dict[tuple[str, int], str] = {}
     team_ids: set[str] = set()
     for pool in pools:
         if len(pool.seeds) != pool.participant_count:
-            raise _reference_error("seed_count_mismatch", pool=pool.pool.value)
+            raise _reference_error("seed_count_mismatch", pool_id=pool.pool_id)
         for seed in pool.seeds:
             if seed.team_id is None:
-                raise _reference_error("unresolved_seed", pool=pool.pool.value)
+                raise _reference_error("unresolved_seed", pool_id=pool.pool_id)
             key = (seed.block_id, seed.block_rank)
             if key in mapping or seed.team_id in team_ids:
                 raise _reference_error(
@@ -259,11 +256,11 @@ def _team_by_rank(
 
 def _validate_placements(pool: TournamentPoolPlan) -> None:
     ranks = sorted(placement.rank for placement in pool.placements)
-    expected = list(range(1, pool.participant_count + 1))
+    expected = list(range(pool.overall_rank_range[0], pool.overall_rank_range[1] + 1))
     if ranks != expected:
         raise _reference_error(
             "invalid_pool_placements",
-            pool=pool.pool.value,
+            pool_id=pool.pool_id,
             expected_ranks=expected,
             actual_ranks=ranks,
         )

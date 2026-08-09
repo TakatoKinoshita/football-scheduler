@@ -105,7 +105,7 @@ def test_referee_summary_excludes_tournament_matches(
 ) -> None:
     document = deepcopy(valid_document)
     matches = document["matches"]  # type: ignore[assignment]
-    matches[2]["phase"] = "upper_tournament"
+    matches[2]["phase"] = "placement_tournament"
 
     summary = validate_schedule(document)["summary"]
 
@@ -270,8 +270,9 @@ def _provisional_day2_document() -> dict[str, object]:
     rank_1 = {"type": "league_rank", "block_id": "A", "rank": 1}
     rank_2 = {"type": "league_rank", "block_id": "A", "rank": 2}
     match = {
-        "id": "UT-FINAL",
-        "phase": "upper_tournament",
+        "id": "PT-1-FINAL",
+        "phase": "placement_tournament",
+        "pool_id": "placement-1",
         "round": "final",
         "round_no": 1,
         "home": rank_1,
@@ -280,14 +281,13 @@ def _provisional_day2_document() -> dict[str, object]:
         "possible_rank_refs": [rank_1, rank_2],
         "possible_team_ids": [],
         "prerequisite_match_ids": [],
-        "preliminary": False,
         "final": True,
     }
     slot = {
         "day_id": "day2",
         "section_no": 1,
         "court_id": "court-a",
-        "match_id": "UT-FINAL",
+        "match_id": "PT-1-FINAL",
         "referee_assignment": {"kind": "organizer", "organizer_reason": "first_section"},
     }
     routes = [
@@ -295,7 +295,7 @@ def _provisional_day2_document() -> dict[str, object]:
             "rank_ref": rank_ref,
             "team_id": None,
             "role": "match",
-            "match_id": "UT-FINAL",
+            "match_id": "PT-1-FINAL",
             "section_no": 1,
             "court_id": "court-a",
             "conditions": [],
@@ -319,13 +319,23 @@ def _provisional_day2_document() -> dict[str, object]:
         "league_plan": {"blocks": [{"id": "A", "team_ids": ["T1", "T2"]}]},
         "tournament_plan": {
             "participant_resolution": "provisional",
-            "upper": {
-                "seeds": [
-                    {"block_id": "A", "block_rank": 1, "team_id": None},
-                    {"block_id": "A", "block_rank": 2, "team_id": None},
-                ]
-            },
-            "lower": {"seeds": []},
+            "pools": [
+                {
+                    "pool_id": "placement-1",
+                    "participant_count": 2,
+                    "overall_rank_range": [1, 2],
+                    "matches": [
+                        {
+                            "id": "PT-1-FINAL",
+                            "rank_range": [1, 2],
+                        }
+                    ],
+                    "seeds": [
+                        {"block_id": "A", "block_rank": 1, "team_id": None},
+                        {"block_id": "A", "block_rank": 2, "team_id": None},
+                    ],
+                }
+            ],
         },
         "matches": [match],
         "team_schedules": routes,
@@ -379,7 +389,7 @@ def test_resolved_day2_rejects_rank_to_team_annotation_swap() -> None:
     document["participant_resolution"] = "resolved"
     document["schedule"]["participant_resolution"] = "resolved"  # type: ignore[index]
     document["tournament_plan"]["participant_resolution"] = "resolved"  # type: ignore[index]
-    seeds = document["tournament_plan"]["upper"]["seeds"]  # type: ignore[index]
+    seeds = document["tournament_plan"]["pools"][0]["seeds"]  # type: ignore[index]
     seeds[0]["team_id"] = "T1"  # type: ignore[index]
     seeds[1]["team_id"] = "T2"  # type: ignore[index]
     document["matches"][0]["possible_team_ids"] = ["T2", "T1"]  # type: ignore[index]
