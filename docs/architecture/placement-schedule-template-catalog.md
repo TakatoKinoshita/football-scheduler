@@ -60,6 +60,9 @@ catalogの欠落、version不一致、digest不一致、canonical位置不整合
 再利用する。同一コート数で理論下限が同じ場合は、より厳しい主催者能力・strict設定で下限を
 達成した配置を、hydrateと独立検証に合格したキーへ再利用する。追加コートが未使用でも同じ
 下限を達成する場合は、コート使用差を再集計したうえでコート数が多いキーにも再利用できる。
+またstrictでは、新しいコートの最初の実試合を主催者が担当できるのは第1セクションまたは決勝だけ
+なので、実効コート数は最大`organizer_capacity + pool_count`となる。この数以上のコートで証明した
+最小配置は、同じ主催者能力でコート数だけが多いstrictキーにも再利用する。
 
 ```console
 uv run python scripts/generate_placement_templates.py --topology 2x4 --workers 1 --resume

@@ -25,6 +25,7 @@ from football_scheduler.placement_template_generator import (
     PlacementSolveAttempt,
     StabilizedPlacementTemplateSolver,
     UnprovenPlacementTemplateError,
+    _source_proves_target_primary,
     check_catalog,
     generate_template_entry,
     generate_topology_shard,
@@ -153,6 +154,46 @@ def test_smallest_real_candidate_is_hydrated_and_independently_validated() -> No
     )
     assert entry.referee_signature
     assert entry.sha256 == placement_entry_digest(entry)
+
+
+def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() -> None:
+    source = PlacementTemplateKey(
+        pool_count=2,
+        pool_size=8,
+        court_count=3,
+        organizer_capacity=1,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+    target = source.model_copy(update={"court_count": 16})
+
+    assert _source_proves_target_primary(source, 15, target, 7) is True
+    assert (
+        _source_proves_target_primary(
+            source.model_copy(update={"court_count": 2}),
+            15,
+            target,
+            7,
+        )
+        is False
+    )
+    assert (
+        _source_proves_target_primary(
+            source,
+            15,
+            target.model_copy(update={"day2_fallback": Day2Fallback.ORGANIZER}),
+            7,
+        )
+        is False
+    )
+    assert (
+        _source_proves_target_primary(
+            source,
+            15,
+            target.model_copy(update={"organizer_capacity": 2}),
+            7,
+        )
+        is False
+    )
 
 
 def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(

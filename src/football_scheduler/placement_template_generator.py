@@ -663,7 +663,13 @@ def _derive_placement_template_entry(
             entry
             for entry in candidates
             if entry.status is PlacementTemplateStatus.AVAILABLE
-            and entry.used_sections == lower_horizon
+            and entry.used_sections is not None
+            and _source_proves_target_primary(
+                entry.key,
+                entry.used_sections,
+                target_key,
+                lower_horizon,
+            )
             and entry.key.pool_count == target_key.pool_count
             and entry.key.pool_size == target_key.pool_size
             and entry.key.court_count <= target_key.court_count
@@ -726,6 +732,26 @@ def _derive_placement_template_entry(
         _validate_hydrated_candidate(candidate, request, schedule, validator)
         return candidate
     return None
+
+
+def _source_proves_target_primary(
+    source_key: PlacementTemplateKey,
+    source_used_sections: int,
+    target_key: PlacementTemplateKey,
+    target_lower_horizon: int,
+) -> bool:
+    if source_used_sections == target_lower_horizon:
+        return True
+    # strictでは、あるコートの最初の実試合が非決勝戦なら、第1sectionで
+    # 主催者審判を割り当てる必要がある。それ以外に新しいコートを開けるのは
+    # 各poolの決勝だけなので、O + pool_countを超えるコートは実行可能集合を
+    # 広げない。コートIDを入れ替えてsource側へ正規化できる。
+    return (
+        source_key.day2_fallback is Day2Fallback.STRICT
+        and target_key.day2_fallback is Day2Fallback.STRICT
+        and source_key.organizer_capacity == target_key.organizer_capacity
+        and source_key.court_count >= source_key.organizer_capacity + source_key.pool_count
+    )
 
 
 def _validate_hydrated_candidate(
