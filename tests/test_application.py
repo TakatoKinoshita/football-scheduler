@@ -12,6 +12,15 @@ from pydantic import BaseModel, ValidationError
 from football_scheduler import application
 
 
+def _handle_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """通常APIテストでは明示的な現行schemaを送る。"""
+
+    request = dict(payload)
+    if "fixture" not in request:
+        request.setdefault("schema_version", "0.2.0")
+    return application.handle_request(request)
+
+
 class _ModelLike:
     def __init__(self, value: dict[str, Any]) -> None:
         self.value = value
@@ -170,7 +179,7 @@ def test_direct_request_is_solved_and_independently_validated(
 
     monkeypatch.setattr(application, "solve_schedule", fake_solve)
 
-    result = application.handle_request(_request())
+    result = _handle_request(_request())
 
     assert result["status"] == "optimal"
     assert result["validation"]["valid"] is True
@@ -178,7 +187,7 @@ def test_direct_request_is_solved_and_independently_validated(
 
 
 def test_day1_league_request_generates_match_and_passes_independent_validation() -> None:
-    result = application.handle_request(_day1_league_request())
+    result = _handle_request(_day1_league_request())
 
     assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
     assert result["schedule_scope"] == "day1_league"
@@ -208,7 +217,7 @@ def test_day1_league_request_adds_block_ids_before_solving(
         lambda request: received.append(request) or _ModelLike(_result()),
     )
 
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(team_count=8, block_count=2, assignment_mode="seeded_snake")
     )
 
@@ -227,7 +236,7 @@ def test_day1_league_request_preserves_manual_blocks() -> None:
         {"id": "B", "team_ids": ["team-2", "team-4"]},
     ]
 
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=4,
             block_count=2,
@@ -245,7 +254,7 @@ def test_day1_league_request_preserves_manual_blocks() -> None:
 
 
 def test_day1_league_request_completes_partial_manual_blocks() -> None:
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=5,
             block_count=2,
@@ -280,7 +289,7 @@ def test_day1_league_request_rejects_manual_imbalance_before_solver(
         "solve_schedule",
         lambda _: pytest.fail("solver must not run"),
     )
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=5,
             block_count=2,
@@ -306,7 +315,7 @@ def test_day1_league_request_rejects_unknown_manual_block_before_solver(
         "solve_schedule",
         lambda _: pytest.fail("solver must not run"),
     )
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=4,
             block_count=2,
@@ -369,7 +378,7 @@ def test_day1_public_manual_validation_rejects_invalid_membership_before_solver(
         "solve_schedule",
         lambda _: pytest.fail("solver must not run"),
     )
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=4,
             block_count=2,
@@ -390,7 +399,7 @@ def test_day1_public_automatic_mode_rejects_manual_blocks_before_solver(
         "solve_schedule",
         lambda _: pytest.fail("solver must not run"),
     )
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=4,
             block_count=2,
@@ -407,9 +416,9 @@ def test_day1_public_automatic_mode_rejects_manual_blocks_before_solver(
 
 
 def test_league_standings_request_returns_rankings_after_all_results_are_entered() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=4, block_count=2))
+    generated = _handle_request(_day1_league_request(team_count=4, block_count=2))
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
@@ -426,9 +435,9 @@ def test_league_standings_request_returns_rankings_after_all_results_are_entered
 
 
 def test_league_standings_request_reports_missing_results() -> None:
-    generated = application.handle_request(_day1_league_request(team_count=4, block_count=2))
+    generated = _handle_request(_day1_league_request(team_count=4, block_count=2))
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
@@ -442,8 +451,8 @@ def test_league_standings_request_reports_missing_results() -> None:
 
 def test_tournament_plan_request_returns_complete_ordered_pools() -> None:
     generated_request = _day1_league_request(team_count=8, block_count=2)
-    generated = application.handle_request(generated_request)
-    standings = application.handle_request(
+    generated = _handle_request(generated_request)
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
@@ -455,7 +464,7 @@ def test_tournament_plan_request_returns_complete_ordered_pools() -> None:
         }
     )
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
@@ -473,8 +482,8 @@ def test_tournament_plan_request_returns_complete_ordered_pools() -> None:
 
 def test_tournament_results_request_returns_overall_final_standings() -> None:
     generated_request = _day1_league_request(team_count=8, block_count=2)
-    generated = application.handle_request(generated_request)
-    standings = application.handle_request(
+    generated = _handle_request(generated_request)
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
@@ -485,7 +494,7 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
             "random_seed": 20260803,
         }
     )
-    tournament = application.handle_request(
+    tournament = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
@@ -528,7 +537,7 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
             winners[match["id"]] = home_team
             losers[match["id"]] = away_team
 
-    outcome = application.handle_request(
+    outcome = _handle_request(
         {
             "request_kind": "tournament_results",
             "tournament_plan": tournament,
@@ -552,9 +561,9 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
 
 def test_tournament_plan_request_returns_provisional_table_without_standings() -> None:
     generated_request = _day1_league_request(team_count=8, block_count=2)
-    generated = application.handle_request(generated_request)
+    generated = _handle_request(generated_request)
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
@@ -574,8 +583,8 @@ def test_tournament_plan_request_returns_provisional_table_without_standings() -
 
 def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() -> None:
     generated_request = _day1_league_request(team_count=8, block_count=2)
-    generated = application.handle_request(generated_request)
-    standings = application.handle_request(
+    generated = _handle_request(generated_request)
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": generated["league_plan"],
@@ -587,7 +596,7 @@ def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() ->
     )
     standings["standings"].pop()
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": generated["league_plan"],
@@ -602,7 +611,7 @@ def test_tournament_plan_request_reports_inconsistent_standings_in_japanese() ->
 
 
 def test_tournament_plan_request_rejects_team_limit() -> None:
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "tournament_plan",
             "final_stage": {"format": "placement_tournament", "tournament_count": 2},
@@ -622,7 +631,7 @@ def test_tournament_plan_request_rejects_team_limit() -> None:
 
 
 def test_league_standings_request_rejects_result_limit() -> None:
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": {"matches": []},
@@ -650,7 +659,7 @@ def test_inferred_horizon_does_not_become_a_silent_hard_constraint(
 
     monkeypatch.setattr(application, "solve_schedule", fake_solve)
 
-    result = application.handle_request(_day1_league_request())
+    result = _handle_request(_day1_league_request())
 
     assert result["status"] == "optimal"
     assert received[0]["day"]["max_sections"] == len(received[0]["matches"]) * 2
@@ -666,7 +675,7 @@ def test_day1_league_request_rejects_block_count_above_team_count(
         lambda _: pytest.fail("solver must not run"),
     )
 
-    result = application.handle_request(_day1_league_request(team_count=8, block_count=9))
+    result = _handle_request(_day1_league_request(team_count=8, block_count=9))
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "PLACEMENT_TOURNAMENT_BLOCK_COUNT_INVALID"
@@ -684,7 +693,7 @@ def test_day1_league_mvp_sizes_finish_within_thirty_seconds(
 ) -> None:
     started = monotonic()
 
-    result = application.handle_request(
+    result = _handle_request(
         _day1_league_request(
             team_count=team_count,
             block_count=block_count,
@@ -710,7 +719,7 @@ def test_day1_league_missing_day_returns_field_detail_without_running_solver(
         lambda _: pytest.fail("solver must not run"),
     )
 
-    result = application.handle_request(request)
+    result = _handle_request(request)
 
     diagnostic = result["diagnostics"][0]
     assert diagnostic["code"] == "INPUT_SCHEMA_INVALID"
@@ -725,7 +734,7 @@ def test_day1_league_reports_insufficient_organizer_capacity() -> None:
         "team_referees_required_after_first": False,
     }
 
-    result = application.handle_request(request)
+    result = _handle_request(request)
 
     assert result["status"] == "INFEASIBLE"
     assert result["diagnostics"][0]["code"] == "SCHEDULE_INFEASIBLE"
@@ -735,7 +744,7 @@ def test_day1_league_reports_insufficient_slots() -> None:
     request = _day1_league_request(team_count=4)
     request["day"]["max_sections"] = 1
 
-    result = application.handle_request(request)
+    result = _handle_request(request)
 
     assert result["status"] == "INFEASIBLE"
     assert result["diagnostics"][0]["code"] == "INSUFFICIENT_SLOTS"
@@ -752,7 +761,7 @@ def test_fixture_and_solver_options_are_resolved(
         lambda request: received.append(request) or _ModelLike(_result()),
     )
 
-    application.handle_request({"fixture": "smoke", "solver_options": {"max_time_seconds": 2}})
+    _handle_request({"fixture": "smoke", "solver_options": {"max_time_seconds": 2}})
 
     assert received[0]["solver"]["max_time_seconds"] == 2
 
@@ -765,7 +774,7 @@ def test_mvp_maximum_fixture_is_available(monkeypatch: pytest.MonkeyPatch) -> No
         lambda request: received.append(request) or _ModelLike(_result()),
     )
 
-    result = application.handle_request({"fixture": "mvp_maximum"})
+    result = _handle_request({"fixture": "mvp_maximum"})
 
     assert result["status"] == "optimal"
     assert len(received[0]["teams"]) == 32
@@ -785,7 +794,7 @@ def test_environment_time_limit_caps_requested_timeout(
         lambda request: received.append(request) or _ModelLike(_result()),
     )
 
-    application.handle_request(_request())
+    _handle_request(_request())
 
     assert received[0]["solver"]["max_time_seconds"] == 1.5
 
@@ -801,14 +810,14 @@ def test_rejects_team_count_over_verification_limit(
         lambda _: pytest.fail("solver must not run"),
     )
 
-    result = application.handle_request(request)
+    result = _handle_request(request)
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "TEAM_LIMIT_EXCEEDED"
 
 
 def test_unknown_fixture_returns_japanese_diagnostic() -> None:
-    result = application.handle_request({"fixture": "large"})
+    result = _handle_request({"fixture": "large"})
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "UNKNOWN_FIXTURE"
@@ -831,7 +840,7 @@ def test_pydantic_validation_error_does_not_escape(
 
     monkeypatch.setattr(application, "solve_schedule", fail_validation)
 
-    result = application.handle_request(_request())
+    result = _handle_request(_request())
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "INPUT_SCHEMA_INVALID"
@@ -845,7 +854,7 @@ def test_unexpected_exception_is_not_exposed(monkeypatch: pytest.MonkeyPatch) ->
         lambda _: (_ for _ in ()).throw(RuntimeError("secret implementation detail")),
     )
 
-    result = application.handle_request(_request())
+    result = _handle_request(_request())
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "SCHEDULE_GENERATION_FAILED"
@@ -854,9 +863,9 @@ def test_unexpected_exception_is_not_exposed(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
-    standings = application.handle_request(
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": day1["league_plan"],
@@ -867,7 +876,7 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
             "random_seed": 20260803,
         }
     )
-    tournament = application.handle_request(
+    tournament = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
@@ -897,7 +906,7 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
         "random_seed": 20260803,
         "solver": {"max_time_seconds": 5},
     }
-    result = application.handle_request(day2_request)
+    result = _handle_request(day2_request)
 
     assert result["status"] in {"OPTIMAL", "FEASIBLE"}
     assert result["schedule_scope"] == "day2_tournament"
@@ -908,7 +917,7 @@ def test_day2_schedule_request_keeps_day1_and_returns_integrated_validation() ->
     assert result["metrics"]["placement_tournament_finals"][0]["final_section_gap"] == 0
     assert result["metrics"]["non_primary_final_max_gap"] is not None
 
-    invalid_day1 = application.handle_request(
+    invalid_day1 = _handle_request(
         {
             **day2_request,
             "day1_schedule": {"day": day1_request["day"], "slots": []},
@@ -927,11 +936,11 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
         block_count=2,
         court_count=2,
     )
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
     standings = None
     if resolved:
-        standings = application.handle_request(
+        standings = _handle_request(
             {
                 "request_kind": "league_standings",
                 "league_plan": day1["league_plan"],
@@ -944,7 +953,7 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
         )
 
     creation_request = _day2_creation_request(day1_request, day1, standings=standings)
-    combined = application.handle_request(creation_request)
+    combined = _handle_request(creation_request)
     assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
 
     tournament_request = {
@@ -955,13 +964,13 @@ def test_day2_creation_matches_existing_two_step_generation(resolved: bool) -> N
     }
     if standings is not None:
         tournament_request["league_standings"] = standings
-    tournament = application.handle_request(tournament_request)
+    tournament = _handle_request(tournament_request)
     schedule_request = {
         key: value
         for key, value in creation_request.items()
         if key not in {"league_standings", "final_stage"}
     }
-    schedule = application.handle_request(
+    schedule = _handle_request(
         {
             **schedule_request,
             "request_kind": "day2_schedule",
@@ -990,9 +999,9 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
         "format": "same_rank_league",
         "uneven_policy": "strict_same_rank",
     }
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
-    standings = application.handle_request(
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": day1["league_plan"],
@@ -1004,9 +1013,7 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
         }
     )
 
-    combined = application.handle_request(
-        _day2_creation_request(day1_request, day1, standings=standings)
-    )
+    combined = _handle_request(_day2_creation_request(day1_request, day1, standings=standings))
 
     assert combined["status"] in {"OPTIMAL", "FEASIBLE"}, combined
     assert "same_rank_plan" in combined
@@ -1023,7 +1030,7 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
         for group in plan["groups"]
         for participant in group["participants"]
     }
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "same_rank_league_results",
             "same_rank_plan": plan,
@@ -1059,7 +1066,7 @@ def test_same_rank_day2_creation_and_results_complete_end_to_end() -> None:
     ],
 )
 def test_same_rank_generation_entry_points_reject_schema_0_1_0(request_kind: str) -> None:
-    result = application.handle_request({"schema_version": "0.1.0", "request_kind": request_kind})
+    result = _handle_request({"schema_version": "0.1.0", "request_kind": request_kind})
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "SCHEMA_VERSION_UNSUPPORTED"
@@ -1067,8 +1074,8 @@ def test_same_rank_generation_entry_points_reject_schema_0_1_0(request_kind: str
 
 def test_day2_creation_reports_tournament_failure_without_partial_result() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
-    standings = application.handle_request(
+    day1 = _handle_request(day1_request)
+    standings = _handle_request(
         {
             "request_kind": "league_standings",
             "league_plan": day1["league_plan"],
@@ -1081,9 +1088,7 @@ def test_day2_creation_reports_tournament_failure_without_partial_result() -> No
     )
     standings["standings"].pop()
 
-    result = application.handle_request(
-        _day2_creation_request(day1_request, day1, standings=standings)
-    )
+    result = _handle_request(_day2_creation_request(day1_request, day1, standings=standings))
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["code"] == "TOURNAMENT_SOURCE_INVALID"
@@ -1094,12 +1099,12 @@ def test_day2_creation_reports_tournament_failure_without_partial_result() -> No
 
 def test_day2_creation_reports_schedule_failure_without_partial_result() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     request = _day2_creation_request(day1_request, day1)
     request["day"] = {**request["day"], "max_sections": 1}
     request["referees"] = {**request["referees"], "organizer_capacity": 1}
 
-    result = application.handle_request(request)
+    result = _handle_request(request)
 
     assert result["status"] == "error"
     assert result["diagnostics"][0]["details"]["operation_stage"] == "day2_schedule"
@@ -1111,14 +1116,14 @@ def test_day2_creation_rejects_failed_independent_validation_without_partial_res
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     monkeypatch.setattr(
         application,
         "validate_day2_schedule",
         lambda _: {"valid": False, "diagnostics": []},
     )
 
-    result = application.handle_request(_day2_creation_request(day1_request, day1))
+    result = _handle_request(_day2_creation_request(day1_request, day1))
 
     assert result["status"] == "error"
     diagnostic = result["diagnostics"][0]
@@ -1132,7 +1137,7 @@ def test_maximum_day2_creation_is_reproducible_and_under_production_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     day1_request = _day1_league_request(team_count=32, block_count=8, court_count=4)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}, day1
     request = _day2_creation_request(day1_request, day1)
     request["solver"] = {"max_time_seconds": 30}
@@ -1143,7 +1148,7 @@ def test_maximum_day2_creation_is_reproducible_and_under_production_limits(
     hashes: list[str] = []
     for _attempt in range(2):
         started = monotonic()
-        result = application.handle_request(request)
+        result = _handle_request(request)
         assert monotonic() - started < 28
         assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
         assert result["day2_schedule"]["validation"]["valid"] is True
@@ -1164,9 +1169,9 @@ def test_maximum_day2_creation_is_reproducible_and_under_production_limits(
 
 def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
-    tournament = application.handle_request(
+    tournament = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
@@ -1176,7 +1181,7 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
     )
     assert tournament["participant_resolution"] == "provisional"
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "day2_schedule",
             "teams": day1_request["teams"],
@@ -1222,9 +1227,9 @@ def test_provisional_day2_schedule_returns_rank_routes_and_passes_validation() -
 
 def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
     day1_request = _day1_league_request(team_count=8, block_count=2, court_count=2)
-    day1 = application.handle_request(day1_request)
+    day1 = _handle_request(day1_request)
     assert day1["status"] in {"OPTIMAL", "FEASIBLE"}
-    tournament = application.handle_request(
+    tournament = _handle_request(
         {
             "request_kind": "tournament_plan",
             "league_plan": day1["league_plan"],
@@ -1242,7 +1247,7 @@ def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
     occupied[1]["court_id"] = "court-2"
     occupied[1]["referee_assignment"] = {"kind": "team", "team_id": "team-4"}
 
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "day2_schedule",
             "teams": day1_request["teams"],
@@ -1273,7 +1278,7 @@ def test_day2_schedule_rejects_legacy_day1_adjacent_court_change() -> None:
 
 
 def test_day2_schedule_rejects_section_limit_before_solver() -> None:
-    result = application.handle_request(
+    result = _handle_request(
         {
             "request_kind": "day2_schedule",
             "teams": [],

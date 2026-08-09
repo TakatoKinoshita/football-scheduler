@@ -10,6 +10,10 @@ from typing import Annotated
 from pydantic import Field, ValidationError
 
 from football_scheduler.models import ContractModel, Diagnostic, RefereeKind
+from football_scheduler.same_rank_league import (
+    SameRankPlanInvariantError,
+    validate_same_rank_plan_invariants,
+)
 from football_scheduler.same_rank_schedule import (
     SameRankDay2Schedule,
     SameRankDay2ScheduleRequest,
@@ -86,6 +90,16 @@ def validate_same_rank_day2_schedule(
         )
 
     diagnostics: list[Diagnostic] = []
+    try:
+        validate_same_rank_plan_invariants(data.same_rank_plan, data.league_plan)
+    except SameRankPlanInvariantError as exc:
+        diagnostics.append(
+            Diagnostic(
+                code="SAME_RANK_SOURCE_INVALID",
+                message="同順位リーグ計画と予選ブロックの対応を確認できませんでした。",
+                details={"reason": exc.reason},
+            )
+        )
     expected_matches = tuple(
         match for group in data.same_rank_plan.groups for match in group.matches
     )

@@ -222,6 +222,155 @@ class SameRankGenerationError(ValueError):
         self.code, self.message, self.details = code, message, details
 
 
+class SameRankPlanInvariantError(ValueError):
+    """受領した同順位リーグ計画が生成規則から外れていることを表す。"""
+
+    def __init__(self, reason: str, **details: object) -> None:
+        super().__init__(reason)
+        self.reason, self.details = reason, details
+
+
+def validate_same_rank_plan_invariants(
+    plan: SameRankLeaguePlan,
+    league_plan: LeaguePlan | None = None,
+) -> None:
+    """T・B・端数方針から、受領済み計画を生成器とは独立に再検証する。"""
+
+    team_count = plan.team_count
+    block_count = plan.block_count
+    quotient, remainder = divmod(team_count, block_count)
+    if quotient < 2:
+        raise SameRankPlanInvariantError("block_size_below_minimum")
+    if remainder == 0 and plan.uneven_policy is not SameRankUnevenPolicy.STRICT_SAME_RANK:
+        raise SameRankPlanInvariantError("uneven_policy_for_even_blocks")
+
+    if league_plan is not None:
+        block_order = tuple(block.id for block in league_plan.blocks)
+        if len(block_order) != block_count or len(set(block_order)) != block_count:
+            raise SameRankPlanInvariantError("block_count_mismatch")
+        source_team_count = sum(len(block.team_ids) for block in league_plan.blocks)
+        if source_team_count != team_count:
+            raise SameRankPlanInvariantError(
+                "team_count_mismatch",
+                expected_team_count=source_team_count,
+                actual_team_count=team_count,
+            )
+        source_sizes = [len(block.team_ids) for block in league_plan.blocks]
+        expected_sizes = sorted([quotient + 1] * remainder + [quotient] * (block_count - remainder))
+        if sorted(source_sizes) != expected_sizes:
+            raise SameRankPlanInvariantError(
+                "league_block_sizes_invalid",
+                expected_block_sizes=expected_sizes,
+                actual_block_sizes=source_sizes,
+            )
+    else:
+        first_group_blocks = [
+            participant.entry.block_id
+            for participant in plan.groups[0].participants
+            if participant.entry.rank == 1
+        ]
+        block_order = tuple(first_group_blocks)
+        if len(block_order) != block_count or len(set(block_order)) != block_count:
+            raise SameRankPlanInvariantError("rank_one_blocks_invalid")
+
+    all_entries = [participant.entry for group in plan.groups for participant in group.participants]
+    actual_keys = {(entry.block_id, entry.rank) for entry in all_entries}
+    sizes_by_block = {
+        block_id: len([entry for entry in all_entries if entry.block_id == block_id])
+        for block_id in block_order
+    }
+    expected_sizes_by_block = (
+        {block.id: len(block.team_ids) for block in league_plan.blocks}
+        if league_plan is not None
+        else sizes_by_block
+    )
+    expected_keys = {
+        (block_id, rank)
+        for block_id, size in expected_sizes_by_block.items()
+        for rank in range(1, size + 1)
+    }
+    if actual_keys != expected_keys or len(all_entries) != len(actual_keys):
+        raise SameRankPlanInvariantError("rank_refs_invalid")
+    actual_sizes = sorted(sizes_by_block.values())
+    expected_sizes = sorted([quotient + 1] * remainder + [quotient] * (block_count - remainder))
+    if actual_sizes != expected_sizes:
+        raise SameRankPlanInvariantError(
+            "plan_block_sizes_invalid",
+            expected_block_sizes=expected_sizes,
+            actual_block_sizes=actual_sizes,
+        )
+
+    slots_by_block: dict[str, list[tuple[LeagueRankRef, str | None]]] = {
+        block_id: [
+            (LeagueRankRef(block_id=block_id, rank=rank), None)
+            for rank in range(1, expected_sizes_by_block[block_id] + 1)
+        ]
+        for block_id in block_order
+    }
+    expected_groups = _rank_groups(
+        slots_by_block,
+        quotient,
+        remainder,
+        plan.uneven_policy,
+    )
+    if len(plan.groups) != len(expected_groups):
+        raise SameRankPlanInvariantError("group_count_invalid")
+    rank_start = 1
+    for group, (group_id, display_name, source_ranks, expected_entries) in zip(
+        plan.groups, expected_groups, strict=True
+    ):
+        rank_end = rank_start + len(expected_entries) - 1
+        actual_entries = tuple(participant.entry for participant in group.participants)
+        if (
+            group.id != group_id
+            or group.display_name != display_name
+            or group.source_block_ranks != source_ranks
+            or group.overall_rank_range != (rank_start, rank_end)
+            or actual_entries != expected_entries
+        ):
+            raise SameRankPlanInvariantError("group_derivation_invalid", group_id=group.id)
+        expected_matches, expected_rounds = _round_robin(
+            group.id,
+            group.display_name,
+            group.participants,
+        )
+        if group.matches != expected_matches or group.logical_rounds != expected_rounds:
+            raise SameRankPlanInvariantError("group_round_robin_invalid", group_id=group.id)
+        rank_start = rank_end + 1
+
+    singleton = next((group for group in plan.groups if len(group.participants) == 1), None)
+    expected_codes = (["SAME_RANK_UNEVEN_BLOCKS"] if remainder else []) + (
+        ["SAME_RANK_SINGLETON_GROUP"] if singleton is not None else []
+    )
+    if [warning.code for warning in plan.warnings] != expected_codes:
+        raise SameRankPlanInvariantError("warning_codes_invalid")
+    if remainder:
+        uneven = plan.warnings[0]
+        expected_details = {
+            "team_count": team_count,
+            "block_count": block_count,
+            "uneven_policy": plan.uneven_policy.value,
+            "block_sizes": [expected_sizes_by_block[block_id] for block_id in block_order],
+            "groups": [
+                {
+                    "group_id": group.id,
+                    "participant_count": len(group.participants),
+                    "source_block_ranks": list(group.source_block_ranks),
+                    "overall_rank_range": list(group.overall_rank_range),
+                }
+                for group in plan.groups
+            ],
+        }
+        if uneven.group_id is not None or uneven.details != expected_details:
+            raise SameRankPlanInvariantError("uneven_warning_invalid")
+    if singleton is not None:
+        warning = plan.warnings[-1]
+        if warning.group_id != singleton.id or warning.details != {
+            "overall_rank": singleton.overall_rank_range[0]
+        }:
+            raise SameRankPlanInvariantError("singleton_warning_invalid")
+
+
 def generate_same_rank_league_plan(
     request: SameRankLeaguePlanRequest | Mapping[str, object],
 ) -> SameRankLeaguePlan:

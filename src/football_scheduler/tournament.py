@@ -412,6 +412,149 @@ class TournamentGenerationError(ValueError):
         self.code, self.message, self.details = code, message, details
 
 
+class TournamentPlanInvariantError(ValueError):
+    """受領した順位決定トーナメント計画が順位帯規則から外れている。"""
+
+    def __init__(self, reason: str, **details: object) -> None:
+        super().__init__(reason)
+        self.reason, self.details = reason, details
+
+
+def validate_tournament_plan_invariants(
+    plan: TournamentPlan,
+    league_plan: LeaguePlan | None = None,
+) -> None:
+    """リーグ順位帯の式から、受領済み複数トーナメントを再検証する。"""
+
+    tournament_count = plan.tournament_count
+    team_count = sum(pool.participant_count for pool in plan.pools)
+    all_seeds = [seed for pool in plan.pools for seed in pool.seeds]
+    if len(all_seeds) != team_count:
+        raise TournamentPlanInvariantError("participant_count_mismatch")
+
+    if league_plan is not None:
+        block_order = tuple(block.id for block in league_plan.blocks)
+        if len(set(block_order)) != len(block_order):
+            raise TournamentPlanInvariantError("duplicate_league_block_id")
+        source_team_ids = [team_id for block in league_plan.blocks for team_id in block.team_ids]
+        if len(source_team_ids) != len(set(source_team_ids)):
+            raise TournamentPlanInvariantError("duplicate_league_team")
+        if len(source_team_ids) != team_count:
+            raise TournamentPlanInvariantError(
+                "team_count_mismatch",
+                expected_team_count=len(source_team_ids),
+                actual_team_count=team_count,
+            )
+        block_count = len(block_order)
+        if block_count == 0 or team_count % block_count:
+            raise TournamentPlanInvariantError("league_block_count_invalid")
+        block_size = team_count // block_count
+        actual_block_sizes = [len(block.team_ids) for block in league_plan.blocks]
+        if any(size != block_size for size in actual_block_sizes):
+            raise TournamentPlanInvariantError(
+                "league_block_sizes_invalid",
+                expected_block_size=block_size,
+                actual_block_sizes=actual_block_sizes,
+            )
+    else:
+        block_order = tuple(dict.fromkeys(seed.block_id for seed in all_seeds))
+        block_count = len(block_order)
+        if block_count == 0 or team_count % block_count:
+            raise TournamentPlanInvariantError("seed_block_count_invalid")
+        block_size = team_count // block_count
+
+    expected_rank_refs = {
+        (block_id, rank) for block_id in block_order for rank in range(1, block_size + 1)
+    }
+    actual_rank_refs = [(seed.block_id, seed.block_rank) for seed in all_seeds]
+    if len(actual_rank_refs) != len(set(actual_rank_refs)) or set(actual_rank_refs) != (
+        expected_rank_refs
+    ):
+        raise TournamentPlanInvariantError("seed_rank_refs_invalid")
+    try:
+        validate_final_stage_input(
+            {"format": "placement_tournament", "tournament_count": tournament_count},
+            team_count=team_count,
+            block_count=block_count,
+        )
+    except ValueError as exc:
+        raise TournamentPlanInvariantError("placement_configuration_invalid") from exc
+    if team_count % tournament_count or block_size % tournament_count:
+        raise TournamentPlanInvariantError("rank_band_not_divisible")
+    participant_count = team_count // tournament_count
+    band_width = block_size // tournament_count
+    if len(plan.pools) != tournament_count:
+        raise TournamentPlanInvariantError("pool_count_invalid")
+    for pool_index, pool in enumerate(plan.pools, 1):
+        rank_start = (pool_index - 1) * band_width + 1
+        rank_end = pool_index * band_width
+        expected_pool_refs = {
+            (block_id, rank) for block_id in block_order for rank in range(rank_start, rank_end + 1)
+        }
+        actual_pool_refs = {(seed.block_id, seed.block_rank) for seed in pool.seeds}
+        if (
+            pool.pool_id != f"placement-{pool_index}"
+            or pool.pool_index != pool_index
+            or pool.display_name != f"第{pool_index}順位決定トーナメント"
+            or pool.participant_count != participant_count
+            or pool.pool_rank_range != (1, participant_count)
+            or pool.overall_rank_range
+            != (
+                (pool_index - 1) * participant_count + 1,
+                pool_index * participant_count,
+            )
+            or actual_pool_refs != expected_pool_refs
+            or len(pool.seeds) != len(expected_pool_refs)
+            or [seed.seed_no for seed in pool.seeds] != list(range(1, participant_count + 1))
+        ):
+            raise TournamentPlanInvariantError(
+                "pool_derivation_invalid",
+                pool_id=pool.pool_id,
+            )
+    expected_draw_keys = {
+        (f"placement-{pool_index}", rank)
+        for pool_index in range(1, tournament_count + 1)
+        for rank in range((pool_index - 1) * band_width + 1, pool_index * band_width + 1)
+    }
+    actual_draw_keys = [(draw.pool_id, draw.block_rank) for draw in plan.seed_draws]
+    if (
+        len(actual_draw_keys) != len(set(actual_draw_keys))
+        or set(actual_draw_keys) != expected_draw_keys
+        or any(draw.random_seed != plan.random_seed for draw in plan.seed_draws)
+    ):
+        raise TournamentPlanInvariantError("seed_draws_invalid")
+    draw_by_key = {(draw.pool_id, draw.block_rank): draw for draw in plan.seed_draws}
+    expected_warnings: list[TournamentWarning] = []
+    for pool_index, pool in enumerate(plan.pools, 1):
+        rank_start = (pool_index - 1) * band_width + 1
+        rank_end = pool_index * band_width
+        expected_seed_order = tuple(
+            entry
+            for rank in range(rank_start, rank_end + 1)
+            for entry in draw_by_key[(pool.pool_id, rank)].decided_rank_refs
+        )
+        if tuple(seed.entry for seed in pool.seeds) != expected_seed_order:
+            raise TournamentPlanInvariantError(
+                "pool_seed_order_invalid",
+                pool_id=pool.pool_id,
+            )
+        regenerated_pool, regenerated_warnings = _generate_pool(
+            pool.pool_id,
+            pool.pool_index,
+            participant_count,
+            pool.seeds,
+            plan.random_seed,
+        )
+        if pool != regenerated_pool:
+            raise TournamentPlanInvariantError(
+                "pool_match_graph_invalid",
+                pool_id=pool.pool_id,
+            )
+        expected_warnings.extend(regenerated_warnings)
+    if plan.warnings != tuple(expected_warnings):
+        raise TournamentPlanInvariantError("tournament_warnings_invalid")
+
+
 @dataclass(frozen=True)
 class _EntryState:
     ref: TournamentEntry
@@ -729,6 +872,23 @@ def _validate_source(
             if team_id in team_to_block:
                 raise _source_error("team_in_multiple_blocks", team_id=team_id)
             team_to_block[team_id] = block.id
+
+    team_count = len(team_to_block)
+    block_count = len(plan.blocks)
+    if block_count == 0 or team_count % block_count:
+        raise _source_error(
+            "block_count_not_divisible",
+            team_count=team_count,
+            block_count=block_count,
+        )
+    expected_block_size = team_count // block_count
+    actual_block_sizes = [len(block.team_ids) for block in plan.blocks]
+    if any(size != expected_block_size for size in actual_block_sizes):
+        raise _source_error(
+            "unequal_block_sizes",
+            expected_block_size=expected_block_size,
+            actual_block_sizes=actual_block_sizes,
+        )
 
     slots_by_block = {
         block.id: [

@@ -14,8 +14,10 @@ from football_scheduler.tournament import (
     ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
+    TournamentPlanInvariantError,
     TournamentPoolPlan,
     WinnerOfRef,
+    validate_tournament_plan_invariants,
 )
 
 
@@ -84,6 +86,16 @@ def calculate_tournament_standings(
         else TournamentResultsRequest.model_validate(request)
     )
     plan = data.tournament_plan
+    _validate_dependencies(plan)
+    try:
+        validate_tournament_plan_invariants(plan)
+    except TournamentPlanInvariantError as exc:
+        raise TournamentResultsError(
+            "TOURNAMENT_SOURCE_INVALID",
+            "順位決定トーナメント計画を確認できませんでした。2日目の計画を作り直してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     if plan.participant_resolution is not ParticipantResolution.RESOLVED:
         raise TournamentResultsError(
             "TOURNAMENT_RESULTS_REQUIRE_RESOLVED_PLAN",
@@ -228,6 +240,39 @@ def calculate_tournament_standings(
         match_results=tuple(ordered_results),
         standings=ordered_standings,
     )
+
+
+def _validate_dependencies(plan: TournamentPlan) -> None:
+    """既存の循環・未知参照診断を派生plan監査より先に保つ。"""
+
+    all_matches = [match for pool in plan.pools for match in pool.matches]
+    matches = {match.id: match for match in all_matches}
+    if len(matches) != len(all_matches):
+        raise _reference_error("duplicate_match_id")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(match_id: str) -> None:
+        if match_id in visited:
+            return
+        if match_id in visiting:
+            raise TournamentResultsError(
+                "TOURNAMENT_DEPENDENCY_CYCLE",
+                "トーナメントの試合参照が循環しています。トーナメント表を作り直してください。",
+                match_id=match_id,
+            )
+        match = matches.get(match_id)
+        if match is None:
+            raise _reference_error("unknown_dependency", match_id=match_id)
+        visiting.add(match_id)
+        for entry in (match.home, match.away):
+            if isinstance(entry, (WinnerOfRef, LoserOfRef)):
+                visit(entry.match_id)
+        visiting.remove(match_id)
+        visited.add(match_id)
+
+    for match in all_matches:
+        visit(match.id)
 
 
 def _team_by_rank(

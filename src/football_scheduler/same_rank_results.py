@@ -12,6 +12,8 @@ from football_scheduler.models import ContractModel, Identifier
 from football_scheduler.same_rank_league import (
     SameRankGroup,
     SameRankLeaguePlan,
+    SameRankPlanInvariantError,
+    validate_same_rank_plan_invariants,
 )
 from football_scheduler.tournament import LeagueRankRef, ParticipantResolution
 
@@ -107,6 +109,15 @@ def calculate_same_rank_standings(
         else SameRankResultsRequest.model_validate(request)
     )
     plan = data.same_rank_plan
+    try:
+        validate_same_rank_plan_invariants(plan)
+    except SameRankPlanInvariantError as exc:
+        raise SameRankResultsError(
+            "SAME_RANK_SOURCE_INVALID",
+            "同順位リーグ計画を確認できませんでした。2日目の計画を作り直してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     if plan.participant_resolution is not ParticipantResolution.RESOLVED:
         raise SameRankResultsError(
             "SAME_RANK_RESULTS_REQUIRE_RESOLVED_PLAN",

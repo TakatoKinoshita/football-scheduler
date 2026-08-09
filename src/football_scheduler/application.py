@@ -191,7 +191,7 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _require_supported_schema(payload: Mapping[str, Any]) -> None:
     received = payload.get("schema_version")
-    if received in {None, SCHEMA_VERSION}:
+    if received == SCHEMA_VERSION:
         return
     raise _RequestError(
         "SCHEMA_VERSION_UNSUPPORTED",

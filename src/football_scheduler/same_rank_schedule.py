@@ -30,7 +30,12 @@ from football_scheduler.models import (
     SolverSettings,
     SolverStatus,
 )
-from football_scheduler.same_rank_league import SameRankLeaguePlan, SameRankMatch
+from football_scheduler.same_rank_league import (
+    SameRankLeaguePlan,
+    SameRankMatch,
+    SameRankPlanInvariantError,
+    validate_same_rank_plan_invariants,
+)
 from football_scheduler.timekeeping import (
     DayTimingError,
     expected_end_time,
@@ -225,6 +230,15 @@ def generate_same_rank_day2_schedule(
         if isinstance(request, SameRankDay2ScheduleRequest)
         else SameRankDay2ScheduleRequest.model_validate(request)
     )
+    try:
+        validate_same_rank_plan_invariants(data.same_rank_plan, data.league_plan)
+    except SameRankPlanInvariantError as exc:
+        raise SameRankScheduleError(
+            "SAME_RANK_SOURCE_INVALID",
+            "同順位リーグ計画と予選ブロックの対応を確認できませんでした。2日目を再作成してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     matches = tuple(match for group in data.same_rank_plan.groups for match in group.matches)
     if not matches:
         return SameRankDay2Schedule(

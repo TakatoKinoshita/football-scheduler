@@ -47,7 +47,9 @@ from football_scheduler.tournament import (
     ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
+    TournamentPlanInvariantError,
     WinnerOfRef,
+    validate_tournament_plan_invariants,
 )
 
 _ORTOOLS_VERSION = version("ortools")
@@ -307,6 +309,15 @@ def generate_day2_schedule(
         if isinstance(request, Day2ScheduleRequest)
         else Day2ScheduleRequest.model_validate(request)
     )
+    try:
+        validate_tournament_plan_invariants(data.tournament_plan, data.league_plan)
+    except TournamentPlanInvariantError as exc:
+        raise Day2ScheduleError(
+            "TOURNAMENT_SOURCE_INVALID",
+            "順位決定トーナメント計画と予選ブロックの対応を確認できませんでした。2日目を再作成してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     path_model = _build_path_model(data.tournament_plan)
     if not path_model.matches:
         metrics = _empty_metrics(data)
