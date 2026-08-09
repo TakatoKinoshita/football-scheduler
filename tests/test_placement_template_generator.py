@@ -198,12 +198,13 @@ def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() 
 
 
 @pytest.mark.parametrize(
-    ("pool_count", "pool_size", "expected"),
-    ((3, 8, 22), (2, 16, 40)),
+    ("pool_count", "pool_size", "court_count", "expected"),
+    ((3, 8, 2, 22), (3, 8, 3, 18), (2, 16, 2, 40)),
 )
 def test_strict_capacity_bound_delays_new_courts_until_finals(
     pool_count: int,
     pool_size: int,
+    court_count: int,
     expected: int,
 ) -> None:
     match_count = pool_count * pool_size * (pool_size.bit_length() - 1) // 2
@@ -213,17 +214,18 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
     assert (
         _strict_referee_capacity_lower_horizon(
             match_count=match_count,
-            court_count=2,
+            court_count=court_count,
             organizer_capacity=1,
             final_count=pool_count,
             earliest_final_section=earliest_final,
+            ancestor_matches_per_final=pool_size - 2,
         )
         == expected
     )
     key = PlacementTemplateKey(
         pool_count=pool_count,
         pool_size=pool_size,
-        court_count=2,
+        court_count=court_count,
         organizer_capacity=1,
         day2_fallback=Day2Fallback.STRICT,
     )

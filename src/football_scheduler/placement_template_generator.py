@@ -142,6 +142,7 @@ class StabilizedPlacementTemplateSolver:
                 organizer_capacity=key.organizer_capacity,
                 final_count=key.pool_count,
                 earliest_final_section=earliest_final_section,
+                ancestor_matches_per_final=key.pool_size - 2,
             )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(
@@ -257,24 +258,34 @@ def _strict_referee_capacity_lower_horizon(
     organizer_capacity: int,
     final_count: int,
     earliest_final_section: int,
+    ancestor_matches_per_final: int,
 ) -> int:
     """strictで各sectionに置ける試合数の楽観上限からhorizon下限を返す。"""
 
     active_courts = min(court_count, organizer_capacity)
     unopened_by_final = final_count
     capacity = 0
+    capacity_by_section: list[int] = []
     horizon = 0
     while capacity < match_count:
         horizon += 1
         if horizon >= earliest_final_section and unopened_by_final > 0:
+            ancestor_capacity = capacity_by_section[horizon - 3] if horizon >= 3 else 0
+            maximum_ready_finals = min(
+                final_count,
+                ancestor_capacity // ancestor_matches_per_final,
+            )
+            opened_finals = final_count - unopened_by_final
             newly_opened = min(
                 organizer_capacity,
                 unopened_by_final,
                 court_count - active_courts,
+                max(0, maximum_ready_finals - opened_finals),
             )
             active_courts += newly_opened
             unopened_by_final -= newly_opened
         capacity += active_courts
+        capacity_by_section.append(capacity)
     return horizon
 
 
