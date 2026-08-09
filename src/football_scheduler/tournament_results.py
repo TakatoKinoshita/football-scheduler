@@ -14,9 +14,10 @@ from football_scheduler.tournament import (
     ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
-    TournamentPool,
+    TournamentPlanInvariantError,
     TournamentPoolPlan,
     WinnerOfRef,
+    validate_tournament_plan_invariants,
 )
 
 
@@ -31,7 +32,7 @@ class TournamentMatchResultInput(ContractModel):
 
 
 class TournamentResultsRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["tournament_results"]
     tournament_plan: TournamentPlan
     results: tuple[TournamentMatchResultInput, ...]
@@ -53,14 +54,14 @@ class TournamentMatchResult(ContractModel):
 
 class FinalStanding(ContractModel):
     rank: Annotated[int, Field(gt=0)]
-    pool: TournamentPool
+    pool_id: Identifier
     pool_rank: Annotated[int, Field(gt=0)]
     team_id: Identifier
     entry: TournamentEntry
 
 
 class TournamentStandings(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     status: Literal["COMPLETE"] = "COMPLETE"
     match_results: tuple[TournamentMatchResult, ...]
     standings: tuple[FinalStanding, ...]
@@ -85,13 +86,23 @@ def calculate_tournament_standings(
         else TournamentResultsRequest.model_validate(request)
     )
     plan = data.tournament_plan
+    _validate_dependencies(plan)
+    try:
+        validate_tournament_plan_invariants(plan)
+    except TournamentPlanInvariantError as exc:
+        raise TournamentResultsError(
+            "TOURNAMENT_SOURCE_INVALID",
+            "順位決定トーナメント計画を確認できませんでした。2日目の計画を作り直してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     if plan.participant_resolution is not ParticipantResolution.RESOLVED:
         raise TournamentResultsError(
             "TOURNAMENT_RESULTS_REQUIRE_RESOLVED_PLAN",
             "リーグ順位を確定してから2日目の試合結果を入力してください。",
         )
 
-    pools = (plan.upper, plan.lower)
+    pools = plan.pools
     all_matches = [match for pool in pools for match in pool.matches]
     match_ids = [match.id for match in all_matches]
     duplicated_plan_ids = sorted(
@@ -195,16 +206,14 @@ def calculate_tournament_standings(
         resolve_match(match.id)
 
     standings: list[FinalStanding] = []
-    upper_count = plan.upper.participant_count
     for pool in pools:
         _validate_placements(pool)
-        rank_offset = 0 if pool.pool is TournamentPool.UPPER else upper_count
         for placement in sorted(pool.placements, key=lambda item: item.rank):
             standings.append(
                 FinalStanding(
-                    rank=rank_offset + placement.rank,
-                    pool=pool.pool,
-                    pool_rank=placement.rank,
+                    rank=placement.rank,
+                    pool_id=pool.pool_id,
+                    pool_rank=placement.pool_rank,
                     team_id=resolve_entry(placement.entry),
                     entry=placement.entry,
                 )
@@ -233,17 +242,50 @@ def calculate_tournament_standings(
     )
 
 
+def _validate_dependencies(plan: TournamentPlan) -> None:
+    """既存の循環・未知参照診断を派生plan監査より先に保つ。"""
+
+    all_matches = [match for pool in plan.pools for match in pool.matches]
+    matches = {match.id: match for match in all_matches}
+    if len(matches) != len(all_matches):
+        raise _reference_error("duplicate_match_id")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(match_id: str) -> None:
+        if match_id in visited:
+            return
+        if match_id in visiting:
+            raise TournamentResultsError(
+                "TOURNAMENT_DEPENDENCY_CYCLE",
+                "トーナメントの試合参照が循環しています。トーナメント表を作り直してください。",
+                match_id=match_id,
+            )
+        match = matches.get(match_id)
+        if match is None:
+            raise _reference_error("unknown_dependency", match_id=match_id)
+        visiting.add(match_id)
+        for entry in (match.home, match.away):
+            if isinstance(entry, (WinnerOfRef, LoserOfRef)):
+                visit(entry.match_id)
+        visiting.remove(match_id)
+        visited.add(match_id)
+
+    for match in all_matches:
+        visit(match.id)
+
+
 def _team_by_rank(
-    pools: tuple[TournamentPoolPlan, TournamentPoolPlan],
+    pools: tuple[TournamentPoolPlan, ...],
 ) -> dict[tuple[str, int], str]:
     mapping: dict[tuple[str, int], str] = {}
     team_ids: set[str] = set()
     for pool in pools:
         if len(pool.seeds) != pool.participant_count:
-            raise _reference_error("seed_count_mismatch", pool=pool.pool.value)
+            raise _reference_error("seed_count_mismatch", pool_id=pool.pool_id)
         for seed in pool.seeds:
             if seed.team_id is None:
-                raise _reference_error("unresolved_seed", pool=pool.pool.value)
+                raise _reference_error("unresolved_seed", pool_id=pool.pool_id)
             key = (seed.block_id, seed.block_rank)
             if key in mapping or seed.team_id in team_ids:
                 raise _reference_error(
@@ -259,11 +301,11 @@ def _team_by_rank(
 
 def _validate_placements(pool: TournamentPoolPlan) -> None:
     ranks = sorted(placement.rank for placement in pool.placements)
-    expected = list(range(1, pool.participant_count + 1))
+    expected = list(range(pool.overall_rank_range[0], pool.overall_rank_range[1] + 1))
     if ranks != expected:
         raise _reference_error(
             "invalid_pool_placements",
-            pool=pool.pool.value,
+            pool_id=pool.pool_id,
             expected_ranks=expected,
             actual_ranks=ranks,
         )

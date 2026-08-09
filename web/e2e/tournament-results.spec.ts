@@ -21,8 +21,10 @@ type ResultInput = {
 
 function outcomeResponse(request: {
   tournament_plan: {
-    upper: { placements: Array<{ rank: number; entry: unknown }> };
-    lower: { placements: Array<{ rank: number; entry: unknown }> };
+    pools: Array<{
+      pool_id: string;
+      placements: Array<{ rank: number; pool_rank: number; entry: unknown }>;
+    }>;
   };
   results: ResultInput[];
 }) {
@@ -51,24 +53,17 @@ function outcomeResponse(request: {
     "team-08",
     "team-06",
   ];
-  const standings = [
-    ...request.tournament_plan.upper.placements.map((placement, index) => ({
+  const standings = request.tournament_plan.pools.flatMap((pool) =>
+    pool.placements.map((placement) => ({
       rank: placement.rank,
-      pool: "upper",
-      pool_rank: placement.rank,
-      team_id: finalTeams[index],
+      pool_id: pool.pool_id,
+      pool_rank: placement.pool_rank,
+      team_id: finalTeams[placement.rank - 1],
       entry: placement.entry,
-    })),
-    ...request.tournament_plan.lower.placements.map((placement, index) => ({
-      rank: 4 + placement.rank,
-      pool: "lower",
-      pool_rank: placement.rank,
-      team_id: finalTeams[4 + index],
-      entry: placement.entry,
-    })),
-  ];
+    }))
+  );
   return {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     status: "COMPLETE",
     match_results: matchResults,
     standings,
@@ -129,10 +124,10 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     "保存状態",
   ]);
   const scheduledSemifinal = page.locator(
-    '#day2-schedule-view tr[data-match-id="UT-SF1"]',
+    '#day2-schedule-view tr[data-match-id="PT-1-SF1"]',
   );
   const resultSemifinal = page.locator(
-    '#tournament-results-input tr[data-match-id="UT-SF1"]',
+    '#tournament-results-input tr[data-match-id="PT-1-SF1"]',
   );
   await expect(resultSemifinal.locator("td").nth(0)).toHaveText(
     await scheduledSemifinal.locator("td").nth(0).innerText(),
@@ -145,15 +140,15 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await expect(page.locator("#tournament-plan-view .result-disclosure")).toHaveCount(2);
   await expect(page.locator("#tournament-plan-view")).not.toContainText("抽選番号");
   await expect(page.locator("#day2-schedule-view")).not.toContainText("最大待ちセクション");
-  await expect(page.locator("#day2-schedule-view")).not.toContainText("未証明の下位目的");
+  await expect(page.locator("#day2-schedule-view")).not.toContainText("未証明の目的");
 
-  const finalRow = page.locator('#tournament-results-input tr[data-match-id="UT-FINAL"]');
+  const finalRow = page.locator('#tournament-results-input tr[data-match-id="PT-1-FINAL"]');
   await expect(finalRow).toContainText("前提試合の結果待ち");
-  await expect(finalRow.locator("input").first()).toBeDisabled();
+  await expect(finalRow.locator("input").first()).toHaveAttribute("aria-label", /前提試合待ち/u);
 
-  await fillRegularResult(page, "UT-SF1", "1", "0");
+  await fillRegularResult(page, "PT-1-SF1", "1", "0");
   const semifinalTwo = page.locator(
-    '#tournament-results-input tr[data-match-id="UT-SF2"]',
+    '#tournament-results-input tr[data-match-id="PT-1-SF2"]',
   );
   const regular = semifinalTwo.locator("td").nth(4).locator("input");
   await regular.nth(0).fill("1");
@@ -165,28 +160,28 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await penalty.nth(1).fill("3");
   await penalty.nth(1).press("Tab");
   await expect(
-    page.locator('#tournament-results-input tr[data-match-id="UT-SF2"]'),
+    page.locator('#tournament-results-input tr[data-match-id="PT-1-SF2"]'),
   ).toContainText("保存済み");
 
   await expect(finalRow).toContainText("青空FC 対 赤松FC");
   const upperBracket = page.locator(
-    '#tournament-plan-view .tournament-bracket[data-pool="upper"]',
+    '#tournament-plan-view .tournament-bracket[data-pool="placement-1"]',
   );
   await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="UT-SF2"]'),
+    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-SF2"]'),
   ).toContainText("PK 4-3");
   await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="UT-SF2"] .bracket-winner-label'),
+    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-SF2"] .bracket-winner-label'),
   ).toContainText("勝者：赤松FC");
   await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="UT-FINAL"]'),
+    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-FINAL"]'),
   ).toContainText("青空FC 対 赤松FC");
-  await fillRegularResult(page, "LT-SF1", "1", "0");
-  await fillRegularResult(page, "UT-PLACE3", "1", "0");
-  await fillRegularResult(page, "LT-SF2", "1", "0");
-  await fillRegularResult(page, "UT-FINAL", "2", "0");
-  await fillRegularResult(page, "LT-PLACE3", "1", "0");
-  await fillRegularResult(page, "LT-FINAL", "1", "0");
+  await fillRegularResult(page, "PT-2-SF1", "1", "0");
+  await fillRegularResult(page, "PT-1-PLACE3", "1", "0");
+  await fillRegularResult(page, "PT-2-SF2", "1", "0");
+  await fillRegularResult(page, "PT-1-FINAL", "2", "0");
+  await fillRegularResult(page, "PT-2-PLACE3", "1", "0");
+  await fillRegularResult(page, "PT-2-FINAL", "1", "0");
 
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
@@ -200,10 +195,10 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     .locator("tbody tr");
   await expect(standingsRows).toHaveCount(8);
   await expect(standingsRows.first()).toContainText(
-    "1位上位青空FC",
+    "1位第1順位帯青空FC",
   );
   await expect(standingsRows.nth(4)).toContainText(
-    "5位下位みどりSC",
+    "5位第2順位帯みどりSC",
   );
   await expect(
     page.getByRole("table", { name: "検証済みの2日目試合結果" }),
@@ -213,7 +208,7 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     "1位確定",
   );
   const correctedScore = page
-    .locator('#tournament-results-input tr[data-match-id="UT-SF1"] td')
+    .locator('#tournament-results-input tr[data-match-id="PT-1-SF1"] td')
     .nth(4)
     .locator("input")
     .first();

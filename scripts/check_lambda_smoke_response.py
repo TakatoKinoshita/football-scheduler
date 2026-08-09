@@ -24,7 +24,7 @@ def main() -> int:
         print("Lambdaのrelease IDがデプロイ対象と一致しません。", file=sys.stderr)
         return 1
     body = json.loads(envelope.get("body", "null"))
-    if not isinstance(body, dict) or body.get("schema_version") != "0.1.0":
+    if not isinstance(body, dict) or body.get("schema_version") != "0.2.0":
         print("Lambda応答のschema versionが一致しません。", file=sys.stderr)
         return 1
     validation = body.get("validation")

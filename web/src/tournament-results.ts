@@ -1,6 +1,10 @@
-import type { JsonObject } from "./types";
+import {
+  placementTournamentPool,
+  placementTournamentPools,
+  type JsonObject,
+} from "./types";
 
-export type TournamentPoolName = "upper" | "lower";
+export type TournamentPoolName = string;
 export type TournamentWinnerSide = "home" | "away";
 export type TournamentDecision = "regular_time" | "penalty_shootout";
 
@@ -62,18 +66,6 @@ function objectArray(value: unknown): JsonObject[] {
   return Array.isArray(value)
     ? value.map(objectValue).filter((item): item is JsonObject => item !== undefined)
     : [];
-}
-
-function poolValue(plan: JsonObject, pool: TournamentPoolName): JsonObject {
-  const value = objectValue(plan[pool]);
-  if (value === undefined) {
-    throw new TournamentProgressError(
-      "TOURNAMENT_RESULT_REFERENCE_INVALID",
-      "トーナメント表の上下区分を読み取れませんでした。",
-      { pool },
-    );
-  }
-  return value;
 }
 
 function identifier(value: unknown): string | undefined {
@@ -174,8 +166,8 @@ export function resolveTournamentProgress(
   }
   const matches = new Map<string, { match: JsonObject; pool: TournamentPoolName }>();
   const teamByRank = new Map<string, string>();
-  for (const pool of ["upper", "lower"] as const) {
-    const poolData = poolValue(plan, pool);
+  for (const pool of placementTournamentPools(plan)) {
+    const poolData = pool.data;
     for (const seed of objectArray(poolData.seeds)) {
       const blockId = identifier(seed.block_id);
       const rank = seed.block_rank;
@@ -184,7 +176,7 @@ export function resolveTournamentProgress(
         throw new TournamentProgressError(
           "TOURNAMENT_RESULT_REFERENCE_INVALID",
           "確定トーナメントのシードを読み取れませんでした。",
-          { pool },
+          { pool_id: pool.poolId },
         );
       }
       const key = `${blockId}:${String(rank)}`;
@@ -192,7 +184,7 @@ export function resolveTournamentProgress(
         throw new TournamentProgressError(
           "TOURNAMENT_RESULT_REFERENCE_INVALID",
           "確定トーナメントのシードが重複しています。",
-          { pool, block_id: blockId, rank, team_id: teamId },
+          { pool_id: pool.poolId, block_id: blockId, rank, team_id: teamId },
         );
       }
       teamByRank.set(key, teamId);
@@ -206,7 +198,7 @@ export function resolveTournamentProgress(
           { match_id: matchId ?? null },
         );
       }
-      matches.set(matchId, { match, pool });
+      matches.set(matchId, { match, pool: pool.poolId });
     }
   }
 
@@ -362,8 +354,8 @@ function matchDependencies(match: JsonObject): string[] {
 
 export function tournamentMatchDescendants(plan: JsonObject, sourceMatchId: string): Set<string> {
   const dependentMatches = new Map<string, Set<string>>();
-  for (const pool of ["upper", "lower"] as const) {
-    for (const match of objectArray(poolValue(plan, pool).matches)) {
+  for (const pool of placementTournamentPools(plan)) {
+    for (const match of objectArray(pool.data.matches)) {
       const matchId = identifier(match.id);
       if (matchId === undefined) continue;
       for (const dependency of matchDependencies(match)) {
@@ -433,12 +425,17 @@ export function overallTournamentRank(
   pool: TournamentPoolName,
   poolRank: number,
 ): number {
-  if (pool === "upper") return poolRank;
-  const upperCount = Number(poolValue(plan, "upper").participant_count);
-  if (!Number.isInteger(upperCount) || upperCount < 0) {
+  const poolInfo = placementTournamentPool(plan, pool);
+  const rawRange = poolInfo?.data.overall_rank_range;
+  if (Array.isArray(rawRange) && Number.isInteger(rawRange[0]) && Number(rawRange[0]) > 0) {
+    return Number(rawRange[0]) + poolRank - 1;
+  }
+  if (poolInfo?.legacyField === "upper") return poolRank;
+  const upperCount = Number(placementTournamentPool(plan, "upper")?.data.participant_count);
+  if (poolInfo?.legacyField !== "lower" || !Number.isInteger(upperCount) || upperCount < 0) {
     throw new TournamentProgressError(
       "TOURNAMENT_RESULT_REFERENCE_INVALID",
-      "上位トーナメントの参加数を読み取れませんでした。",
+      "順位帯の大会全体順位範囲を読み取れませんでした。",
     );
   }
   return upperCount + poolRank;
@@ -473,8 +470,8 @@ export function previewTournamentStandings(
     );
   }
   const teamByRank = new Map<string, string>();
-  for (const pool of ["upper", "lower"] as const) {
-    for (const seed of objectArray(poolValue(plan, pool).seeds)) {
+  for (const pool of placementTournamentPools(plan)) {
+    for (const seed of objectArray(pool.data.seeds)) {
       const blockId = identifier(seed.block_id);
       const rank = seed.block_rank;
       const teamId = identifier(seed.team_id);
@@ -505,20 +502,22 @@ export function previewTournamentStandings(
   };
 
   const standings: TournamentStandingPreview[] = [];
-  for (const pool of ["upper", "lower"] as const) {
-    for (const placement of objectArray(poolValue(plan, pool).placements)) {
-      const poolRank = Number(placement.rank);
+  for (const pool of placementTournamentPools(plan)) {
+    for (const placement of objectArray(pool.data.placements)) {
+      const poolRank = Number(placement.pool_rank ?? placement.rank);
       const entry = objectValue(placement.entry);
       if (!Number.isInteger(poolRank) || poolRank < 1 || entry === undefined) {
         throw new TournamentProgressError(
           "TOURNAMENT_RESULT_REFERENCE_INVALID",
           "最終順位の定義を読み取れませんでした。",
-          { pool },
+          { pool_id: pool.poolId },
         );
       }
       standings.push({
-        rank: overallTournamentRank(plan, pool, poolRank),
-        pool,
+        rank: pool.legacyField === undefined
+          ? Number(placement.rank)
+          : overallTournamentRank(plan, pool.poolId, poolRank),
+        pool: pool.poolId,
         pool_rank: poolRank,
         team_id: entryTeam(entry),
         entry,

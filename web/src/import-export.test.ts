@@ -6,14 +6,20 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
-import { scheduleViewTournamentFixture } from "../e2e/fixtures";
-import { createTournamentDocument } from "./types";
+import { sameRankWebFixture, scheduleViewTournamentFixture, tournamentFixture } from "../e2e/fixtures";
+import {
+  LEGACY_SCHEMA_VERSION,
+  SCHEMA_VERSION,
+  createTournamentDocument,
+  type TournamentDocument,
+} from "./types";
 
 function validDocument() {
   const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+  document.schemaVersion = LEGACY_SCHEMA_VERSION;
   document.tournament.name = "地区大会";
   document.tournament.input = {
-    schema_version: "0.1.0",
+    schema_version: LEGACY_SCHEMA_VERSION,
     teams: [
       { id: "team-01", name: "青" },
       { id: "team-02", name: "赤" },
@@ -33,6 +39,12 @@ function validDocument() {
 
 function rankedDocument() {
   const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+  document.schemaVersion = LEGACY_SCHEMA_VERSION;
+  document.tournament.input.schema_version = LEGACY_SCHEMA_VERSION;
+  (document.tournament.input.league as Record<string, unknown>).odd_split_policy = "upper";
+  const referees = document.tournament.input.referees as Record<string, unknown>;
+  referees.tournament_fallback = referees.day2_fallback;
+  delete referees.day2_fallback;
   document.tournament.name = "順位確定大会";
   document.tournament.input.teams = [
     { id: "team-01", name: "青" },
@@ -250,10 +262,276 @@ function provisionalDay2Document() {
   return document;
 }
 
+function completedSameRankStandingsDocument() {
+  const document = sameRankWebFixture(16) as unknown as TournamentDocument;
+  const result = document.tournament.result as Record<string, unknown>;
+  const plan = result.same_rank_plan as {
+    groups: Array<{
+      id: string;
+      overall_rank_range: number[];
+      participants: Array<{ entry: Record<string, unknown>; team: { team_id: string } }>;
+      matches: Array<{
+        id: string;
+        home_team: { team_id: string };
+        away_team: { team_id: string };
+      }>;
+    }>;
+  };
+  const results = plan.groups.flatMap((group) => group.matches.map((match) => ({
+    match_id: match.id,
+    home_team_id: match.home_team.team_id,
+    away_team_id: match.away_team.team_id,
+    regular_score_home: 1,
+    regular_score_away: 0,
+  })));
+  result.same_rank_league_results = results;
+  const standings = plan.groups.flatMap((group) => {
+    const stats = new Map(group.participants.map((participant) => [participant.team.team_id, {
+      played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, points: 0,
+      entry: participant.entry,
+    }]));
+    for (const match of group.matches) {
+      const home = stats.get(match.home_team.team_id)!;
+      const away = stats.get(match.away_team.team_id)!;
+      home.played += 1; home.wins += 1; home.goalsFor += 1; home.points += 3;
+      away.played += 1; away.losses += 1; away.goalsAgainst += 1;
+    }
+    return [...stats].sort(([, left], [, right]) =>
+      right.points - left.points ||
+      (right.goalsFor - right.goalsAgainst) - (left.goalsFor - left.goalsAgainst) ||
+      right.goalsFor - left.goalsFor
+    ).map(([teamId, values], index) => ({
+      rank: group.overall_rank_range[0]! + index,
+      group_id: group.id,
+      group_rank: index + 1,
+      team_id: teamId,
+      entry: values.entry,
+      played: values.played,
+      wins: values.wins,
+      draws: values.draws,
+      losses: values.losses,
+      goals_for: values.goalsFor,
+      goals_against: values.goalsAgainst,
+      goal_difference: values.goalsFor - values.goalsAgainst,
+      points: values.points,
+      tie_break: "勝点・得失点差・総得点",
+      head_to_head: null,
+      automatic: false,
+    }));
+  });
+  result.same_rank_standings = {
+    schema_version: "0.2.0",
+    status: "COMPLETE",
+    match_results: results.map((match) => ({ ...match, outcome: "home_win" })),
+    standings,
+    draws: [],
+  };
+  return document;
+}
+
 describe("大会JSONの入出力", () => {
-  it("書き出した文書を同じ内容で読み込む", () => {
-    const document = validDocument();
+  it("E2E用4チーム同順位リーグ文書を復元する", () => {
+    const document = tournamentFixture({ withResult: true }) as unknown as TournamentDocument;
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+  it("schema 0.2.0文書を書き出して同じ内容で読み込む", () => {
+    const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "白" },
+      { id: "team-04", name: "緑" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "strict_same_rank",
+    };
+
+    expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))
+      .toEqual(document);
+  });
+
+  it("同順位リーグの仮計画と仮日程を同じ内容で復元する", () => {
+    const document = sameRankWebFixture(16, { resolved: false });
+    expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))
+      .toEqual(document);
+  });
+
+  it("同順位グループの順位範囲改ざんを拒否する", () => {
+    const document = sameRankWebFixture(16, { resolved: false });
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = result.same_rank_plan as Record<string, unknown>;
+    const groups = plan.groups as Array<Record<string, unknown>>;
+    groups[0]!.overall_rank_range = [1, 5];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/順位範囲/);
+  });
+
+  it("割り切れる同順位リーグへ端数警告を混在させた文書を拒否する", () => {
+    const document = sameRankWebFixture(16, { resolved: false });
+    const result = document.tournament.result as Record<string, unknown>;
+    const plan = result.same_rank_plan as Record<string, unknown>;
+    plan.warnings = [{
+      code: "SAME_RANK_UNEVEN_BLOCKS",
+      message: "不正な警告",
+      group_id: null,
+      details: {},
+    }];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/警告/);
+  });
+
+  it("16チーム4ブロックの警告なし同順位リーグをJSON往復する", () => {
+    const document = sameRankWebFixture(16) as unknown as TournamentDocument;
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it("17チーム4ブロックのsingletonと2警告をJSON往復する", () => {
+    const document = sameRankWebFixture(17) as unknown as TournamentDocument;
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
+  it.each(["strict_same_rank", "merge_bottom"] as const)(
+    "18チーム4ブロックの%s同順位リーグをJSON往復する",
+    (policy) => {
+      const document = sameRankWebFixture(18, { policy }) as unknown as TournamentDocument;
+      expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+    },
+  );
+
+  it("同順位リーグ日程の重複slotと未知courtを拒否する", () => {
+    const duplicate = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const duplicateSchedule = (duplicate.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    const duplicateSlots = duplicateSchedule.slots as Array<Record<string, unknown>>;
+    duplicateSlots[1]!.section_no = duplicateSlots[0]!.section_no;
+    duplicateSlots[1]!.court_id = duplicateSlots[0]!.court_id;
+    expect(() => parseTournamentJson(JSON.stringify(duplicate))).toThrow(/スロット位置/);
+
+    const unknown = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const unknownSchedule = (unknown.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    (unknownSchedule.slots as Array<Record<string, unknown>>)[0]!.court_id = "unknown-court";
+    expect(() => parseTournamentJson(JSON.stringify(unknown))).toThrow(/スロット位置/);
+  });
+
+  it("同順位リーグ日程の未知審判順位枠を拒否する", () => {
+    const document = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const schedule = (document.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    const slot = (schedule.slots as Array<Record<string, unknown>>).find(
+      (item) => item.match_id !== null && item.section_no !== 1,
+    )!;
+    slot.referee_assignment = {
+      kind: "team",
+      rank_ref: { type: "league_rank", block_id: "UNKNOWN", rank: 1 },
+      team_id: null,
+      organizer_reason: null,
+      fallback_reasons: [],
+    };
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/チーム審判参照/);
+  });
+
+  it("同順位リーグの第1セクションでチーム審判を拒否する", () => {
+    const document = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const schedule = (document.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    const slot = (schedule.slots as Array<Record<string, unknown>>).find(
+      (item) => item.match_id !== null && item.section_no === 1,
+    )!;
+    slot.referee_assignment = {
+      kind: "team",
+      rank_ref: { type: "league_rank", block_id: "C", rank: 1 },
+      team_id: null,
+      organizer_reason: null,
+      fallback_reasons: [],
+    };
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/チーム審判参照/);
+  });
+
+  it("同順位リーグ日程の審判回数と目的別監査値の改ざんを拒否する", () => {
+    const missingRank = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const missingSchedule = (missingRank.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    const missingMetrics = missingSchedule.metrics as Record<string, unknown>;
+    (missingMetrics.referee_counts as Array<Record<string, unknown>>).pop();
+    expect(() => parseTournamentJson(JSON.stringify(missingRank))).toThrow(/審判回数監査値/);
+
+    const changedStage = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const changedSchedule = (changedStage.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    const changedMetrics = changedSchedule.metrics as Record<string, unknown>;
+    (changedMetrics.objective_stages as Array<Record<string, unknown>>)[0]!.value = 999;
+    expect(() => parseTournamentJson(JSON.stringify(changedStage))).toThrow(/目的別監査値/);
+  });
+
+  it("同順位リーグ日程の独立検証欠落と統合検証不一致を拒否する", () => {
+    const missing = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const missingSchedule = (missing.tournament.result as Record<string, unknown>).day2_schedule as Record<string, unknown>;
+    delete missingSchedule.validation;
+    expect(() => parseTournamentJson(JSON.stringify(missing))).toThrow(/独立検証/);
+
+    const mismatch = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const mismatchResult = mismatch.tournament.result as Record<string, unknown>;
+    mismatchResult.integrated_validation = { valid: true, diagnostics: [], summary: {} };
+    expect(() => parseTournamentJson(JSON.stringify(mismatch))).toThrow(/統合検証結果/);
+  });
+
+  it("同順位リーグ順位を保存済み結果から再検証する", () => {
+    const document = completedSameRankStandingsDocument();
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+
+    for (const field of ["points", "group_id", "entry"] as const) {
+      const tampered = structuredClone(document);
+      const result = tampered.tournament.result as Record<string, unknown>;
+      const final = result.same_rank_standings as Record<string, unknown>;
+      const rows = final.standings as Array<Record<string, unknown>>;
+      rows[0]![field] = field === "points"
+        ? 999
+        : field === "entry"
+          ? { type: "league_rank", block_id: "UNKNOWN", rank: 1 }
+          : "same-rank-unknown";
+      expect(() => parseTournamentJson(JSON.stringify(tampered))).toThrow(/保存済み結果/);
+    }
+    const duplicateCanonical = structuredClone(document);
+    const duplicateResult = duplicateCanonical.tournament.result as Record<string, unknown>;
+    const duplicateFinal = duplicateResult.same_rank_standings as Record<string, unknown>;
+    const canonical = duplicateFinal.match_results as Array<Record<string, unknown>>;
+    canonical[1] = structuredClone(canonical[0]!);
+    expect(() => parseTournamentJson(JSON.stringify(duplicateCanonical))).toThrow(/検証済み同順位リーグ結果/);
+    const swapped = structuredClone(document);
+    const swappedResult = swapped.tournament.result as Record<string, unknown>;
+    const swappedFinal = swappedResult.same_rank_standings as Record<string, unknown>;
+    const rows = swappedFinal.standings as Array<Record<string, unknown>>;
+    [rows[0], rows[1]] = [rows[1]!, rows[0]!];
+    expect(() => parseTournamentJson(JSON.stringify(swapped))).toThrow(/総合順位/);
+  });
+
+  it("plan未生成でも形式別の決勝設定不正を拒否する", () => {
+    const sameRank = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
+    sameRank.tournament.name = "不正設定";
+    sameRank.tournament.input.teams = [
+      { id: "team-01", name: "1" }, { id: "team-02", name: "2" },
+      { id: "team-03", name: "3" }, { id: "team-04", name: "4" },
+    ];
+    sameRank.tournament.input.courts = [{ id: "court-a", name: "A" }];
+    sameRank.tournament.input.league = { block_count: 1, assignment_mode: "random" };
+    sameRank.tournament.input.final_stage = { format: "same_rank_league", uneven_policy: "strict_same_rank" };
+    expect(() => parseTournamentJson(JSON.stringify(sameRank))).toThrow(/同順位リーグ/);
+
+    const placement = structuredClone(sameRank);
+    placement.tournament.input.teams = Array.from({ length: 8 }, (_, index) => ({
+      id: `team-${String(index + 1)}`, name: String(index + 1),
+    }));
+    placement.tournament.input.league = { block_count: 3, assignment_mode: "random" };
+    placement.tournament.input.final_stage = { format: "placement_tournament", tournament_count: 2 };
+    expect(() => parseTournamentJson(JSON.stringify(placement))).toThrow(/順位決定トーナメント/);
+  });
+
+  it("schema 0.1.0文書を閲覧・印刷用として内容を変えずに読み込む", () => {
+    const document = validDocument();
+
+    const parsed = parseTournamentJson(serializeTournamentJson(document));
+
+    expect(parsed).toEqual(document);
+    expect(parsed.schemaVersion).toBe(LEGACY_SCHEMA_VERSION);
   });
 
   it("従来のinput.matches形式でも1日目スロットを復元する", () => {
@@ -434,10 +712,43 @@ describe("大会JSONの入出力", () => {
     document.schemaVersion = "9.9.9";
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrowError(
       new ImportValidationError(
-        "UNSUPPORTED_SCHEMA_VERSION",
+        "SCHEMA_VERSION_UNSUPPORTED",
         "このファイルの版「9.9.9」には対応していません。アプリを更新してから再度お試しください。",
       ),
     );
+  });
+
+  it("文書と生成入力のschema versionが一致しないファイルを拒否する", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "版不一致大会";
+    document.tournament.input.schema_version = LEGACY_SCHEMA_VERSION;
+
+    let thrown: unknown;
+    try {
+      parseTournamentJson(JSON.stringify(document));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ImportValidationError);
+    expect(thrown).toMatchObject({ code: "SCHEMA_VERSION_UNSUPPORTED" });
+    expect((thrown as Error).message).toContain("一致しません");
+  });
+
+  it("生成結果の途中に異なるschema versionが混在するファイルを拒否する", () => {
+    const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const leaguePlan = result.league_plan as Record<string, unknown>;
+    leaguePlan.schema_version = LEGACY_SCHEMA_VERSION;
+
+    let thrown: unknown;
+    try {
+      parseTournamentJson(JSON.stringify(document));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ImportValidationError);
+    expect(thrown).toMatchObject({ code: "SCHEMA_VERSION_UNSUPPORTED" });
+    expect((thrown as Error).message).toContain("異なる版");
   });
 
   it("壊れたJSONを利用者向けメッセージで拒否する", () => {
@@ -776,10 +1087,16 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
-  it("決勝が最終でない旧ルールの2日目日程を監査値なしなら復元する", () => {
+  it("現行2日目日程は決勝配置の監査値がなければ拒否する", () => {
     const document = scheduleViewTournamentFixture();
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    const metrics = schedule.metrics as Record<string, unknown>;
+    delete metrics.placement_tournament_finals;
+    delete metrics.non_primary_final_max_gap;
+    delete metrics.non_primary_final_sum_gap;
 
-    expect(parseTournamentJson(JSON.stringify(document))).toEqual(document);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/決勝配置/);
   });
 
   it("現行監査値のある2日目日程で決勝が最終でなければ拒否する", () => {
@@ -787,11 +1104,19 @@ describe("大会JSONの入出力", () => {
     const result = document.tournament.result as Record<string, unknown>;
     const schedule = result.day2_schedule as Record<string, unknown>;
     const metrics = schedule.metrics as Record<string, unknown>;
-    metrics.upper_tournament_final_section = 4;
-    metrics.lower_tournament_final_section = 5;
-    metrics.lower_tournament_final_section_gap = 0;
+    const slots = schedule.slots as Array<Record<string, unknown>>;
+    const primary = slots.find((slot) => slot.match_id === "PT-1-FINAL")!;
+    const secondary = slots.find((slot) => slot.match_id === "PT-2-FINAL")!;
+    primary.match_id = "PT-2-FINAL";
+    secondary.match_id = "PT-1-FINAL";
+    metrics.placement_tournament_finals = [
+      { pool_id: "placement-1", section_no: 4, final_section_gap: 1 },
+      { pool_id: "placement-2", section_no: 5, final_section_gap: 0 },
+    ];
+    metrics.non_primary_final_max_gap = 0;
+    metrics.non_primary_final_sum_gap = 0;
 
-    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/現行ルール/);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/最高順位帯の決勝/);
   });
 
   it("2日目日程の決勝配置と現行監査値の不一致を拒否する", () => {
@@ -799,11 +1124,12 @@ describe("大会JSONの入出力", () => {
     const result = document.tournament.result as Record<string, unknown>;
     const schedule = result.day2_schedule as Record<string, unknown>;
     const metrics = schedule.metrics as Record<string, unknown>;
-    metrics.upper_tournament_final_section = 5;
-    metrics.lower_tournament_final_section = 5;
-    metrics.lower_tournament_final_section_gap = 0;
+    metrics.placement_tournament_finals = [
+      { pool_id: "placement-1", section_no: 4, final_section_gap: 1 },
+      { pool_id: "placement-2", section_no: 4, final_section_gap: 1 },
+    ];
 
-    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/監査値/);
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/決勝配置/);
   });
 
   it("2日目試合結果と総合最終順位を同じ内容で復元する", () => {

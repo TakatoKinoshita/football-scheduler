@@ -17,10 +17,12 @@ from football_scheduler.league import LeaguePlan, LeagueTeam
 from football_scheduler.models import (
     ContractModel,
     Court,
+    Day2Fallback,
     DaySettings,
     Diagnostic,
     Identifier,
     ObjectiveStageMetric,
+    PoolFinalMetric,
     RefereeAssignment,
     RefereeKind,
     RefereeSettings,
@@ -31,7 +33,6 @@ from football_scheduler.models import (
     SolverSettings,
     SolverStatus,
     TeamRefereeCount,
-    TournamentFallback,
 )
 from football_scheduler.timekeeping import (
     DayTimingError,
@@ -46,7 +47,9 @@ from football_scheduler.tournament import (
     ParticipantResolution,
     TournamentEntry,
     TournamentPlan,
+    TournamentPlanInvariantError,
     WinnerOfRef,
+    validate_tournament_plan_invariants,
 )
 
 _ORTOOLS_VERSION = version("ortools")
@@ -64,7 +67,7 @@ class Day1ScheduleSource(ContractModel):
 
 
 class Day2ScheduleRequest(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["day2_schedule"]
     teams: Annotated[tuple[LeagueTeam, ...], Field(min_length=2, max_length=32)]
     courts: Annotated[tuple[Court, ...], Field(min_length=1, max_length=16)]
@@ -98,18 +101,14 @@ class Day2ScheduleRequest(ContractModel):
         }
         seed_rank_refs = [
             (seed.block_id, seed.block_rank)
-            for pool in (self.tournament_plan.upper, self.tournament_plan.lower)
+            for pool in self.tournament_plan.pools
             for seed in pool.seeds
         ]
         if len(seed_rank_refs) != len(set(seed_rank_refs)):
             raise ValueError("トーナメントの順位枠が重複しています")
         if set(seed_rank_refs) != expected_rank_refs:
             raise ValueError("トーナメントの順位枠とリーグ計画が一致しません")
-        seed_values = [
-            seed.team_id
-            for pool in (self.tournament_plan.upper, self.tournament_plan.lower)
-            for seed in pool.seeds
-        ]
+        seed_values = [seed.team_id for pool in self.tournament_plan.pools for seed in pool.seeds]
         if self.tournament_plan.participant_resolution is ParticipantResolution.RESOLVED:
             if any(team_id is None for team_id in seed_values):
                 raise ValueError("トーナメントの参加チームが確定していません")
@@ -125,7 +124,8 @@ class ScheduledTournamentMatch(ContractModel):
     """配置・独立検証に使う参照付きトーナメント試合。"""
 
     id: Identifier
-    phase: Literal["upper_tournament", "lower_tournament"]
+    phase: Literal["placement_tournament"] = "placement_tournament"
+    pool_id: Identifier
     round: str
     round_no: Annotated[int, Field(gt=0)]
     home: TournamentEntry
@@ -134,7 +134,6 @@ class ScheduledTournamentMatch(ContractModel):
     possible_rank_refs: tuple[LeagueRankRef, ...] = ()
     possible_team_ids: tuple[Identifier, ...] = ()
     prerequisite_match_ids: tuple[Identifier, ...]
-    preliminary: bool = False
     final: bool = False
 
     @model_validator(mode="after")
@@ -170,7 +169,7 @@ class TeamRouteEntry(ContractModel):
 
 
 class Day2Schedule(ContractModel):
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     schedule_scope: Literal["day2_tournament"] = "day2_tournament"
     participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     status: SolverStatus
@@ -271,8 +270,9 @@ class _PathModel:
     dependencies: Mapping[str, frozenset[str]]
     conflict_pairs: frozenset[tuple[int, int]]
     team_by_rank: Mapping[_RankKey, str]
-    upper_final_index: int | None
-    lower_final_index: int | None
+    final_indexes: tuple[int, ...]
+    final_index_by_pool: Mapping[str, int]
+    primary_final_index: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +284,8 @@ class _ModelVariables:
     active_sections: tuple[cp_model.IntVar, ...]
     used_sections: cp_model.IntVar
     maximum_wait: cp_model.IntVar
-    lower_final_section_gap: cp_model.IntVar
+    non_primary_final_max_gap: cp_model.IntVar
+    non_primary_final_sum_gap: cp_model.IntVar
     court_change_count: cp_model.IntVar
     court_usage_difference: cp_model.IntVar
 
@@ -308,6 +309,15 @@ def generate_day2_schedule(
         if isinstance(request, Day2ScheduleRequest)
         else Day2ScheduleRequest.model_validate(request)
     )
+    try:
+        validate_tournament_plan_invariants(data.tournament_plan, data.league_plan)
+    except TournamentPlanInvariantError as exc:
+        raise Day2ScheduleError(
+            "TOURNAMENT_SOURCE_INVALID",
+            "順位決定トーナメント計画と予選ブロックの対応を確認できませんでした。2日目を再作成してください。",
+            reason=exc.reason,
+            **exc.details,
+        ) from exc
     path_model = _build_path_model(data.tournament_plan)
     if not path_model.matches:
         metrics = _empty_metrics(data)
@@ -366,13 +376,7 @@ def generate_day2_schedule(
             wall_time_seconds=layout.wall_time_seconds,
             required_matches=len(path_model.matches),
             available_slots=horizon * len(data.courts),
-            required_final_match_id=(
-                path_model.matches[path_model.upper_final_index].id
-                if path_model.upper_final_index is not None
-                else path_model.matches[path_model.lower_final_index].id
-                if path_model.lower_final_index is not None
-                else ""
-            ),
+            required_final_match_id=path_model.matches[path_model.primary_final_index].id,
             required_final_rule="last_occupied_section",
             maximum_sections=horizon,
             court_count=len(data.courts),
@@ -387,7 +391,7 @@ def generate_day2_schedule(
         layout,
         started,
     )
-    if invalid_reasons and data.referees.tournament_fallback is TournamentFallback.STRICT:
+    if invalid_reasons and data.referees.day2_fallback is Day2Fallback.STRICT:
         return _failed_schedule(
             data,
             path_model.matches,
@@ -420,52 +424,6 @@ def generate_day2_schedule(
     )
     result_status = SolverStatus.OPTIMAL if metrics.optimality_proven else SolverStatus.FEASIBLE
     diagnostic_items: list[Diagnostic] = []
-    lower_final_gap = metrics.lower_tournament_final_section_gap
-    if lower_final_gap is not None and lower_final_gap > 0:
-        gap_proven = "lower_tournament_final_section_gap" in metrics.optimized_objectives
-        reason_codes: list[str] = []
-        reason_messages: list[str] = []
-        if len(data.courts) < 2:
-            reason_codes.append("court_capacity")
-            reason_messages.append(f"利用できるコート数が{len(data.courts)}面")
-        if data.referees.organizer_capacity < 2:
-            reason_codes.append("organizer_capacity")
-            reason_messages.append(
-                f"同時に担当できる主催者審判能力が{data.referees.organizer_capacity}試合"
-            )
-        if not gap_proven:
-            reason_codes.append("optimality_not_proven")
-            reason_messages.append("制限時間内に最も遅い配置であることを未証明")
-        if not reason_codes:
-            reason_codes.append("other_hard_constraints")
-            reason_messages.append("休憩・試合依存・役割衝突などのハード制約")
-        if gap_proven:
-            message = (
-                "最小セクション数と既存の必須条件を保つと、下位トーナメント決勝を"
-                "上位決勝と同じ最終セクションへ配置できませんでした。"
-            )
-            code = "LOWER_TOURNAMENT_FINAL_NOT_LAST_SECTION"
-        else:
-            message = (
-                "下位トーナメント決勝は最終セクションより前です。制限時間内に、"
-                "これより遅い配置がないことまでは証明できませんでした。"
-            )
-            code = "LOWER_TOURNAMENT_FINAL_PLACEMENT_NOT_PROVEN"
-        message = f"{message}理由は{'、'.join(reason_messages)}です。"
-        diagnostic_items.append(
-            Diagnostic(
-                code=code,
-                message=message,
-                details={
-                    "upper_final_section": metrics.upper_tournament_final_section or 0,
-                    "lower_final_section": metrics.lower_tournament_final_section or 0,
-                    "section_gap": lower_final_gap,
-                    "court_count": len(data.courts),
-                    "organizer_capacity": data.referees.organizer_capacity,
-                    "reason_codes": reason_codes,
-                },
-            )
-        )
     if result_status is SolverStatus.FEASIBLE:
         diagnostic_items.append(
             Diagnostic(
@@ -536,7 +494,7 @@ def _find_referee_ready_layout(
             if count > data.referees.organizer_capacity
         }
         strict_invalid = bool(invalid_reasons) and (
-            data.referees.tournament_fallback is TournamentFallback.STRICT
+            data.referees.day2_fallback is Day2Fallback.STRICT
         )
         if not strict_invalid and not capacity_overruns:
             best_valid = (layout, slots, invalid_reasons, capacity_overruns)
@@ -582,7 +540,7 @@ def _find_referee_ready_layout(
 
 
 def _build_path_model(plan: TournamentPlan) -> _PathModel:
-    raw_matches = tuple((*plan.upper.matches, *plan.lower.matches))
+    raw_matches = tuple(match for pool in plan.pools for match in pool.matches)
     by_id = {match.id: match for match in raw_matches}
     if len(by_id) != len(raw_matches):
         raise Day2ScheduleError(
@@ -592,7 +550,7 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
     rank_teams: dict[_RankKey, str] = {}
     team_ranks: dict[str, _RankKey] = {}
     known_ranks: set[_RankKey] = set()
-    for pool in (plan.upper, plan.lower):
+    for pool in plan.pools:
         for seed in pool.seeds:
             key = (seed.block_id, seed.block_rank)
             if key in known_ranks:
@@ -682,6 +640,7 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         ScheduledTournamentMatch(
             id=match.id,
             phase=match.phase,
+            pool_id=match.pool_id,
             round=match.round,
             round_no=match.round_no,
             home=match.home,
@@ -697,31 +656,29 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
                 else ()
             ),
             prerequisite_match_ids=tuple(sorted(dependencies[match.id])),
-            preliminary="-PRELIM-" in match.id,
-            final=match.rank_range == (1, 2),
+            final=any(
+                match.pool_id == pool.pool_id
+                and match.rank_range == (pool.overall_rank_range[0], pool.overall_rank_range[0] + 1)
+                for pool in plan.pools
+            ),
         )
         for match in raw_matches
     )
-    final_indexes_by_phase = {
-        phase: [
+    final_index_by_pool: dict[str, int] = {}
+    for pool in plan.pools:
+        indexes = [
             index
             for index, match in enumerate(scheduled_matches)
-            if match.phase == phase and match.rank_range == (1, 2)
+            if match.pool_id == pool.pool_id and match.final
         ]
-        for phase in ("upper_tournament", "lower_tournament")
-    }
-    expected_final_counts = {
-        "upper_tournament": int(plan.upper.participant_count >= 2),
-        "lower_tournament": int(plan.lower.participant_count >= 2),
-    }
-    for phase, indexes in final_indexes_by_phase.items():
-        if len(indexes) != expected_final_counts[phase]:
+        if len(indexes) != 1:
             raise _invalid_reference(
                 "tournament_final_definition_invalid",
-                phase=phase,
-                expected=expected_final_counts[phase],
+                pool_id=pool.pool_id,
+                expected=1,
                 actual=len(indexes),
             )
+        final_index_by_pool[pool.pool_id] = indexes[0]
     conflict_pairs = frozenset(
         (left, right)
         for left in range(len(scheduled_matches))
@@ -737,8 +694,9 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
         dependencies=dependencies,
         conflict_pairs=conflict_pairs,
         team_by_rank=rank_teams,
-        upper_final_index=next(iter(final_indexes_by_phase["upper_tournament"]), None),
-        lower_final_index=next(iter(final_indexes_by_phase["lower_tournament"]), None),
+        final_indexes=tuple(final_index_by_pool[pool.pool_id] for pool in plan.pools),
+        final_index_by_pool=final_index_by_pool,
+        primary_final_index=final_index_by_pool[plan.pools[0].pool_id],
     )
 
 
@@ -806,26 +764,22 @@ def _build_cp_model(
         for dependency_id in dependency_ids:
             model.add(section_number[target] >= section_number[index_by_id[dependency_id]] + 2)
 
-    primary_final_index = (
-        path_model.upper_final_index
-        if path_model.upper_final_index is not None
-        else path_model.lower_final_index
+    model.add(section_number[path_model.primary_final_index] == used_sections)
+    non_primary_final_gaps: list[cp_model.IntVar] = []
+    for final_index in path_model.final_indexes[1:]:
+        gap = model.new_int_var(0, horizon, f"final_gap_{final_index}")
+        model.add(gap == used_sections - section_number[final_index])
+        non_primary_final_gaps.append(gap)
+    non_primary_final_max_gap = model.new_int_var(0, horizon, "non_primary_final_max_gap")
+    non_primary_final_sum_gap = model.new_int_var(
+        0, horizon * max(1, len(non_primary_final_gaps)), "non_primary_final_sum_gap"
     )
-    if primary_final_index is not None:
-        model.add(section_number[primary_final_index] == used_sections)
-    lower_final_section_gap = model.new_int_var(0, horizon, "lower_final_section_gap")
-    if path_model.upper_final_index is not None and path_model.lower_final_index is not None:
-        model.add(
-            lower_final_section_gap == used_sections - section_number[path_model.lower_final_index]
-        )
+    if non_primary_final_gaps:
+        model.add_max_equality(non_primary_final_max_gap, non_primary_final_gaps)
+        model.add(non_primary_final_sum_gap == sum(non_primary_final_gaps))
     else:
-        model.add(lower_final_section_gap == 0)
-
-    preliminary = [index for index, match in enumerate(path_model.matches) if match.preliminary]
-    main = [index for index, match in enumerate(path_model.matches) if not match.preliminary]
-    for preliminary_index in preliminary:
-        for main_index in main:
-            model.add(section_number[main_index] >= section_number[preliminary_index] + 1)
+        model.add(non_primary_final_max_gap == 0)
+        model.add(non_primary_final_sum_gap == 0)
 
     # 第1セクションは全試合が主催者審判になる。
     model.add(
@@ -892,7 +846,8 @@ def _build_cp_model(
         active_sections=active,
         used_sections=used_sections,
         maximum_wait=maximum_wait,
-        lower_final_section_gap=lower_final_section_gap,
+        non_primary_final_max_gap=non_primary_final_max_gap,
+        non_primary_final_sum_gap=non_primary_final_sum_gap,
         court_change_count=court_change_count,
         court_usage_difference=court_usage_difference,
     )
@@ -906,12 +861,13 @@ def _solve_lexicographically(
 ) -> _SolvedLayout:
     stages: tuple[tuple[str, cp_model.IntVar], ...] = (
         ("used_sections", variables.used_sections),
-        ("lower_tournament_final_section_gap", variables.lower_final_section_gap),
+        ("non_primary_final_max_gap", variables.non_primary_final_max_gap),
+        ("non_primary_final_sum_gap", variables.non_primary_final_sum_gap),
         ("maximum_team_wait_sections", variables.maximum_wait),
         ("team_court_change_count", variables.court_change_count),
         ("court_usage_difference", variables.court_usage_difference),
     )
-    budget_fractions = (0.5, 0.1, 0.16, 0.12, 0.12)
+    budget_fractions = (0.45, 0.08, 0.07, 0.16, 0.12, 0.12)
     best_solver: cp_model.CpSolver | None = None
     optimized: list[str] = []
     primary_bound = 0.0
@@ -1165,20 +1121,14 @@ def _audit_metrics(
     court_counts = Counter(slot.court_id for slot in occupied)
     counts = [court_counts[court.id] for court in data.courts]
     positions = {slot.match_id: slot.section_no for slot in occupied if slot.match_id is not None}
-    upper_final_section = (
-        positions.get(path_model.matches[path_model.upper_final_index].id)
-        if path_model.upper_final_index is not None
-        else None
-    )
-    lower_final_section = (
-        positions.get(path_model.matches[path_model.lower_final_index].id)
-        if path_model.lower_final_index is not None
-        else None
-    )
-    lower_final_gap = (
-        layout.solver.value(variables.lower_final_section_gap)
-        if path_model.lower_final_index is not None
-        else None
+    used_section_count = layout.solver.value(variables.used_sections)
+    final_metrics = tuple(
+        PoolFinalMetric(
+            pool_id=pool_id,
+            section_no=positions[path_model.matches[index].id],
+            final_section_gap=used_section_count - positions[path_model.matches[index].id],
+        )
+        for pool_id, index in path_model.final_index_by_pool.items()
     )
     referee_then_match_count, adjacent_move_count = _route_transition_counts(routes)
     league_counts, league_minimum, league_maximum, league_difference, previous_same_court = (
@@ -1187,8 +1137,12 @@ def _audit_metrics(
     stage_values = (
         ("used_sections", layout.solver.value(variables.used_sections)),
         (
-            "lower_tournament_final_section_gap",
-            layout.solver.value(variables.lower_final_section_gap),
+            "non_primary_final_max_gap",
+            layout.solver.value(variables.non_primary_final_max_gap),
+        ),
+        (
+            "non_primary_final_sum_gap",
+            layout.solver.value(variables.non_primary_final_sum_gap),
         ),
         ("league_team_referee_count_difference", league_difference),
         (
@@ -1221,7 +1175,8 @@ def _audit_metrics(
         for name, value in stage_values
         if name
         in {
-            "lower_tournament_final_section_gap",
+            "non_primary_final_max_gap",
+            "non_primary_final_sum_gap",
             "referee_then_match_count",
             "adjacent_assignment_court_change_count",
         }
@@ -1251,9 +1206,9 @@ def _audit_metrics(
         tournament_team_referee_count=team_referee_count,
         tournament_referee_fallback_count=fallback_count,
         unused_slot_count=len(slots) - len(occupied),
-        upper_tournament_final_section=upper_final_section,
-        lower_tournament_final_section=lower_final_section,
-        lower_tournament_final_section_gap=lower_final_gap,
+        placement_tournament_finals=final_metrics,
+        non_primary_final_max_gap=layout.solver.value(variables.non_primary_final_max_gap),
+        non_primary_final_sum_gap=layout.solver.value(variables.non_primary_final_sum_gap),
         optimized_objectives=optimized_objectives,
         objective_stages=tuple(
             ObjectiveStageMetric(
@@ -1335,7 +1290,8 @@ def _empty_metrics(data: Day2ScheduleRequest) -> SolverMetrics:
     )
     stage_values = (
         ("used_sections", 0),
-        ("lower_tournament_final_section_gap", 0),
+        ("non_primary_final_max_gap", 0),
+        ("non_primary_final_sum_gap", 0),
         ("league_team_referee_count_difference", league_difference),
         ("maximum_team_wait_sections", 0),
         ("referee_then_match_count", 0),

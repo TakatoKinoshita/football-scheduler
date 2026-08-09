@@ -21,7 +21,7 @@ def _function_url_event(body: Any, *, base64_encoded: bool = False) -> dict[str,
 def test_direct_event_is_forwarded_without_transport_wrapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = {"schema_version": "0.1.0", "random_seed": 20260803}
+    payload = {"schema_version": "0.2.0", "random_seed": 20260803}
     expected = {"status": "success", "schedule": []}
     received: list[dict[str, Any]] = []
 
@@ -38,7 +38,7 @@ def test_direct_event_is_forwarded_without_transport_wrapping(
 def test_function_url_json_body_is_decoded_and_response_is_wrapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = {"schema_version": "0.1.0", "teams": [{"id": "team-01"}]}
+    payload = {"schema_version": "0.2.0", "teams": [{"id": "team-01"}]}
     expected = {"status": "success", "message": "生成しました。"}
     received: list[dict[str, Any]] = []
 

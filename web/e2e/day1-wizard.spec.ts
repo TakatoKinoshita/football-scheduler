@@ -113,7 +113,7 @@ function manualGeneratedResult(request: {
   return {
     ...scheduleResult,
     league_plan: {
-      schema_version: "0.1.0",
+      schema_version: "0.2.0",
       assignment_mode: "manual",
       random_seed: 20260803,
       blocks,
@@ -141,6 +141,7 @@ async function fillThroughGeneration(page: import("@playwright/test").Page): Pro
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("seeded_snake");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
   await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
@@ -207,6 +208,7 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
 
   await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
@@ -267,6 +269,7 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート\nBコート");
   await page.getByLabel("青", { exact: true }).selectOption("A");
   await page.getByLabel("緑", { exact: true }).selectOption("B");
@@ -355,6 +358,7 @@ test("手動指定の人数超過では次へ進まない", async ({ page }) => 
   await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
   await page.locator("#courts").fill("Aコート");
   for (const name of ["青", "赤", "白", "緑"]) {
     await page.getByLabel(name, { exact: true }).selectOption("A");
@@ -449,8 +453,17 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
 }) => {
   await mockExternalServices(page);
   await openApp(page);
+  const source = tournamentFixture({ withResult: true }) as ReturnType<
+    typeof tournamentFixture
+  > & { tournament: { result: unknown } };
+  source.tournament.input.courts.push({ id: "court-b", name: "Bコート" });
+  source.tournament.input.league.block_count = 2;
+  source.tournament.result = generatedRolePathResult({
+    teams: source.tournament.input.teams,
+    courts: source.tournament.input.courts,
+  });
   const customized = JSON.parse(
-    JSON.stringify(tournamentFixture({ withResult: true }))
+    JSON.stringify(source)
       .replaceAll("team-01", "blue-team")
       .replaceAll("team-02", "green-team")
       .replaceAll("court-a", "main-pitch"),
@@ -465,19 +478,22 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(customized.tournament.result),
+      body: JSON.stringify(generatedRolePathResult(request)),
     });
   });
 
   await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
   await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
-  await expect(page.locator("#result-summary")).toContainText("配置済み 1試合");
+  await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
 
-  expect(request).toMatchObject({
-    teams: [{ id: "blue-team" }, { id: "green-team" }],
-    courts: [{ id: "main-pitch" }],
-    day: { game_duration_minutes: 40 },
-  });
+  expect(request).toMatchObject({ day: { game_duration_minutes: 40 } });
+  expect(request?.teams).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "blue-team" }),
+    expect.objectContaining({ id: "green-team" }),
+  ]));
+  expect(request?.courts).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "main-pitch" }),
+  ]));
 });
 
 test("生成直前の無効入力ではAPIを呼ばず安全確認を維持する", async ({ page }) => {

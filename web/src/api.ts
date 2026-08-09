@@ -12,6 +12,12 @@ function turnstileAction(input: JsonObject): string {
       return "generate_tournament";
     case "tournament_results":
       return "calculate_tournament_results";
+    case "same_rank_league_plan":
+      return "generate_same_rank_league";
+    case "same_rank_league_results":
+      return "calculate_same_rank_results";
+    case "same_rank_day2_schedule":
+      return "generate_same_rank_day2_schedule";
     case "day2_creation":
       return "create_day2";
     case "day2_schedule":
@@ -119,7 +125,7 @@ export function calculateLeagueStandings(
   return generateSchedule(input, turnstileToken, fetchImplementation);
 }
 
-/** リーグ順位枠と任意の確定順位から、上位・下位の完全順位決定表を生成する。 */
+/** リーグ順位枠と任意の確定順位から、順序付きプールの完全順位決定表を生成する。 */
 export function generateTournamentPlan(
   input: JsonObject,
   turnstileToken: string,
@@ -130,6 +136,15 @@ export function generateTournamentPlan(
 
 /** 入力済みの2日目試合結果を検証し、総合最終順位を確定する。 */
 export function calculateTournamentStandings(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}
+
+/** 同順位リーグの結果を検証し、グループ順位と総合順位を確定する。 */
+export function calculateSameRankStandings(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

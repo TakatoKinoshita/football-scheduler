@@ -244,7 +244,7 @@ def run_benchmark(fixture: str, repeat: int, timeout: float | None) -> dict[str,
     result_sizes = [run["result_bytes"] for run in runs]
     rss_values = [int(run["rss_after_bytes"]) for run in runs if run["rss_after_bytes"] is not None]
     return {
-        "benchmark_schema_version": "0.1.0",
+        "benchmark_schema_version": "0.2.0",
         "fixture": fixture,
         "repeat": repeat,
         "requested_timeout_seconds": timeout,

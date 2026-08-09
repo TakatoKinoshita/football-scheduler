@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from football_scheduler.final_stage import FinalStageConfig
 from football_scheduler.league import (
     AssignmentMode,
     LeagueGenerationError,
@@ -47,17 +48,17 @@ class Day1LeagueSettings(ContractModel):
         AssignmentMode.MANUAL,
     ] = AssignmentMode.RANDOM
     manual_blocks: tuple[Day1ManualBlock, ...] = ()
-    odd_split_policy: Literal["upper", "lower", "alternate"] = "upper"
 
 
 class Day1LeagueScheduleRequest(ContractModel):
     """対戦生成前の1日目リーグ日程リクエスト。"""
 
-    schema_version: Literal["0.1.0"] = "0.1.0"
+    schema_version: Literal["0.2.0"] = "0.2.0"
     request_kind: Literal["day1_league"]
     teams: Annotated[tuple[LeagueTeam, ...], Field(min_length=2, max_length=32)]
     courts: Annotated[tuple[Court, ...], Field(min_length=1, max_length=16)]
     league: Day1LeagueSettings
+    final_stage: FinalStageConfig
     day: DaySettings
     referees: RefereeSettings
     random_seed: int = 20260803
