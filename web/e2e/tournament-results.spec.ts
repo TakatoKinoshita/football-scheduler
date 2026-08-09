@@ -238,6 +238,7 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await expect(page.locator("#tournament-results-confirmation")).toBeHidden();
 
   await page.emulateMedia({ media: "screen" });
+  await page.locator("#tab-schedule-settings").click();
   await page.locator("#day2-margin-minutes").fill("15");
   await page.locator("#day2-margin-minutes").blur();
   const downloadPromise = page.waitForEvent("download");
