@@ -1,106 +1,184 @@
 #!/usr/bin/env python3
-"""MVP上限入力を本番HTTP adapter経由で反復検証する。"""
+"""最大構成の両日生成をhash seedの異なる本番HTTP adapterで検証する。"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import time
-from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from football_scheduler.api_handler import MAX_HTTP_BODY_BYTES, lambda_handler
-from football_scheduler.fixtures import make_maximum_mvp_request
+from football_scheduler.fixtures import make_maximum_schedule_creation_request
+
+_HASH_SEEDS = ("1", "987654321")
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="32チームの本番経路を30秒要件で検証します。")
+    parser = argparse.ArgumentParser(
+        description="32チーム・2トーナメントの本番経路を別プロセスで検証します。"
+    )
     parser.add_argument("--repeat", type=int, default=2, help="再現性確認の実行回数。既定は2回")
     parser.add_argument(
         "--maximum-seconds", type=float, default=30.0, help="1回あたりの許容時間。既定は30秒"
     )
+    parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
+def _remove_wall_times(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _remove_wall_times(item)
+            for key, item in value.items()
+            if key != "wall_time_seconds"
+        }
+    if isinstance(value, list):
+        return [_remove_wall_times(item) for item in value]
+    return value
+
+
 def _normalized_hash(result: dict[str, Any]) -> str:
-    normalized = deepcopy(result)
-    metrics = normalized.get("metrics")
-    if isinstance(metrics, dict):
-        metrics.pop("wall_time_seconds", None)
-    validation = normalized.get("validation")
-    if isinstance(validation, dict):
-        validation_metrics = validation.get("metrics")
-        if isinstance(validation_metrics, dict):
-            validation_metrics.pop("wall_time_seconds", None)
     encoded = json.dumps(
-        normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+        _remove_wall_times(result),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def main() -> int:
-    args = _parser().parse_args()
-    if args.repeat < 2:
-        print("再現性確認のため、--repeatは2以上にしてください。", file=sys.stderr)
-        return 2
-    if args.maximum_seconds <= 0:
-        print("--maximum-secondsは0より大きくしてください。", file=sys.stderr)
-        return 2
-
-    request = make_maximum_mvp_request().model_dump(mode="json")
-    body = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
-    event = {
+def _event() -> dict[str, object]:
+    body = json.dumps(
+        make_maximum_schedule_creation_request(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return {
         "httpMethod": "POST",
         "headers": {
             "content-type": "application/json",
-            "content-length": str(len(body.encode("utf-8"))),
-            "x-turnstile-action": "generate_schedule",
+            "content-length": str(len(body.encode())),
+            "x-turnstile-action": "create_schedule",
         },
         "body": body,
         "isBase64Encoded": False,
     }
-    hashes: list[str] = []
-    for attempt in range(1, args.repeat + 1):
-        started = time.perf_counter()
-        response = lambda_handler(event, None)
-        elapsed = time.perf_counter() - started
-        response_bytes = len(response["body"].encode("utf-8"))
-        result = json.loads(response["body"])
-        if response["statusCode"] != 200:
-            print(
-                f"{attempt}回目: APIが{response['statusCode']}を返しました: {result}",
-                file=sys.stderr,
-            )
-            return 1
-        if result.get("status") not in {"OPTIMAL", "FEASIBLE"}:
-            print(f"{attempt}回目: 実行可能な日程を得られませんでした: {result}", file=sys.stderr)
-            return 1
-        validation = result.get("validation")
-        if not isinstance(validation, dict) or validation.get("valid") is not True:
-            print(f"{attempt}回目: 独立制約検証に失敗しました: {validation}", file=sys.stderr)
-            return 1
-        if elapsed > args.maximum_seconds:
-            print(
-                f"{attempt}回目: {elapsed:.3f}秒で上限{args.maximum_seconds:.3f}秒を超えました。",
-                file=sys.stderr,
-            )
-            return 1
-        if response_bytes > MAX_HTTP_BODY_BYTES:
-            print(f"{attempt}回目: 応答が1 MBを超えました。", file=sys.stderr)
-            return 1
-        result_hash = _normalized_hash(result)
-        hashes.append(result_hash)
-        print(
-            f"{attempt}回目: {result['status']}、{elapsed:.3f}秒、"
-            f"{response_bytes:,}バイト、独立制約検証=合格"
-        )
 
-    if len(set(hashes)) != 1:
-        print("同じ入力とrandom_seedから異なる結果が生成されました。", file=sys.stderr)
+
+def _worker(maximum_seconds: float) -> int:
+    started = time.perf_counter()
+    response = lambda_handler(_event(), None)
+    elapsed = time.perf_counter() - started
+    response_bytes = len(response["body"].encode())
+    result: Any = json.loads(response["body"])
+    if response["statusCode"] != 200 or not isinstance(result, dict):
+        print(json.dumps({"error": "HTTP_ERROR", "response": response}, ensure_ascii=False))
         return 1
-    print(f"再現性=合格、結果SHA-256={hashes[0]}")
+    tournament_result = result.get("tournament_result")
+    day2 = tournament_result.get("day2_schedule") if isinstance(tournament_result, dict) else None
+    matches = day2.get("tournament_matches") if isinstance(day2, dict) else None
+    slots = day2.get("slots") if isinstance(day2, dict) else None
+    occupied_count = (
+        sum(isinstance(slot, dict) and slot.get("match_id") is not None for slot in slots)
+        if isinstance(slots, list)
+        else -1
+    )
+    validation = day2.get("validation") if isinstance(day2, dict) else None
+    integrated = day2.get("integrated_validation") if isinstance(day2, dict) else None
+    errors: list[str] = []
+    if result.get("status") not in {"OPTIMAL", "FEASIBLE"}:
+        errors.append("STATUS")
+    if not isinstance(matches, list) or len(matches) != 64 or occupied_count != 64:
+        errors.append("MATCH_COUNT")
+    if not isinstance(validation, dict) or validation.get("valid") is not True:
+        errors.append("VALIDATION")
+    if not isinstance(integrated, dict) or integrated.get("valid") is not True:
+        errors.append("INTEGRATED_VALIDATION")
+    if elapsed > maximum_seconds:
+        errors.append("TIME_LIMIT")
+    if response_bytes > MAX_HTTP_BODY_BYTES:
+        errors.append("RESPONSE_LIMIT")
+    payload = {
+        "status": result.get("status"),
+        "elapsed_seconds": elapsed,
+        "response_bytes": response_bytes,
+        "match_count": len(matches) if isinstance(matches, list) else -1,
+        "occupied_match_count": occupied_count,
+        "result_sha256": _normalized_hash(result),
+        "errors": errors,
+    }
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return int(bool(errors))
+
+
+def _run_worker(hash_seed: str, maximum_seconds: float) -> dict[str, Any]:
+    environment = os.environ.copy()
+    environment["PYTHONHASHSEED"] = hash_seed
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--maximum-seconds",
+        str(maximum_seconds),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=max(60.0, maximum_seconds + 15.0),
+    )
+    try:
+        payload: Any = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        payload = None
+    if result.returncode != 0 or not isinstance(payload, dict):
+        raise RuntimeError(
+            f"hash seed {hash_seed}のworkerが失敗しました: "
+            f"stdout={result.stdout[-2000:]!r} stderr={result.stderr[-2000:]!r}"
+        )
+    return payload
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    if args.maximum_seconds <= 0:
+        print("--maximum-secondsは0より大きくしてください。", file=sys.stderr)
+        return 2
+    if args.worker:
+        return _worker(args.maximum_seconds)
+    if args.repeat < 2:
+        print("再現性確認のため、--repeatは2以上にしてください。", file=sys.stderr)
+        return 2
+
+    payloads: list[dict[str, Any]] = []
+    try:
+        for attempt in range(args.repeat):
+            seed = _HASH_SEEDS[attempt % len(_HASH_SEEDS)]
+            payload = _run_worker(seed, args.maximum_seconds)
+            payloads.append(payload)
+            print(
+                f"{attempt + 1}回目(hash seed={seed}): {payload['status']}、"
+                f"{payload['elapsed_seconds']:.3f}秒、{payload['response_bytes']:,}バイト、"
+                f"2日目64試合・独立制約検証=合格"
+            )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    hashes = {str(payload["result_sha256"]) for payload in payloads}
+    if len(hashes) != 1:
+        print("異なるhash seedから異なる結果が生成されました。", file=sys.stderr)
+        return 1
+    digest = next(iter(hashes))
+    print(f"プロセス間再現性=合格、結果SHA-256={digest}")
     return 0
 
 

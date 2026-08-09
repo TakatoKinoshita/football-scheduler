@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import combinations
+from typing import Any
 
 from football_scheduler.models import (
     Court,
@@ -119,3 +120,43 @@ def make_maximum_mvp_request() -> ScheduleRequest:
         random_seed=20260803,
         solver=SolverSettings(max_time_seconds=20),
     )
+
+
+def make_maximum_schedule_creation_request() -> dict[str, Any]:
+    """32チーム・2トーナメントを両日生成する本番経路検証入力を返す。"""
+
+    return {
+        "schema_version": "0.2.0",
+        "request_kind": "schedule_creation",
+        "generation_scope": "all",
+        "teams": [
+            {"id": f"team-{index + 1:02d}", "name": f"チーム{index + 1}"} for index in range(32)
+        ],
+        "courts": [
+            {"id": f"court-{letter.lower()}", "name": f"{letter}コート"}
+            for letter in ("A", "B", "C", "D")
+        ],
+        "league": {"block_count": 8, "assignment_mode": "random"},
+        "final_stage": {"format": "placement_tournament", "tournament_count": 2},
+        "day": {
+            "id": "day1",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 5,
+            "max_sections": 24,
+        },
+        "day2": {
+            "id": "day2",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 10,
+            "max_sections": 40,
+        },
+        "referees": {
+            "organizer_capacity": 4,
+            "team_referees_required_after_first": False,
+            "day2_fallback": "organizer",
+        },
+        "random_seed": 20260803,
+        "solver": {"max_time_seconds": 20},
+    }

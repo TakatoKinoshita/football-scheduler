@@ -381,6 +381,18 @@ jobs:
             --no-cli-pager /tmp/lambda-smoke-response.json
           uv run python scripts/check_lambda_smoke_response.py \
             /tmp/lambda-smoke-response.json --release-id "$RELEASE_ID"
+          uv run python scripts/write_lambda_smoke_event.py \
+            /tmp/lambda-maximum-day2-event.json --maximum-day2
+          aws lambda invoke \
+            --function-name "${{ steps.stack.outputs.function }}" \
+            --qualifier live \
+            --payload fileb:///tmp/lambda-maximum-day2-event.json \
+            --cli-binary-format raw-in-base64-out \
+            --no-cli-pager /tmp/lambda-maximum-day2-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/lambda-maximum-day2-response.json \
+            --release-id "$RELEASE_ID" \
+            --maximum-day2
 
       - name: Update Pages Function secrets
         if: ${{ inputs.operation == 'apply' }}
