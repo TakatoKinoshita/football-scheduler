@@ -137,20 +137,19 @@ root.innerHTML = `
       <button id="convert-legacy-copy" class="secondary" type="button">編集用コピーを作成</button>
     </div>
 
-    <nav class="steps no-print" aria-label="作成手順">
-      <button class="step" type="button" data-step="1"><b>1</b><span>大会・チーム</span></button>
-      <button class="step" type="button" data-step="2"><b>2</b><span>ブロック・会場</span></button>
-      <button class="step" type="button" data-step="3"><b>3</b><span>1日目設定</span></button>
-      <button class="step" type="button" data-step="4"><b>4</b><span>1日目</span></button>
-      <button class="step" type="button" data-step="5"><b>5</b><span>2日目</span></button>
+    <nav class="steps no-print" role="tablist" aria-label="大会運営">
+      <button id="tab-tournament" class="step" role="tab" type="button" data-step="1" aria-controls="tournament-panel" aria-selected="true" tabindex="0"><b>1</b><span>大会・チーム</span></button>
+      <button id="tab-schedule-settings" class="step" role="tab" type="button" data-step="2" aria-controls="schedule-settings-panel" aria-selected="false" tabindex="-1"><b>2</b><span>日程設定・生成</span></button>
+      <button id="tab-day1" class="step" role="tab" type="button" data-step="3" aria-controls="day1-results-panel" aria-selected="false" tabindex="-1"><b>3</b><span>1日目</span></button>
+      <button id="tab-day2" class="step" role="tab" type="button" data-step="4" aria-controls="day2-results-panel" aria-selected="false" tabindex="-1"><b>4</b><span>2日目</span></button>
     </nav>
 
-    <section class="panel wizard-panel no-print" data-panel="1" aria-labelledby="step1-heading">
+    <section id="tournament-panel" class="panel wizard-panel no-print" role="tabpanel" data-panel="1" aria-labelledby="tab-tournament">
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 1 / 5</p>
-          <h2 id="step1-heading">大会名と参加チーム</h2>
-          <p>参加チームは、組合せ抽選に使う順番で1行に1チームずつ入力します。</p>
+          <p class="section-number">タブ 1 / 4</p>
+          <h2 id="step1-heading">大会・チーム</h2>
+          <p>大会名、参加チーム、会場で使用するコートを入力します。</p>
         </div>
         <span class="save-state" id="save-state" role="status">読み込み中…</span>
       </div>
@@ -167,22 +166,50 @@ root.innerHTML = `
           <small id="team-count">0 / 32チーム</small>
           <span id="teams-error" class="field-error" role="alert"></span>
         </label>
+        <label class="field" for="courts">
+          <span>使用コート <em>必須</em> <small>1行に1コート・1〜16コート</small></span>
+          <textarea id="courts" rows="8" placeholder="例：&#10;Aコート&#10;Bコート"></textarea>
+          <small id="court-count">0 / 16コート</small>
+          <span id="courts-error" class="field-error" role="alert"></span>
+        </label>
       </div>
       <div class="wizard-actions">
         <span></span>
-        <button id="step1-next" class="primary" type="button">次へ：ブロック・会場</button>
+        <button id="step1-next" class="primary" type="button">次へ：日程設定・生成</button>
       </div>
     </section>
 
-    <section class="panel wizard-panel no-print" data-panel="2" aria-labelledby="step2-heading" hidden>
+    <section id="schedule-settings-panel" class="panel wizard-panel no-print" role="tabpanel" data-panel="2" aria-labelledby="tab-schedule-settings" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 2 / 5</p>
-          <h2 id="step2-heading">ブロックと使用コート</h2>
-          <p>ブロック数を選び、会場で同時に使えるコートを入力します。</p>
+          <p class="section-number">タブ 2 / 4</p>
+          <h2 id="step2-heading">日程設定・生成</h2>
+          <p>両日の大会設定を確認し、日程を生成します。</p>
         </div>
       </div>
-      <div class="form-grid">
+      <section id="common-settings" class="settings-section" aria-labelledby="common-settings-heading">
+        <h3 id="common-settings-heading">両日共通</h3>
+        <details class="advanced-settings" open>
+          <summary>共通設定を表示</summary>
+          <div class="form-grid">
+            <label class="field" for="organizer-capacity">
+              <span>同時に担当できる主催者審判数</span>
+              <input id="organizer-capacity" type="number" min="0" max="16" inputmode="numeric" />
+              <small>変更するまでは、使用コート数と同じ値になります。</small>
+              <span id="organizer-capacity-error" class="field-error" role="alert"></span>
+            </label>
+            <label class="field" for="random-seed">
+              <span>抽選番号</span>
+              <input id="random-seed" type="number" step="1" inputmode="numeric" />
+              <small>同じ入力と番号なら同じ抽選結果になります。</small>
+              <span id="random-seed-error" class="field-error" role="alert"></span>
+            </label>
+          </div>
+        </details>
+      </section>
+      <section id="day1-settings" class="settings-section" aria-labelledby="day1-settings-heading">
+        <h3 id="day1-settings-heading">1日目の情報</h3>
+        <div class="form-grid">
         <label class="field" for="block-count">
           <span>ブロック数 <em>必須</em></span>
           <select id="block-count"><option value="">選択してください</option></select>
@@ -206,6 +233,44 @@ root.innerHTML = `
           <div id="manual-block-team-list" class="manual-block-team-list"></div>
           <span id="manual-blocks-error" class="field-error" role="alert"></span>
         </fieldset>
+        </div>
+        <div class="form-grid three-columns">
+          <label class="field" for="start-time">
+            <span>開始時刻 <em>必須</em></span>
+            <input id="start-time" type="time" step="60" />
+            <span id="start-time-error" class="field-error" role="alert"></span>
+          </label>
+          <label class="field" for="game-duration">
+            <span>1試合の時間（分） <em>必須</em></span>
+            <input id="game-duration" type="number" min="1" max="240" inputmode="numeric" />
+            <span id="game-duration-error" class="field-error" role="alert"></span>
+          </label>
+          <label class="field" for="margin-minutes">
+            <span>試合間隔（分） <em>必須</em></span>
+            <input id="margin-minutes" type="number" min="0" max="240" inputmode="numeric" />
+            <span id="margin-minutes-error" class="field-error" role="alert"></span>
+          </label>
+        </div>
+        <details class="advanced-settings">
+          <summary>1日目の詳細設定を表示</summary>
+          <div class="form-grid">
+            <label class="field" for="max-sections">
+              <span>最大セクション数 <small>任意</small></span>
+              <input id="max-sections" type="number" min="1" max="128" inputmode="numeric" placeholder="指定しない" />
+              <small>空欄の場合は、必要な数を自動で使います。</small>
+              <span id="max-sections-error" class="field-error" role="alert"></span>
+            </label>
+            <label class="check-field field-wide" for="team-referees">
+              <input id="team-referees" type="checkbox" />
+              <span>第2セクション以降は、空いている参加チームにも審判を割り当てる</span>
+            </label>
+            <span id="team-referees-error" class="field-error field-wide" role="alert"></span>
+          </div>
+        </details>
+      </section>
+      <section id="day2-settings" class="settings-section" aria-labelledby="day2-settings-heading">
+        <h3 id="day2-settings-heading">2日目の情報</h3>
+        <div class="form-grid">
         <label class="field" for="final-stage-format">
           <span>2日目の決勝方式 <em>必須</em></span>
           <select id="final-stage-format">
@@ -237,89 +302,77 @@ root.innerHTML = `
           <small>各ブロックの人数が揃わない場合だけ選択します。</small>
           <span id="same-rank-uneven-policy-error" class="field-error" role="alert"></span>
         </label>
-        <label class="field field-wide" for="courts">
-          <span>使用コート <em>必須</em> <small>1行に1コート・1〜16コート</small></span>
-          <textarea id="courts" rows="8" placeholder="例：&#10;Aコート&#10;Bコート"></textarea>
-          <small id="court-count">0 / 16コート</small>
-          <span id="courts-error" class="field-error" role="alert"></span>
-        </label>
-      </div>
-      <div class="wizard-actions">
-        <button id="step2-back" class="secondary" type="button">戻る</button>
-        <button id="step2-next" class="primary" type="button">次へ：時刻・生成</button>
-      </div>
-    </section>
-
-    <section class="panel wizard-panel no-print" data-panel="3" aria-labelledby="step3-heading" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="section-number">手順 3 / 5</p>
-          <h2 id="step3-heading">開催時刻を確認して生成</h2>
-          <p>安全確認後、最大30秒で1日目の結果を表示します。通信中も入力は失われません。</p>
         </div>
-      </div>
       <div class="form-grid three-columns">
-        <label class="field" for="start-time">
-          <span>開始時刻 <em>必須</em></span>
-          <input id="start-time" type="time" step="60" />
-          <span id="start-time-error" class="field-error" role="alert"></span>
+        <label class="field" for="day2-start-time">
+          <span>開始時刻</span>
+          <input id="day2-start-time" type="time" step="60" value="09:30" />
         </label>
-        <label class="field" for="game-duration">
+        <label class="field" for="day2-game-duration">
           <span>1試合の時間（分） <em>必須</em></span>
-          <input id="game-duration" type="number" min="1" max="240" inputmode="numeric" />
-          <span id="game-duration-error" class="field-error" role="alert"></span>
+          <input id="day2-game-duration" type="number" min="1" max="240" inputmode="numeric" value="35" />
         </label>
-        <label class="field" for="margin-minutes">
+        <label class="field" for="day2-margin-minutes">
           <span>試合間隔（分） <em>必須</em></span>
-          <input id="margin-minutes" type="number" min="0" max="240" inputmode="numeric" />
-          <span id="margin-minutes-error" class="field-error" role="alert"></span>
+          <input id="day2-margin-minutes" type="number" min="0" max="240" inputmode="numeric" value="10" />
         </label>
       </div>
       <details class="advanced-settings">
-        <summary>詳細設定を表示</summary>
+        <summary>2日目の詳細設定を表示</summary>
         <div class="form-grid">
-          <label class="field" for="organizer-capacity">
-            <span>同時に担当できる主催者審判数</span>
-            <input id="organizer-capacity" type="number" min="0" max="16" inputmode="numeric" />
-            <small>変更するまでは、使用コート数と同じ値になります。</small>
-            <span id="organizer-capacity-error" class="field-error" role="alert"></span>
+          <label class="field" for="day2-end-time">
+            <span>終了時刻 <small>任意</small></span>
+            <input id="day2-end-time" type="time" step="60" />
           </label>
-          <label class="field" for="max-sections">
+          <label class="field" for="day2-max-sections">
             <span>最大セクション数 <small>任意</small></span>
-            <input id="max-sections" type="number" min="1" max="128" inputmode="numeric" placeholder="指定しない" />
-            <small>空欄の場合は、必要な数を自動で使います。</small>
-            <span id="max-sections-error" class="field-error" role="alert"></span>
+            <input id="day2-max-sections" type="number" min="1" max="128" inputmode="numeric" />
           </label>
-          <label class="field" for="random-seed">
-            <span>抽選番号</span>
-            <input id="random-seed" type="number" step="1" inputmode="numeric" />
-            <small>同じ入力と番号なら同じ抽選結果になります。</small>
-            <span id="random-seed-error" class="field-error" role="alert"></span>
+          <label class="field" for="day2-fallback">
+            <span>審判を確保できない場合</span>
+            <select id="day2-fallback">
+              <option value="organizer">主催者審判へ切り替える</option>
+              <option value="strict">配置を組み直し、切替を許可しない</option>
+            </select>
           </label>
-          <label class="check-field field-wide" for="team-referees">
-            <input id="team-referees" type="checkbox" />
-            <span>第2セクション以降は、空いている参加チームにも審判を割り当てる</span>
+          <label class="field field-wide" for="day2-breaks">
+            <span>休憩 <small>任意・1行に「セクション:分」</small></span>
+            <textarea id="day2-breaks" rows="3" placeholder="例：&#10;4:60"></textarea>
           </label>
-          <span id="team-referees-error" class="field-error field-wide" role="alert"></span>
         </div>
       </details>
+      </section>
+      <section id="schedule-generation" class="settings-section" aria-labelledby="schedule-generation-heading">
       <div class="generation-box">
-        <h3>入力確認と安全確認</h3>
+        <h3 id="schedule-generation-heading">日程生成</h3>
+        <h4>入力確認と安全確認</h4>
         <p id="generation-review">入力内容を確認しています。</p>
         <div id="turnstile-widget" class="turnstile-box" aria-label="安全確認">この手順を開くと安全確認を読み込みます。</div>
         <button id="generate" class="primary" type="button" disabled>1日目の日程を生成する</button>
         <p id="generation-status" class="status-message" role="status" aria-live="polite"></p>
+        <div id="day2-generation-confirmation" class="standings-confirmation" hidden>
+          <h3>2日目を作成する</h3>
+          <p id="tournament-review">リーグ順位枠を確認しています。</p>
+          <p>トーナメント表と時刻・コート・審判をまとめて作成します。</p>
+          <p id="day2-review">2日目設定を確認しています。</p>
+          <div id="day2-creation-turnstile-widget" class="turnstile-box" aria-label="2日目作成の安全確認">
+            安全確認を読み込んでいます。
+          </div>
+          <button id="generate-day2" class="primary" type="button" disabled>2日目を作成する</button>
+          <p id="day2-status" class="status-message" role="status" aria-live="polite"></p>
+        </div>
       </div>
       <div class="wizard-actions">
-        <button id="step3-back" class="secondary" type="button">戻る</button>
+        <button id="step2-back" class="secondary" type="button">大会・チームへ戻る</button>
         <span></span>
       </div>
+      </section>
     </section>
 
-    <section id="day1-results-panel" class="panel results day-result" data-panel="4" aria-labelledby="results-heading" hidden>
+    <section id="day1-results-panel" class="panel results day-result" role="tabpanel" data-panel="3" aria-labelledby="tab-day1" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 4 / 5</p>
+          <p class="section-number">タブ 3 / 4</p>
           <h2 id="results-heading">1日目の日程とリーグ結果</h2>
           <p id="result-summary">まだ生成結果はありません。</p>
         </div>
@@ -342,19 +395,19 @@ root.innerHTML = `
           <h3>2日目の準備へ進めます</h3>
           <p>順位未確定でも仮トーナメントを作成でき、確定後はチーム名を反映します。</p>
         </div>
-        <button id="go-day2" class="primary" type="button">2日目へ進む</button>
+        <button id="go-day2" class="primary" type="button">2日目の日程を見る</button>
       </div>
       <div class="wizard-actions no-print">
-        <button id="step4-back" class="secondary" type="button">設定へ戻る</button>
+        <button id="step3-back" class="secondary" type="button">設定へ戻る</button>
         <span></span>
       </div>
     </section>
 
-    <section id="day2-results-panel" class="panel results day-result" data-panel="5" aria-labelledby="day2-results-heading" hidden>
+    <section id="day2-results-panel" class="panel results day-result" role="tabpanel" data-panel="4" aria-labelledby="tab-day2" hidden>
       <div class="section-heading">
         <div>
-          <p class="section-number">手順 5 / 5</p>
-          <h2 id="day2-results-heading">2日目のトーナメントと日程</h2>
+          <p class="section-number">タブ 4 / 4</p>
+          <h2 id="day2-results-heading">2日目の日程と結果</h2>
           <p id="day2-result-summary">1日目の日程を作成すると、仮トーナメントを作成できます。</p>
         </div>
         <div class="button-row no-print">
@@ -365,55 +418,6 @@ root.innerHTML = `
       <div id="day2-result-content" class="result-content empty">
         1日目タブで日程を作成してください。
       </div>
-      <div id="day2-generation-confirmation" class="standings-confirmation no-print" hidden>
-        <h3>2日目を作成する</h3>
-        <p id="tournament-review">リーグ順位枠を確認しています。</p>
-        <p>トーナメント表と時刻・コート・審判をまとめて作成します。</p>
-        <div class="form-grid three-columns">
-          <label class="field" for="day2-start-time">
-            <span>開始時刻</span>
-            <input id="day2-start-time" type="time" step="60" value="09:30" />
-          </label>
-          <label class="field" for="day2-game-duration">
-            <span>1試合の時間（分）</span>
-            <input id="day2-game-duration" type="number" min="1" max="240" inputmode="numeric" value="35" />
-          </label>
-          <label class="field" for="day2-margin-minutes">
-            <span>試合間隔（分）</span>
-            <input id="day2-margin-minutes" type="number" min="0" max="240" inputmode="numeric" value="10" />
-          </label>
-        </div>
-        <details class="advanced-settings">
-          <summary>2日目の詳細設定を表示</summary>
-          <div class="form-grid">
-            <label class="field" for="day2-end-time">
-              <span>終了時刻 <small>任意</small></span>
-              <input id="day2-end-time" type="time" step="60" />
-            </label>
-            <label class="field" for="day2-max-sections">
-              <span>最大セクション数 <small>任意</small></span>
-              <input id="day2-max-sections" type="number" min="1" max="128" inputmode="numeric" />
-            </label>
-            <label class="field" for="day2-fallback">
-              <span>審判を確保できない場合</span>
-              <select id="day2-fallback">
-                <option value="organizer">主催者審判へ切り替える</option>
-                <option value="strict">配置を組み直し、切替を許可しない</option>
-              </select>
-            </label>
-            <label class="field field-wide" for="day2-breaks">
-              <span>休憩 <small>任意・1行に「セクション:分」</small></span>
-              <textarea id="day2-breaks" rows="3" placeholder="例：&#10;4:60"></textarea>
-            </label>
-          </div>
-        </details>
-        <p id="day2-review">2日目設定を確認しています。</p>
-        <div id="day2-creation-turnstile-widget" class="turnstile-box" aria-label="2日目作成の安全確認">
-          安全確認を読み込んでいます。
-        </div>
-        <button id="generate-day2" class="primary" type="button" disabled>2日目を作成する</button>
-        <p id="day2-status" class="status-message" role="status" aria-live="polite"></p>
-      </div>
       <div id="tournament-results-confirmation" class="standings-confirmation no-print" hidden>
         <h3>総合最終順位を確定する</h3>
         <p id="tournament-results-progress">2日目の試合結果を確認しています。</p>
@@ -422,10 +426,6 @@ root.innerHTML = `
         </div>
         <button id="confirm-tournament-results" class="primary" type="button" disabled>総合最終順位を確定する</button>
         <p id="tournament-results-status" class="status-message" role="status" aria-live="polite"></p>
-      </div>
-      <div class="wizard-actions no-print">
-        <button id="step5-back" class="secondary" type="button">1日目へ戻る</button>
-        <span></span>
       </div>
     </section>
 
@@ -487,8 +487,8 @@ function restoredWizardStep(document: TournamentDocument): WizardStep {
   return asObject(result.tournament_plan) !== undefined ||
     asObject(result.same_rank_plan) !== undefined ||
     asObject(result.day2_schedule) !== undefined
-    ? 5
-    : 4;
+    ? 4
+    : 3;
 }
 
 function inputNumber(input: HTMLInputElement): number | null {
@@ -761,7 +761,7 @@ function turnstileApi(): TurnstileApi | undefined {
 
 function refreshGenerateEnabled(): void {
   generateButton.disabled =
-    legacyCompatibility || turnstileToken.length === 0 || !navigator.onLine || currentStep !== 3;
+    legacyCompatibility || turnstileToken.length === 0 || !navigator.onLine || currentStep !== 2;
 }
 
 function requireTurnstileConfirmation(message: string): void {
@@ -1436,7 +1436,7 @@ function renderResult(): void {
       .map((assignment) => [String(assignment.team_id), String(assignment.block_id)]),
   );
   standingsConfirmation.hidden = blocks.length === 0;
-  goDay2Area.hidden = blocks.length === 0;
+  goDay2Area.hidden = asObject(result.day2_schedule) === undefined;
 
   const day1ScheduleContainer = window.document.createElement("div");
   day1ScheduleContainer.id = "day1-schedule-view";
@@ -3281,7 +3281,7 @@ function setLegacyControlsDisabled(disabled: boolean): void {
   requiredElement<HTMLElement>("#legacy-banner").hidden = !disabled;
   manualBlocksField.disabled = disabled;
   for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-    "[data-panel='4'] input, [data-panel='4'] select, [data-panel='4'] textarea, [data-panel='5'] input, [data-panel='5'] select, [data-panel='5'] textarea",
+    "[data-panel='3'] input, [data-panel='3'] select, [data-panel='3'] textarea, [data-panel='4'] input, [data-panel='4'] select, [data-panel='4'] textarea",
   )) {
     control.disabled = disabled;
   }
@@ -3344,14 +3344,14 @@ function renderStep(): void {
   for (const step of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
     const active = Number(step.dataset.step) === currentStep;
     step.classList.toggle("active", active);
-    if (active) step.setAttribute("aria-current", "step");
-    else step.removeAttribute("aria-current");
+    step.setAttribute("aria-selected", String(active));
+    step.tabIndex = active ? 0 : -1;
   }
   updateReview();
   refreshGenerateEnabled();
-  if (currentStep === 4) document.body.dataset.printScope = "day1";
-  if (currentStep === 5) document.body.dataset.printScope = "day2";
-  if (currentStep === 3) setupTurnstile();
+  if (currentStep === 3) document.body.dataset.printScope = "day1";
+  if (currentStep === 4) document.body.dataset.printScope = "day2";
+  if (currentStep === 2) setupTurnstile();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -3650,22 +3650,8 @@ function showFieldIssues(issues: FieldIssue[]): void {
   }
 }
 
-function goToStep(step: WizardStep, validateForward = true): boolean {
+function goToStep(step: WizardStep): boolean {
   updateDraft(false);
-  if (validateForward && !legacyCompatibility && step > currentStep) {
-    const through = Math.min(step - 1, 3) as 1 | 2 | 3;
-    const issues = validateDay1LeagueDocument(documentState, through);
-    if (issues.length > 0) {
-      const first = issues[0];
-      currentStep = first?.step ?? currentStep;
-      showFieldIssues(issues);
-      generationStatus.textContent =
-        "入力を修正してください。赤字の説明に、必要な対応を表示しています。";
-      renderStep();
-      document.getElementById(first?.field ?? "")?.focus();
-      return false;
-    }
-  }
   clearFieldIssues();
   currentStep = step;
   renderStep();
@@ -3718,16 +3704,28 @@ organizerCapacityInput.addEventListener("input", () => {
 for (const stepButton of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
   stepButton.addEventListener("click", () => {
     const step = Number(stepButton.dataset.step) as WizardStep;
-    goToStep(step, step > currentStep);
+    goToStep(step);
+  });
+  stepButton.addEventListener("keydown", (event) => {
+    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".step[data-step]"));
+    const index = tabs.indexOf(stepButton);
+    let targetIndex: number | undefined;
+    if (event.key === "ArrowRight") targetIndex = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") targetIndex = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") targetIndex = 0;
+    else if (event.key === "End") targetIndex = tabs.length - 1;
+    if (targetIndex === undefined) return;
+    event.preventDefault();
+    const target = tabs[targetIndex];
+    if (target === undefined) return;
+    goToStep(Number(target.dataset.step) as WizardStep);
+    target.focus();
   });
 }
 requiredElement<HTMLButtonElement>("#step1-next").addEventListener("click", () => goToStep(2));
-requiredElement<HTMLButtonElement>("#step2-back").addEventListener("click", () => goToStep(1, false));
-requiredElement<HTMLButtonElement>("#step2-next").addEventListener("click", () => goToStep(3));
-requiredElement<HTMLButtonElement>("#step3-back").addEventListener("click", () => goToStep(2, false));
-requiredElement<HTMLButtonElement>("#step4-back").addEventListener("click", () => goToStep(3, false));
-requiredElement<HTMLButtonElement>("#step5-back").addEventListener("click", () => goToStep(4, false));
-requiredElement<HTMLButtonElement>("#go-day2").addEventListener("click", () => goToStep(5, false));
+requiredElement<HTMLButtonElement>("#step2-back").addEventListener("click", () => goToStep(1));
+requiredElement<HTMLButtonElement>("#step3-back").addEventListener("click", () => goToStep(2));
+requiredElement<HTMLButtonElement>("#go-day2").addEventListener("click", () => goToStep(4));
 
 requiredElement<HTMLButtonElement>("#confirm-save").addEventListener("click", () => {
   updateDraft(false);
@@ -3954,7 +3952,7 @@ generateButton.addEventListener("click", () => {
     if (issues.length > 0) {
       const first = issues[0];
       showFieldIssues(issues);
-      currentStep = first?.step ?? 3;
+      currentStep = first?.step ?? 2;
       generationStatus.textContent =
         "日程を生成する前に入力を修正してください。赤字の説明に、必要な対応を表示しています。";
       renderStep();
@@ -3999,7 +3997,7 @@ generateButton.addEventListener("click", () => {
       autosave.cancel();
       return storage.confirm(documentState).then(() => {
         generationStatus.textContent = "1日目の日程を生成し、この端末へ保存しました。";
-        currentStep = 4;
+        currentStep = 3;
         renderResult();
         renderStep();
       });
@@ -4009,7 +4007,7 @@ generateButton.addEventListener("click", () => {
         const issues = apiFieldIssues(error);
         if (issues.length > 0) {
           showFieldIssues(issues);
-          currentStep = issues[0]?.step ?? 3;
+          currentStep = issues[0]?.step ?? 2;
           generationStatus.textContent =
             "日程を生成できませんでした。赤字の説明に沿って入力を修正してください。";
           renderStep();

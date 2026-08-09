@@ -181,7 +181,7 @@ describe("1日目リーグ入力", () => {
     expect(normalized.document).toBe(document);
   });
 
-  it("ブロック数未選択を手順2の具体的なエラーにする", () => {
+  it("ブロック数未選択をタブ2の具体的なエラーにする", () => {
     const document = createTournamentDocument();
     document.tournament.name = "地区大会";
     document.tournament.input.teams = [
@@ -194,6 +194,21 @@ describe("1日目リーグ入力", () => {
       field: "block-count",
       step: 2,
       message: "ブロック数を選択してください。",
+    });
+  });
+
+  it("使用コート未入力をタブ1の具体的なエラーにする", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+    ];
+
+    expect(validateDay1LeagueDocument(document, 1)).toContainEqual({
+      field: "courts",
+      step: 1,
+      message: "使用コートを1行に1コート、1つ以上入力してください。",
     });
   });
 
@@ -345,7 +360,7 @@ describe("1日目リーグ入力", () => {
     document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
     document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
 
-    expect(validateDay1LeagueDocument(document, 3)).toContainEqual({
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
       field: "final-stage-format",
       step: 2,
       message: "2日目の決勝方式を選択してください。",
@@ -360,7 +375,7 @@ describe("1日目リーグ入力", () => {
     ).toEqual([
       {
         field: "game-duration",
-        step: 3,
+        step: 2,
         message: "試合時間の入力値を確認してください。",
       },
     ]);
