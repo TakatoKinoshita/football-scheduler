@@ -115,6 +115,38 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await openApp(page);
   await importDocument(page, tournamentResultsFixture());
 
+  const resultHeaders = await page
+    .getByRole("table", { name: "2日目の試合結果入力" })
+    .locator("thead th")
+    .allTextContents();
+  expect(resultHeaders).toEqual([
+    "試合",
+    "時間",
+    "コート",
+    "対戦",
+    "通常得点",
+    "PK",
+    "保存状態",
+  ]);
+  const scheduledSemifinal = page.locator(
+    '#day2-schedule-view tr[data-match-id="UT-SF1"]',
+  );
+  const resultSemifinal = page.locator(
+    '#tournament-results-input tr[data-match-id="UT-SF1"]',
+  );
+  await expect(resultSemifinal.locator("td").nth(0)).toHaveText(
+    await scheduledSemifinal.locator("td").nth(0).innerText(),
+  );
+  await expect(resultSemifinal.locator("td").nth(1)).toHaveText(
+    await scheduledSemifinal.locator("td").nth(1).innerText(),
+  );
+  await expect(resultSemifinal.locator("td").nth(2)).toHaveText("Aコート");
+  await expect(page.locator("#day2-team-schedules-view")).not.toHaveAttribute("open", "");
+  await expect(page.locator("#tournament-plan-view .result-disclosure")).toHaveCount(2);
+  await expect(page.locator("#tournament-plan-view")).not.toContainText("抽選番号");
+  await expect(page.locator("#day2-schedule-view")).not.toContainText("最大待ちセクション");
+  await expect(page.locator("#day2-schedule-view")).not.toContainText("未証明の下位目的");
+
   const finalRow = page.locator('#tournament-results-input tr[data-match-id="UT-FINAL"]');
   await expect(finalRow).toContainText("前提試合の結果待ち");
   await expect(finalRow.locator("input").first()).toBeDisabled();

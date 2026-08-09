@@ -65,7 +65,6 @@ import {
 import {
   applyTournamentResultChange,
   overallTournamentRank,
-  overallTournamentRankRange,
   resolveTournamentProgress,
   tournamentMatchDescendants,
   type TournamentMatchProgress,
@@ -323,18 +322,10 @@ root.innerHTML = `
       <div id="day2-result-content" class="result-content empty">
         1日目タブで日程を作成してください。
       </div>
-      <div id="tournament-confirmation" class="standings-confirmation no-print" hidden>
-        <h3>2日目トーナメントを作成する</h3>
+      <div id="day2-generation-confirmation" class="standings-confirmation no-print" hidden>
+        <h3>2日目を作成する</h3>
         <p id="tournament-review">リーグ順位枠を確認しています。</p>
-        <div id="tournament-turnstile-widget" class="turnstile-box" aria-label="トーナメント作成の安全確認">
-          安全確認を読み込んでいます。
-        </div>
-        <button id="generate-tournament" class="primary" type="button" disabled>2日目トーナメントを作成する</button>
-        <p id="tournament-status" class="status-message" role="status" aria-live="polite"></p>
-      </div>
-      <div id="day2-confirmation" class="standings-confirmation no-print" hidden>
-        <h3>2日目日程を作成する</h3>
-        <p>1日目の日程と確定済みトーナメント表は変更しません。</p>
+        <p>トーナメント表と時刻・コート・審判をまとめて作成します。</p>
         <div class="form-grid three-columns">
           <label class="field" for="day2-start-time">
             <span>開始時刻</span>
@@ -374,10 +365,15 @@ root.innerHTML = `
           </div>
         </details>
         <p id="day2-review">2日目設定を確認しています。</p>
-        <div id="day2-turnstile-widget" class="turnstile-box" aria-label="2日目日程作成の安全確認">
-          安全確認を読み込んでいます。
+        <div class="day2-turnstile-group" role="group" aria-label="2日目作成の安全確認">
+          <div id="tournament-turnstile-widget" class="turnstile-box" aria-label="トーナメント作成の安全確認">
+            安全確認を読み込んでいます。
+          </div>
+          <div id="day2-turnstile-widget" class="turnstile-box" aria-label="日程作成の安全確認">
+            安全確認を読み込んでいます。
+          </div>
         </div>
-        <button id="generate-day2" class="primary" type="button" disabled>2日目の日程を作成する</button>
+        <button id="generate-day2" class="primary" type="button" disabled>2日目を作成する</button>
         <p id="day2-status" class="status-message" role="status" aria-live="polite"></p>
       </div>
       <div id="tournament-results-confirmation" class="standings-confirmation no-print" hidden>
@@ -472,6 +468,14 @@ function appendTextElement<K extends keyof HTMLElementTagNameMap>(
   if (className !== undefined) element.className = className;
   parent.append(element);
   return element;
+}
+
+function createResultDisclosure(title: string, id: string): HTMLDetailsElement {
+  const details = window.document.createElement("details");
+  details.id = id;
+  details.className = "result-disclosure";
+  appendTextElement(details, "summary", title);
+  return details;
 }
 
 type WebScheduleSlot = JsonObject & {
@@ -606,7 +610,6 @@ let tournamentResultsTurnstileWidgetId: string | undefined;
 let tournamentResultsTurnstileSetupStarted = false;
 let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
 let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
-let tournamentStatusOwner: "turnstile" | "generation" = "turnstile";
 let day2StatusOwner: "turnstile" | "generation" = "turnstile";
 let tournamentResultsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
@@ -651,11 +654,8 @@ const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmat
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
 const standingsStatus = requiredElement<HTMLElement>("#standings-status");
 const standingsButton = requiredElement<HTMLButtonElement>("#confirm-standings");
-const tournamentConfirmation = requiredElement<HTMLElement>("#tournament-confirmation");
+const day2GenerationConfirmation = requiredElement<HTMLElement>("#day2-generation-confirmation");
 const tournamentReview = requiredElement<HTMLElement>("#tournament-review");
-const tournamentStatus = requiredElement<HTMLElement>("#tournament-status");
-const tournamentButton = requiredElement<HTMLButtonElement>("#generate-tournament");
-const day2Confirmation = requiredElement<HTMLElement>("#day2-confirmation");
 const day2StartTimeInput = requiredElement<HTMLInputElement>("#day2-start-time");
 const day2GameDurationInput = requiredElement<HTMLInputElement>("#day2-game-duration");
 const day2MarginInput = requiredElement<HTMLInputElement>("#day2-margin-minutes");
@@ -831,39 +831,6 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
   return hadStandings || hadResolvedTournament || hadResolvedDay2;
 }
 
-function saveTournamentPlan(plan: JsonObject): void {
-  const result = asObject(documentState.tournament.result);
-  if (result === undefined) return;
-  tournamentResultDrafts.clear();
-  documentState = {
-    ...documentState,
-    updatedAt: new Date().toISOString(),
-    tournament: {
-      ...documentState.tournament,
-      result: {
-        ...result,
-        tournament_plan: plan,
-        day2_schedule: undefined,
-        integrated_validation: undefined,
-        tournament_results: undefined,
-        final_standings: undefined,
-      },
-    },
-  };
-  saveState.textContent = "保存しています…";
-  autosave.schedule(
-    documentState,
-    () => {
-      saveState.textContent = "この端末に保存済み";
-    },
-    () => {
-      saveState.textContent = "保存できませんでした";
-      tournamentStatus.textContent =
-        "トーナメント表を保存できませんでした。ファイルへ保存してください。";
-    },
-  );
-}
-
 function parseDay2Breaks(): JsonObject[] | undefined {
   const parsed: JsonObject[] = [];
   const seen = new Set<number>();
@@ -965,21 +932,31 @@ function saveDay2Settings(): void {
     "2日目設定を変更したため、以前の日程を取り消しました。もう一度作成してください。";
   requiredElement<HTMLElement>("#day2-result-summary").textContent =
     "2日目設定が変更されました。日程をもう一度作成してください。";
-  refreshDay2Enabled();
+  refreshDay2GenerationEnabled();
 }
 
-function saveDay2Schedule(schedule: JsonObject): void {
+function saveDay2Generation(plan: JsonObject, schedule: JsonObject, day2: JsonObject): void {
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return;
+  const referees = asObject(documentState.tournament.input.referees) ?? {};
+  tournamentResultDrafts.clear();
   documentState = {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: {
       ...documentState.tournament,
+      input: {
+        ...documentState.tournament.input,
+        day2,
+        referees: { ...referees, tournament_fallback: day2FallbackInput.value },
+      },
       result: {
         ...result,
+        tournament_plan: plan,
         day2_schedule: schedule,
         integrated_validation: schedule.integrated_validation,
+        tournament_results: undefined,
+        final_standings: undefined,
       },
     },
   };
@@ -990,7 +967,9 @@ function saveDay2Schedule(schedule: JsonObject): void {
       saveState.textContent = "この端末に保存済み";
     },
     () => {
-      day2Status.textContent = "2日目日程を保存できませんでした。ファイルへ保存してください。";
+      saveState.textContent = "保存できませんでした";
+      day2Status.textContent =
+        "2日目を端末へ保存できませんでした。ファイルへ保存してください。";
     },
   );
 }
@@ -1073,34 +1052,24 @@ function refreshLeagueResultsProgress(totalMatches: number): void {
     standingsTurnstileToken.length === 0;
 }
 
-function refreshTournamentEnabled(): void {
+function refreshDay2GenerationEnabled(): void {
   const result = asObject(documentState.tournament.result);
   const hasLeaguePlan = asObject(result?.league_plan) !== undefined;
-  tournamentButton.disabled =
-    !hasLeaguePlan || !navigator.onLine || tournamentTurnstileToken.length === 0;
-}
-
-function refreshDay2Enabled(): void {
-  const result = asObject(documentState.tournament.result);
-  const tournamentPlan = asObject(result?.tournament_plan);
-  const hasTournament = tournamentPlan !== undefined;
-  const provisional =
-    tournamentPlan !== undefined && tournamentParticipantResolution(tournamentPlan) === "provisional";
+  const provisional = asObject(result?.league_standings) === undefined;
   const settings = currentDay2Settings();
   const legacyDay1ViolationCount = day1PolicyViolationCount(result);
   day2Review.textContent =
-    !hasTournament
-      ? "先に2日目トーナメントを作成してください。"
-      : legacyDay1ViolationCount > 0
+    legacyDay1ViolationCount > 0
       ? `1日目の旧ルール日程に隣接コート移動が${String(legacyDay1ViolationCount)}件あります。先に1日目日程を再作成してください。`
       : settings === undefined
       ? "2日目設定に入力誤りがあります。休憩は「4:60」の形式で入力してください。"
-      : `${provisional ? "仮日程／" : ""}${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
+      : `${provisional ? "仮トーナメント・仮日程／" : ""}${String(settings.start_time)}開始／1試合${String(settings.game_duration_minutes)}分／間隔${String(settings.margin_minutes)}分／${day2FallbackInput.value === "strict" ? "主催者切替なし" : "必要時は主催者へ切替"}`;
   day2Button.disabled =
-    !hasTournament ||
+    !hasLeaguePlan ||
     legacyDay1ViolationCount > 0 ||
     settings === undefined ||
     !navigator.onLine ||
+    tournamentTurnstileToken.length === 0 ||
     day2TurnstileToken.length === 0;
 }
 
@@ -1151,7 +1120,7 @@ function appendScheduleTable(
   table.setAttribute("aria-label", options.tableLabel);
   const head = window.document.createElement("thead");
   const heading = window.document.createElement("tr");
-  const labels = ["試合", "セクション", "時間"];
+  const labels = ["試合", "時間"];
   if (options.showCourt) labels.push("コート");
   if (options.showPhase) labels.push("区分");
   labels.push("対戦", "審判");
@@ -1166,7 +1135,6 @@ function appendScheduleTable(
     const numberCell = window.document.createElement("td");
     appendMatchDisplayNumber(numberCell, row.matchId, row.displayNumber);
     tableRow.append(numberCell);
-    appendTextElement(tableRow, "td", `第${row.sectionNo}`);
     appendTextElement(tableRow, "td", row.timeLabel);
     if (options.showCourt) appendTextElement(tableRow, "td", row.courtName);
     if (options.showPhase) appendTextElement(tableRow, "td", details.phase ?? "-");
@@ -1227,8 +1195,7 @@ function renderResult(): void {
   const day2Summary = requiredElement<HTMLElement>("#day2-result-summary");
   const day2Content = requiredElement<HTMLElement>("#day2-result-content");
   const result = documentState.tournament.result;
-  tournamentConfirmation.hidden = true;
-  day2Confirmation.hidden = true;
+  day2GenerationConfirmation.hidden = true;
   tournamentResultsConfirmation.hidden = true;
   goDay2Area.hidden = true;
   day2PrintButton.disabled = true;
@@ -1307,7 +1274,6 @@ function renderResult(): void {
   standingsConfirmation.hidden = blocks.length === 0;
   goDay2Area.hidden = blocks.length === 0;
 
-  appendTextElement(content, "h3", "1日目の日程表");
   const day1ScheduleContainer = window.document.createElement("div");
   day1ScheduleContainer.id = "day1-schedule-view";
   day1ScheduleContainer.className = "schedule-view-content";
@@ -1376,21 +1342,11 @@ function renderResult(): void {
       { showPhase: false, details: day1Details },
     );
   };
-  content.append(
-    createScheduleViewToggle("day1", day1ScheduleViewMode, (mode) => {
-      day1ScheduleViewMode = mode;
-      saveScheduleViewMode("day1", mode);
-      renderDay1Schedule();
-    }),
-    day1ScheduleContainer,
-  );
-  renderDay1Schedule();
-
   if (blocks.length > 0) {
-    appendTextElement(content, "h3", "ブロック分け");
+    const blockDisclosure = createResultDisclosure("ブロック分け", "day1-blocks-view");
     if (automaticAssignments.size > 0) {
       appendTextElement(
-        content,
+        blockDisclosure,
         "p",
         `未割当てだった${String(automaticAssignments.size)}チームを抽選番号で自動配置しました。`,
         "muted",
@@ -1421,8 +1377,41 @@ function renderResult(): void {
       appendTextElement(card, "p", `総当たり ${roundCount}ラウンド`, "muted");
       blockGrid.append(card);
     }
-    content.append(blockGrid);
+    blockDisclosure.append(blockGrid);
+    content.append(blockDisclosure);
   }
+
+  const day1ScheduleHeading = appendTextElement(content, "h3", "1日目の日程表");
+  day1ScheduleHeading.id = "day1-schedule-heading";
+  content.append(
+    createScheduleViewToggle("day1", day1ScheduleViewMode, (mode) => {
+      day1ScheduleViewMode = mode;
+      saveScheduleViewMode("day1", mode);
+      renderDay1Schedule();
+    }),
+    day1ScheduleContainer,
+  );
+  renderDay1Schedule();
+
+  const teamDisclosure = createResultDisclosure("チーム別予定", "day1-team-schedules-view");
+  const teamGrid = window.document.createElement("div");
+  teamGrid.className = "team-schedule-grid";
+  for (const [teamId, teamName] of teamNames) {
+    const card = window.document.createElement("section");
+    card.className = "team-card";
+    appendTextElement(card, "h4", teamName);
+    const schedule = teamSchedules.get(teamId) ?? [];
+    if (schedule.length === 0) {
+      appendTextElement(card, "p", "確定済みの予定はありません。", "muted");
+    } else {
+      const list = window.document.createElement("ul");
+      for (const item of schedule) appendTextElement(list, "li", item);
+      card.append(list);
+    }
+    teamGrid.append(card);
+  }
+  teamDisclosure.append(teamGrid);
+  content.append(teamDisclosure);
 
   if (blocks.length > 0) {
     const resultsByMatch = new Map(
@@ -1434,7 +1423,8 @@ function renderResult(): void {
     const enteredCount = leagueMatches.filter((match) =>
       resultsByMatch.has(String(match.id)),
     ).length;
-    appendTextElement(content, "h3", "リーグ結果入力");
+    const leagueResultsHeading = appendTextElement(content, "h3", "リーグ結果入力");
+    leagueResultsHeading.id = "league-results-heading";
     appendTextElement(
       content,
       "p",
@@ -1442,9 +1432,10 @@ function renderResult(): void {
       "muted",
     );
     const resultTable = window.document.createElement("table");
+    resultTable.setAttribute("aria-label", "1日目の試合結果入力");
     const resultHead = window.document.createElement("thead");
     const resultHeading = window.document.createElement("tr");
-    for (const heading of ["時間", "ブロック", "対戦", "得点", "保存状態"]) {
+    for (const heading of ["試合", "時間", "コート", "対戦", "得点", "保存状態"]) {
       appendTextElement(resultHeading, "th", heading);
     }
     resultHead.append(resultHeading);
@@ -1455,6 +1446,14 @@ function renderResult(): void {
       const current = resultsByMatch.get(matchId);
       const scheduledRow = schedulePresentation.timeRows.find((item) => item.matchId === matchId);
       const row = window.document.createElement("tr");
+      row.dataset.matchId = matchId;
+      const numberCell = window.document.createElement("td");
+      appendMatchDisplayNumber(
+        numberCell,
+        matchId,
+        schedulePresentation.displayNumberByMatchId.get(matchId) ?? matchId,
+      );
+      row.append(numberCell);
       appendTextElement(
         row,
         "td",
@@ -1462,12 +1461,7 @@ function renderResult(): void {
           ? "未配置"
           : scheduledRow.timeLabel,
       );
-      const blockId = blocks.find(
-        (block) =>
-          Array.isArray(block.team_ids) &&
-          block.team_ids.includes(exactTeamId(match, "home")),
-      )?.id;
-      appendTextElement(row, "td", String(blockId ?? "-"));
+      appendTextElement(row, "td", scheduledRow?.courtName ?? "未配置");
       const home = exactTeamId(match, "home");
       const away = exactTeamId(match, "away");
       const homeName = teamNames.get(home ?? "") ?? "名称未設定";
@@ -1553,6 +1547,7 @@ function renderResult(): void {
     content.append(resultWrapper);
     refreshLeagueResultsProgress(leagueMatches.length);
     setupStandingsTurnstile();
+    content.append(standingsConfirmation);
     const standings = asObject(result.league_standings);
     if (standings !== undefined) {
       renderLeagueStandings(content, standings, teamNames);
@@ -1569,24 +1564,6 @@ function renderResult(): void {
     );
   }
 
-  appendTextElement(content, "h3", "チーム別予定");
-  const teamGrid = window.document.createElement("div");
-  teamGrid.className = "team-schedule-grid";
-  for (const [teamId, teamName] of teamNames) {
-    const card = window.document.createElement("section");
-    card.className = "team-card";
-    appendTextElement(card, "h4", teamName);
-    const schedule = teamSchedules.get(teamId) ?? [];
-    if (schedule.length === 0) {
-      appendTextElement(card, "p", "確定済みの予定はありません。", "muted");
-    } else {
-      const list = window.document.createElement("ul");
-      for (const item of schedule) appendTextElement(list, "li", item);
-      card.append(list);
-    }
-    teamGrid.append(card);
-  }
-  content.append(teamGrid);
   printButton.disabled = false;
 }
 
@@ -1782,7 +1759,6 @@ function renderTournamentPlan(
       `${heading}（${String(pool.participant_count ?? 0)}チーム）`,
     );
 
-    let roundLabelByMatchId: ReadonlyMap<string, string> = new Map();
     if (tournamentBracketVisible) {
       try {
         const bracketInput = {
@@ -1795,91 +1771,23 @@ function renderTournamentPlan(
         };
         const presentation = defaultTournamentBracketPresentation(bracketInput);
         const bracketModel = buildTournamentBracketModel(bracketInput, presentation.layout);
-        roundLabelByMatchId = new Map(
-          bracketModel.nodes.map((node) => [node.id, node.roundLabel]),
-        );
         poolSection.append(presentation.render(bracketModel, `${heading}表`));
       } catch (error) {
         appendTextElement(
           poolSection,
           "p",
           error instanceof TournamentBracketError
-            ? `ブラケット図を表示できませんでした。${error.message} 下の一覧表で内容を確認してください。`
-            : "ブラケット図を表示できませんでした。下の一覧表で内容を確認してください。",
+            ? `ブラケット図を表示できませんでした。${error.message} 画面を再読み込みしてください。`
+            : "ブラケット図を表示できませんでした。画面を再読み込みしてください。",
           "notice tournament-bracket-error",
         );
       }
     }
 
-    const seedList = window.document.createElement("ol");
-    seedList.className = "seed-list";
-    for (const seed of asObjectArray(pool.seeds)) {
-      const rankLabel = `${String(seed.block_id)}ブロック ${String(seed.block_rank)}位`;
-      const teamName =
-        typeof seed.team_id === "string" ? teamNames.get(seed.team_id) : undefined;
-      appendTextElement(
-        seedList,
-        "li",
-        teamName === undefined ? rankLabel : `${teamName}（${rankLabel}）`,
-      );
-    }
-    poolSection.append(seedList);
-
-    const byes = asObjectArray(pool.byes);
-    if (byes.length > 0) {
-      appendTextElement(poolSection, "h5", "予備戦免除（不戦通過）");
-      const byeList = window.document.createElement("ul");
-      for (const bye of byes) {
-        appendTextElement(
-          byeList,
-          "li",
-          `${tournamentEntryLabel(bye.entry, rankedTeams, teamNames, displayNumberByMatchId)} → ${displayNumberByMatchId?.get(String(bye.next_match_id)) ?? String(bye.next_match_id)}`,
-        );
-      }
-      poolSection.append(byeList);
-    }
-
-    const table = window.document.createElement("table");
-    const head = window.document.createElement("thead");
-    const headingRow = window.document.createElement("tr");
-    for (const label of ["試合", "段階", "対戦", "決定順位範囲"]) {
-      appendTextElement(headingRow, "th", label);
-    }
-    head.append(headingRow);
-    table.append(head);
-    const body = window.document.createElement("tbody");
-    for (const match of asObjectArray(pool.matches)) {
-      const row = window.document.createElement("tr");
-      const matchId = String(match.id ?? "-");
-      const overallRange = overallTournamentRankRange(plan, field, match.rank_range);
-      const rankRange = overallRange === undefined
-        ? "-"
-        : `${String(overallRange[0])}〜${String(overallRange[1])}位`;
-      const roundLabel = roundLabelByMatchId.get(matchId) ?? String(match.round ?? "-");
-      const numberCell = window.document.createElement("td");
-      const displayNumber = displayNumberByMatchId?.get(matchId);
-      if (displayNumber === undefined) {
-        numberCell.textContent = matchId;
-      } else {
-        appendMatchDisplayNumber(numberCell, matchId, displayNumber);
-      }
-      row.append(numberCell);
-      appendTextElement(row, "td", roundLabel);
-      appendTextElement(
-        row,
-        "td",
-        `${tournamentEntryLabel(match.home, rankedTeams, teamNames, displayNumberByMatchId)} 対 ${tournamentEntryLabel(match.away, rankedTeams, teamNames, displayNumberByMatchId)}`,
-      );
-      appendTextElement(row, "td", rankRange);
-      body.append(row);
-    }
-    table.append(body);
-    const wrapper = window.document.createElement("div");
-    wrapper.className = "table-wrap";
-    wrapper.append(table);
-    poolSection.append(wrapper);
-
-    appendTextElement(poolSection, "h5", "最終順位の決まり方");
+    const placementDisclosure = createResultDisclosure(
+      "最終順位の決まり方",
+      `${field}-placement-guide`,
+    );
     const placements = window.document.createElement("ol");
     for (const placement of asObjectArray(pool.placements)) {
       appendTextElement(
@@ -1888,26 +1796,11 @@ function renderTournamentPlan(
         `${String(overallTournamentRank(plan, field, Number(placement.rank)))}位：${tournamentEntryLabel(placement.entry, rankedTeams, teamNames, displayNumberByMatchId)}`,
       );
     }
-    poolSection.append(placements);
+    placementDisclosure.append(placements);
+    poolSection.append(placementDisclosure);
     section.append(poolSection);
   }
 
-  for (const draw of asObjectArray(plan.seed_draws)) {
-    const concreteOrder = Array.isArray(draw.decided_order) ? draw.decided_order : [];
-    const rankOrder = asObjectArray(draw.decided_rank_refs);
-    const order =
-      concreteOrder.length > 0
-        ? concreteOrder.map((team) => teamNames.get(String(team)) ?? String(team)).join("、")
-        : rankOrder
-            .map((entry) => `${String(entry.block_id)}ブロック ${String(entry.rank)}位`)
-            .join("、");
-    appendTextElement(
-      section,
-      "p",
-      `${draw.pool === "upper" ? "上位" : "下位"}・ブロック${String(draw.block_rank)}位の抽選（抽選番号 ${String(draw.random_seed)}）：${order}`,
-      "muted",
-    );
-  }
   for (const warning of asObjectArray(plan.warnings)) {
     appendTextElement(section, "p", String(warning.message ?? "組合せに注意事項があります。"), "notice");
   }
@@ -1974,30 +1867,6 @@ function renderDay2Schedule(
         "この2日目日程は旧ルールで作成され、決勝より後に別の試合があります。既存の日程・結果・順位はそのまま閲覧、入力、印刷できます。新ルールへ更新する場合は2日目日程を再作成してください。",
         "notice legacy-schedule-warning",
       );
-    } else if (finalPlacement.bothFinalsShareLastSection) {
-      appendTextElement(
-        section,
-        "p",
-        `決勝配置：上位・下位決勝とも第${String(finalPlacement.usedSections)}セクション（最終）`,
-        "validation-ok",
-      );
-    } else if (finalPlacement.upperFinalSection !== undefined) {
-      const lower = finalPlacement.lowerFinalSection === undefined
-        ? "下位決勝なし"
-        : `下位決勝は第${String(finalPlacement.lowerFinalSection)}セクション`;
-      appendTextElement(
-        section,
-        "p",
-        `決勝配置：上位決勝は第${String(finalPlacement.upperFinalSection)}セクション（最終）、${lower}`,
-        "muted",
-      );
-    } else if (finalPlacement.lowerFinalSection !== undefined) {
-      appendTextElement(
-        section,
-        "p",
-        `決勝配置：下位決勝は第${String(finalPlacement.lowerFinalSection)}セクション（最終）`,
-        "validation-ok",
-      );
     }
   } catch (error) {
     appendTextElement(
@@ -2022,31 +1891,6 @@ function renderDay2Schedule(
       );
     }
   }
-  const auditList = window.document.createElement("ul");
-  auditList.className = "audit-list";
-  for (const [label, value] of [
-    ["最大待ちセクション", metrics?.maximum_team_wait_sections],
-    ["審判直後の試合", metrics?.referee_then_match_count],
-    ["隣接セクションのコート移動", metrics?.adjacent_assignment_court_change_count],
-    ["依存試合間のコート移動", metrics?.team_court_change_count],
-    ["コート使用数の最大差", metrics?.court_usage_difference],
-    ["主催者への切替", metrics?.tournament_referee_fallback_count],
-    ["未使用スロット", metrics?.unused_slot_count],
-  ] as Array<readonly [string, unknown]>) {
-    appendTextElement(auditList, "li", `${label}：${String(value ?? 0)}`);
-  }
-  section.append(auditList);
-  const unproven = asObjectArray(metrics?.objective_stages)
-    .filter((stage) => stage.optimality_proven !== true)
-    .map((stage) => String(stage.objective));
-  appendTextElement(
-    section,
-    "p",
-    unproven.length === 0
-      ? "記録された最適化目的はすべて最適性を証明済みです。"
-      : `未証明の下位目的：${unproven.join("、")}（証明済みの上位目的は維持しています）`,
-    "muted",
-  );
   const rankedTeams = new Map(
     asObjectArray(standings?.standings)
       .filter(
@@ -2113,7 +1957,7 @@ function renderDay2Schedule(
   );
   renderCurrentSchedule();
 
-  appendTextElement(section, "h4", "チーム別の可能な経路");
+  const routeDisclosure = createResultDisclosure("チーム別予定", "day2-team-schedules-view");
   const routeGrid = window.document.createElement("div");
   routeGrid.className = "team-schedule-grid";
   const routesByTeam = new Map<string, { label: string; routes: JsonObject[] }>();
@@ -2159,7 +2003,8 @@ function renderDay2Schedule(
     card.append(list);
     routeGrid.append(card);
   }
-  section.append(routeGrid);
+  routeDisclosure.append(routeGrid);
+  section.append(routeDisclosure);
   content.append(section);
   if (!provisional) {
     renderTournamentResultsInput(content, schedule, plan, teamNames);
@@ -2302,7 +2147,7 @@ function renderTournamentResultsInput(
   table.setAttribute("aria-label", "2日目の試合結果入力");
   const head = window.document.createElement("thead");
   const heading = window.document.createElement("tr");
-  for (const label of ["時間", "試合", "区分", "対戦", "通常得点", "PK", "保存状態"]) {
+  for (const label of ["試合", "時間", "コート", "対戦", "通常得点", "PK", "保存状態"]) {
     appendTextElement(heading, "th", label);
   }
   head.append(heading);
@@ -2313,7 +2158,6 @@ function renderTournamentResultsInput(
     const row = window.document.createElement("tr");
     row.dataset.matchId = match.matchId;
     const presentationRow = presentation.timeRows.find((item) => item.matchId === match.matchId);
-    appendTextElement(row, "td", presentationRow?.timeLabel ?? "未配置");
     const numberCell = window.document.createElement("td");
     appendMatchDisplayNumber(
       numberCell,
@@ -2321,7 +2165,8 @@ function renderTournamentResultsInput(
       presentation.displayNumberByMatchId.get(match.matchId) ?? match.matchId,
     );
     row.append(numberCell);
-    appendTextElement(row, "td", match.pool === "upper" ? "上位" : "下位");
+    appendTextElement(row, "td", presentationRow?.timeLabel ?? "未配置");
+    appendTextElement(row, "td", presentationRow?.courtName ?? "未配置");
     const ready = match.homeTeamId !== undefined && match.awayTeamId !== undefined;
     const homeName = ready ? teamNames.get(match.homeTeamId!) ?? match.homeTeamId! : "前提試合待ち";
     const awayName = ready ? teamNames.get(match.awayTeamId!) ?? match.awayTeamId! : "前提試合待ち";
@@ -2555,147 +2400,109 @@ function requestLeagueStandings(): void {
     });
 }
 
-function requestTournamentPlan(): void {
+function requestDay2Generation(): void {
   const result = asObject(documentState.tournament.result);
   const leaguePlan = resultLeaguePlan();
   const standings = asObject(result?.league_standings);
-  if (result === undefined || leaguePlan === undefined) return;
-  if (tournamentTurnstileToken.length === 0) {
-    tournamentStatus.textContent = "トーナメント作成の安全確認を完了してください。";
-    return;
-  }
-  tournamentButton.disabled = true;
-  tournamentStatusOwner = "generation";
-  tournamentStatus.textContent =
-    standings === undefined
-      ? "仮トーナメントを作成しています…"
-      : "2日目トーナメントを作成しています…";
-  const league = asObject(documentState.tournament.input.league);
-  const request: JsonObject = {
-    request_kind: "tournament_plan",
-    league_plan: leaguePlan,
-    odd_split_policy: league?.odd_split_policy ?? "upper",
-    random_seed: documentState.tournament.input.random_seed ?? 20260803,
-  };
-  if (standings !== undefined) request.league_standings = standings;
-  void generateTournamentPlan(
-    request,
-    tournamentTurnstileToken,
-  )
-    .then((plan) => {
-      saveTournamentPlan(plan);
-      tournamentStatus.textContent =
-        standings === undefined
-          ? "仮トーナメントを作成し、この端末へ保存しました。"
-          : "2日目トーナメントを作成し、この端末へ保存しました。";
-      renderResult();
-    })
-    .catch((error: unknown) => {
-      tournamentStatus.textContent =
-        error instanceof ScheduleApiError
-          ? error.message
-          : "トーナメントを作成できませんでした。1日目の内容は保存されています。";
-      refreshTournamentEnabled();
-    })
-    .finally(() => {
-      tournamentTurnstileToken = "";
-      refreshTournamentEnabled();
-      const api = turnstileApi();
-      if (tournamentTurnstileWidgetId !== undefined && api !== undefined) {
-        try {
-          api.reset(tournamentTurnstileWidgetId);
-        } catch {
-          tournamentStatus.textContent =
-            "安全確認を再開できませんでした。画面を再読み込みしてください。";
-        }
-      }
-    });
-}
-
-function requestDay2Schedule(): void {
-  const result = asObject(documentState.tournament.result);
-  const leaguePlan = resultLeaguePlan();
-  const tournamentPlan = asObject(result?.tournament_plan);
   const day1 = asObject(documentState.tournament.input.day);
   const day2 = currentDay2Settings();
   if (
     result === undefined ||
     leaguePlan === undefined ||
-    tournamentPlan === undefined ||
     day1 === undefined ||
     day2 === undefined
   ) {
-    day2Status.textContent = "2日目日程の作成に必要な設定またはトーナメント表がありません。";
+    day2Status.textContent = "2日目の作成に必要な1日目の日程または設定がありません。";
     return;
   }
   const legacyDay1ViolationCount = day1PolicyViolationCount(result);
   if (legacyDay1ViolationCount > 0) {
     day2Status.textContent =
       `1日目の旧ルール日程に隣接コート移動が${String(legacyDay1ViolationCount)}件あります。1日目の日程を再作成してからお試しください。`;
-    refreshDay2Enabled();
+    refreshDay2GenerationEnabled();
     return;
   }
-  if (day2TurnstileToken.length === 0) {
-    day2Status.textContent = "2日目日程作成の安全確認を完了してください。";
+  if (tournamentTurnstileToken.length === 0 || day2TurnstileToken.length === 0) {
+    day2Status.textContent = "2日目作成の安全確認を完了してください。";
+    refreshDay2GenerationEnabled();
     return;
   }
-  saveDay2Settings();
+  const tournamentToken = tournamentTurnstileToken;
+  const scheduleToken = day2TurnstileToken;
+  tournamentTurnstileToken = "";
+  day2TurnstileToken = "";
   day2Button.disabled = true;
   day2StatusOwner = "generation";
-  const provisional = tournamentParticipantResolution(tournamentPlan) === "provisional";
-  day2Status.textContent = provisional
-    ? "仮の2日目時刻・コート・審判を配置しています…"
-    : "2日目の時刻・コート・審判を配置しています…";
-  const referees = asObject(documentState.tournament.input.referees) ?? {};
-  void generateDay2Schedule(
-    {
-      schema_version: "0.1.0",
-      request_kind: "day2_schedule",
-      teams: documentState.tournament.input.teams,
-      courts: documentState.tournament.input.courts,
-      league_plan: leaguePlan,
-      day1_schedule: { day: day1, slots: result.slots ?? [] },
-      tournament_plan: tournamentPlan,
-      day: day2,
-      referees: {
-        ...referees,
-        tournament_fallback: day2FallbackInput.value,
-      },
-      random_seed: documentState.tournament.input.random_seed ?? 20260803,
-      solver: { max_time_seconds: 30 },
-    },
-    day2TurnstileToken,
-  )
-    .then((schedule) => {
+  const league = asObject(documentState.tournament.input.league);
+  const tournamentRequest: JsonObject = {
+    request_kind: "tournament_plan",
+    league_plan: leaguePlan,
+    odd_split_policy: league?.odd_split_policy ?? "upper",
+    random_seed: documentState.tournament.input.random_seed ?? 20260803,
+  };
+  if (standings !== undefined) tournamentRequest.league_standings = standings;
+
+  void (async () => {
+    let stage: "tournament" | "schedule" = "tournament";
+    try {
+      day2Status.textContent = standings === undefined
+        ? "仮トーナメントを作成しています…"
+        : "トーナメントを作成しています…";
+      const tournamentPlan = await generateTournamentPlan(tournamentRequest, tournamentToken);
+      stage = "schedule";
+      day2Status.textContent = standings === undefined
+        ? "仮の時刻・コート・審判を配置しています…"
+        : "時刻・コート・審判を配置しています…";
+      const referees = asObject(documentState.tournament.input.referees) ?? {};
+      const schedule = await generateDay2Schedule(
+        {
+          schema_version: "0.1.0",
+          request_kind: "day2_schedule",
+          teams: documentState.tournament.input.teams,
+          courts: documentState.tournament.input.courts,
+          league_plan: leaguePlan,
+          day1_schedule: { day: day1, slots: result.slots ?? [] },
+          tournament_plan: tournamentPlan,
+          day: day2,
+          referees: {
+            ...referees,
+            tournament_fallback: day2FallbackInput.value,
+          },
+          random_seed: documentState.tournament.input.random_seed ?? 20260803,
+          solver: { max_time_seconds: 30 },
+        },
+        scheduleToken,
+      );
       assertNewDay2FinalPlacement(schedule, tournamentPlan);
-      saveDay2Schedule(schedule);
+      saveDay2Generation(tournamentPlan, schedule, day2);
+      const provisional = tournamentParticipantResolution(tournamentPlan) === "provisional";
       day2Status.textContent = provisional
-        ? "仮の2日目日程を作成し、この端末へ保存しました。"
-        : "2日目日程を作成し、この端末へ保存しました。";
+        ? "仮トーナメントと仮日程を作成し、この端末へ保存しました。"
+        : "2日目のトーナメントと日程を作成し、この端末へ保存しました。";
       renderResult();
-    })
-    .catch((error: unknown) => {
-      day2Status.textContent =
-        error instanceof ScheduleApiError
-          ? error.message
-          : error instanceof Day2FinalPlacementError
-            ? error.message
-          : "2日目日程を作成できませんでした。設定とトーナメント表は保存されています。";
-      refreshDay2Enabled();
-    })
-    .finally(() => {
-      day2TurnstileToken = "";
-      refreshDay2Enabled();
+    } catch (error: unknown) {
+      const detail = error instanceof ScheduleApiError || error instanceof Day2FinalPlacementError
+        ? error.message
+        : "通信状態を確認して、もう一度お試しください。";
+      day2Status.textContent = stage === "tournament"
+        ? `トーナメントを作成できませんでした。既存の日程は変更していません。${detail}`
+        : `トーナメント作成後の日程配置に失敗しました。既存の日程は変更していません。${detail}`;
+    } finally {
+      refreshDay2GenerationEnabled();
       const api = turnstileApi();
-      if (day2TurnstileWidgetId !== undefined && api !== undefined) {
+      if (api !== undefined) {
         try {
-          api.reset(day2TurnstileWidgetId);
+          if (tournamentTurnstileWidgetId !== undefined) {
+            api.reset(tournamentTurnstileWidgetId);
+          }
+          if (day2TurnstileWidgetId !== undefined) api.reset(day2TurnstileWidgetId);
         } catch {
           day2Status.textContent =
             "安全確認を再開できませんでした。画面を再読み込みしてください。";
         }
       }
-    });
+    }
+  })();
 }
 
 function requestTournamentStandings(): void {
@@ -3085,7 +2892,7 @@ function renderDay2Preparation(
       "notice",
     );
   }
-  tournamentConfirmation.hidden = false;
+  day2GenerationConfirmation.hidden = false;
   const league = asObject(documentState.tournament.input.league);
   const splitLabels: Record<string, string> = {
     upper: "中央順位を上位へ入れる",
@@ -3094,11 +2901,12 @@ function renderDay2Preparation(
   };
   const policy = String(league?.odd_split_policy ?? "upper");
   tournamentReview.textContent = `${standings === undefined ? "仮トーナメント／" : ""}上下振り分け：${splitLabels[policy] ?? splitLabels.upper}`;
-  tournamentButton.textContent =
-    standings === undefined ? "仮トーナメントを作成する" : "2日目トーナメントを作成する";
+  day2Button.textContent = asObject(result.day2_schedule) === undefined
+    ? "2日目を作成する"
+    : "2日目を再作成する";
   setupTournamentTurnstile();
-  refreshTournamentEnabled();
-  day2Confirmation.hidden = true;
+  setupDay2Turnstile();
+  refreshDay2GenerationEnabled();
   day2PrintButton.disabled = tournamentPlan === undefined;
   bracketPrintButton.disabled = !tournamentBracketVisible || tournamentPlan === undefined;
   bracketPrintButton.hidden = !tournamentBracketVisible;
@@ -3126,9 +2934,6 @@ function renderDay2Preparation(
     asObjectArray(result.tournament_results),
     asObject(result.final_standings),
   );
-  day2Confirmation.hidden = false;
-  setupDay2Turnstile();
-  refreshDay2Enabled();
   if (day2Schedule !== undefined) {
     const finalStandings = asObject(result.final_standings);
     day2Summary.textContent = finalStandings !== undefined
@@ -3496,12 +3301,30 @@ bracketPrintButton.addEventListener("click", () => {
   document.body.dataset.printScope = "bracket";
   window.print();
 });
+const printOpenedDisclosures = new Set<HTMLDetailsElement>();
+function expandResultDisclosuresForPrint(): void {
+  for (const details of document.querySelectorAll<HTMLDetailsElement>(".result-disclosure")) {
+    if (details.open) continue;
+    details.open = true;
+    printOpenedDisclosures.add(details);
+  }
+}
+function restoreResultDisclosuresAfterPrint(): void {
+  for (const details of printOpenedDisclosures) details.open = false;
+  printOpenedDisclosures.clear();
+}
+const printMedia = window.matchMedia("print");
+printMedia.addEventListener("change", (event) => {
+  if (event.matches) expandResultDisclosuresForPrint();
+  else restoreResultDisclosuresAfterPrint();
+});
+window.addEventListener("beforeprint", expandResultDisclosuresForPrint);
 window.addEventListener("afterprint", () => {
+  restoreResultDisclosuresAfterPrint();
   delete document.body.dataset.printScope;
 });
 standingsButton.addEventListener("click", requestLeagueStandings);
-tournamentButton.addEventListener("click", requestTournamentPlan);
-day2Button.addEventListener("click", requestDay2Schedule);
+day2Button.addEventListener("click", requestDay2Generation);
 tournamentResultsButton.addEventListener("click", requestTournamentStandings);
 for (const control of [
   day2StartTimeInput,
@@ -3528,8 +3351,7 @@ function updateConnectionStatus(): void {
   if (!standingsConfirmation.hidden) {
     refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
   }
-  if (!tournamentConfirmation.hidden) refreshTournamentEnabled();
-  if (!day2Confirmation.hidden) refreshDay2Enabled();
+  if (!day2GenerationConfirmation.hidden) refreshDay2GenerationEnabled();
   if (!tournamentResultsConfirmation.hidden) refreshTournamentResultsEnabled();
 }
 window.addEventListener("online", updateConnectionStatus);
@@ -3689,7 +3511,7 @@ function setupTournamentTurnstile(): void {
   if (!siteKey) {
     container.textContent =
       "安全確認の設定が完了していないため、トーナメントを作成できません。";
-    tournamentStatus.textContent = container.textContent;
+    day2Status.textContent = container.textContent;
     return;
   }
   void loadTurnstileApi()
@@ -3701,86 +3523,26 @@ function setupTournamentTurnstile(): void {
           action: "generate_tournament",
           callback: (token) => {
             tournamentTurnstileToken = token;
-            refreshTournamentEnabled();
-            if (tournamentStatusOwner === "turnstile") {
-              tournamentStatus.textContent =
-                token.length > 0
-                  ? "安全確認が完了しました。"
-                  : "安全確認を完了できませんでした。もう一度お試しください。";
-            }
-          },
-          "expired-callback": () => {
-            tournamentTurnstileToken = "";
-            refreshTournamentEnabled();
-            if (tournamentStatusOwner === "turnstile") {
-              tournamentStatus.textContent =
-                "安全確認の期限が切れました。もう一度確認してください。";
-            }
-          },
-          "error-callback": () => {
-            tournamentTurnstileToken = "";
-            refreshTournamentEnabled();
-            if (tournamentStatusOwner === "turnstile") {
-              tournamentStatus.textContent =
-                "安全確認を完了できませんでした。通信状態を確認してください。";
-            }
-          },
-        });
-      } catch {
-        container.textContent =
-          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
-      }
-    })
-    .catch((error: unknown) => {
-      const initialized =
-        error instanceof Error && error.message === "Turnstile API is unavailable";
-      container.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。通信状態を確認してください。";
-      tournamentStatus.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。確定順位はこの端末に保存されています。";
-    });
-}
-
-function setupDay2Turnstile(): void {
-  if (day2TurnstileSetupStarted) return;
-  day2TurnstileSetupStarted = true;
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const container = requiredElement<HTMLElement>("#day2-turnstile-widget");
-  if (!siteKey) {
-    container.textContent = "安全確認の設定が完了していないため、2日目日程を作成できません。";
-    day2Status.textContent = container.textContent;
-    return;
-  }
-  void loadTurnstileApi()
-    .then((api) => {
-      try {
-        container.replaceChildren();
-        day2TurnstileWidgetId = api.render(container, {
-          sitekey: siteKey,
-          action: "generate_day2_schedule",
-          callback: (token) => {
-            day2TurnstileToken = token;
-            refreshDay2Enabled();
+            refreshDay2GenerationEnabled();
             if (day2StatusOwner === "turnstile") {
-              day2Status.textContent =
-                token.length > 0
+              day2Status.textContent = token.length === 0
+                ? "安全確認を完了できませんでした。もう一度お試しください。"
+                : day2TurnstileToken.length > 0
                   ? "安全確認が完了しました。"
-                  : "安全確認を完了できませんでした。もう一度お試しください。";
+                  : "安全確認を続けています…";
             }
           },
           "expired-callback": () => {
-            day2TurnstileToken = "";
-            refreshDay2Enabled();
+            tournamentTurnstileToken = "";
+            refreshDay2GenerationEnabled();
             if (day2StatusOwner === "turnstile") {
               day2Status.textContent =
                 "安全確認の期限が切れました。もう一度確認してください。";
             }
           },
           "error-callback": () => {
-            day2TurnstileToken = "";
-            refreshDay2Enabled();
+            tournamentTurnstileToken = "";
+            refreshDay2GenerationEnabled();
             if (day2StatusOwner === "turnstile") {
               day2Status.textContent =
                 "安全確認を完了できませんでした。通信状態を確認してください。";
@@ -3800,7 +3562,69 @@ function setupDay2Turnstile(): void {
         : "安全確認を読み込めませんでした。通信状態を確認してください。";
       day2Status.textContent = initialized
         ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。トーナメント表はこの端末に保存されています。";
+        : "安全確認を読み込めませんでした。1日目の内容はこの端末に保存されています。";
+    });
+}
+
+function setupDay2Turnstile(): void {
+  if (day2TurnstileSetupStarted) return;
+  day2TurnstileSetupStarted = true;
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+  const container = requiredElement<HTMLElement>("#day2-turnstile-widget");
+  if (!siteKey) {
+    container.textContent = "安全確認の設定が完了していないため、2日目を作成できません。";
+    day2Status.textContent = container.textContent;
+    return;
+  }
+  void loadTurnstileApi()
+    .then((api) => {
+      try {
+        container.replaceChildren();
+        day2TurnstileWidgetId = api.render(container, {
+          sitekey: siteKey,
+          action: "generate_day2_schedule",
+          callback: (token) => {
+            day2TurnstileToken = token;
+            refreshDay2GenerationEnabled();
+            if (day2StatusOwner === "turnstile") {
+              day2Status.textContent = token.length === 0
+                ? "安全確認を完了できませんでした。もう一度お試しください。"
+                : tournamentTurnstileToken.length > 0
+                  ? "安全確認が完了しました。"
+                  : "安全確認を続けています…";
+            }
+          },
+          "expired-callback": () => {
+            day2TurnstileToken = "";
+            refreshDay2GenerationEnabled();
+            if (day2StatusOwner === "turnstile") {
+              day2Status.textContent =
+                "安全確認の期限が切れました。もう一度確認してください。";
+            }
+          },
+          "error-callback": () => {
+            day2TurnstileToken = "";
+            refreshDay2GenerationEnabled();
+            if (day2StatusOwner === "turnstile") {
+              day2Status.textContent =
+                "安全確認を完了できませんでした。通信状態を確認してください。";
+            }
+          },
+        });
+      } catch {
+        container.textContent =
+          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+      }
+    })
+    .catch((error: unknown) => {
+      const initialized =
+        error instanceof Error && error.message === "Turnstile API is unavailable";
+      container.textContent = initialized
+        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
+        : "安全確認を読み込めませんでした。通信状態を確認してください。";
+      day2Status.textContent = initialized
+        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
+        : "安全確認を読み込めませんでした。1日目の内容はこの端末に保存されています。";
     });
 }
 

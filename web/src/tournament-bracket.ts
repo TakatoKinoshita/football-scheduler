@@ -1700,7 +1700,7 @@ function renderSheet(
   title.textContent = `${heading} ${sheet.title}`;
   const description = svgElement("desc", { id: descriptionId });
   description.textContent =
-    "参加枠から直交線をたどり、上側に勝者、下側に敗者の順位決定戦を示す標準的なトーナメント表です。完全な文字情報は続く一覧表でも確認できます。";
+    "参加枠から直交線をたどり、上側に勝者、下側に敗者の順位決定戦を示す標準的なトーナメント表です。完全な文字情報は図の読み上げ用説明でも確認できます。";
   svg.append(title, description);
   appendSvgText(svg, sheet.title, 16, 24, "bracket-sheet-title", 32);
   for (const segment of sheet.segments.filter((item) => item.role === "entry")) {

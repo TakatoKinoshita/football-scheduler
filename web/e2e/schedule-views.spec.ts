@@ -24,6 +24,29 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await page.locator('.step[data-step="4"]').click();
   await expect(page.locator("#day1-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 
+  const blockDisclosure = page.locator("#day1-blocks-view");
+  const teamDisclosure = page.locator("#day1-team-schedules-view");
+  await expect(blockDisclosure).not.toHaveAttribute("open", "");
+  await expect(teamDisclosure).not.toHaveAttribute("open", "");
+  await blockDisclosure.locator("summary").focus();
+  await blockDisclosure.locator("summary").press("Enter");
+  await expect(blockDisclosure).toHaveAttribute("open", "");
+  const majorSectionOrder = await page.evaluate(() => [
+    "day1-blocks-view",
+    "day1-schedule-heading",
+    "day1-team-schedules-view",
+    "league-results-heading",
+  ].map((id) => Array.from(document.querySelector("#result-content")!.children)
+    .indexOf(document.getElementById(id)!)));
+  expect(majorSectionOrder.every((index) => index >= 0)).toBe(true);
+  expect(majorSectionOrder).toEqual([...majorSectionOrder].sort((left, right) => left - right));
+
+  const leagueResultHeaders = await page
+    .getByRole("table", { name: "1日目の試合結果入力" })
+    .locator("thead th")
+    .allTextContents();
+  expect(leagueResultHeaders).toEqual(["試合", "時間", "コート", "対戦", "得点", "保存状態"]);
+
   const toggle = page.locator("#day1-schedule-view-toggle");
   await expect(toggle.getByLabel("時間順")).toBeChecked();
   await expect(page.locator('#result-content [data-schedule-view="time"]')).toBeVisible();
@@ -38,13 +61,24 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
     '#result-content .court-schedule-card[data-court-id="court-a"]',
   );
   await expect(courtA.locator("table")).toHaveAttribute("aria-label", "Aコートの日程");
-  await expect(courtA.locator("tbody tr").nth(0)).toContainText("第1");
-  await expect(courtA.locator("tbody tr").nth(1)).toContainText("第3");
-  await expect(page.locator("#result-content .match-display-number")).toHaveCount(4);
+  await expect(courtA.locator("thead")).not.toContainText("セクション");
+  await expect(courtA.locator("tbody tr").nth(0)).toContainText("09:30");
+  await expect(courtA.locator("tbody tr").nth(1)).toContainText("10:50");
+  await expect(page.locator("#result-content .match-display-number")).toHaveCount(8);
+  const scheduledMatch = courtA.locator('tbody tr[data-match-id="LG-A-M1"]');
+  const resultMatch = page.locator('table[aria-label="1日目の試合結果入力"] tr[data-match-id="LG-A-M1"]');
+  await expect(resultMatch.locator("td").nth(0)).toHaveText(
+    await scheduledMatch.locator("td").nth(0).innerText(),
+  );
+  await expect(resultMatch.locator("td").nth(1)).toHaveText(
+    await scheduledMatch.locator("td").nth(1).innerText(),
+  );
+  await expect(resultMatch.locator("td").nth(2)).toHaveText("Aコート");
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toHaveCount(1);
 
   await page.emulateMedia({ media: "print" });
   await expect(toggle).toBeHidden();
+  await expect(teamDisclosure.locator(".team-schedule-grid")).toBeVisible();
   await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
   await expect(page.locator('#result-content [data-schedule-view="time"]')).toBeHidden();
   await page.emulateMedia({ media: "screen" });
@@ -136,7 +170,7 @@ test("表示切替後もリーグ得点入力を一組だけ保存し、確定�
   await expect(awayScore).toHaveValue("1");
 });
 
-test("2日目はコート別を既定にし、直前実試合の表示番号を審判と一覧で共有する", async ({
+test("2日目はコート別を既定にし、直前実試合の表示番号を審判とブラケットで共有する", async ({
   page,
 }) => {
   await openScheduleViewFixture(page);
@@ -160,7 +194,9 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator("#tournament-plan-view .tournament-bracket figcaption").first())
     .toHaveText("上位トーナメント表（仮）");
   await expect(page.getByRole("button", { name: "トーナメント表だけ印刷" })).toBeEnabled();
-  await expect(page.locator("#tournament-plan-view table")).toHaveCount(2);
+  await expect(page.locator("#tournament-plan-view table")).toHaveCount(0);
+  await expect(page.locator("#tournament-plan-view .seed-list")).toHaveCount(0);
+  await expect(page.locator("#tournament-plan-view .result-disclosure")).toHaveCount(2);
 
   const toggle = page.locator("#day2-schedule-view-toggle");
   await expect(toggle.getByLabel("コート別")).toBeChecked();
@@ -171,18 +207,19 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(courtA.locator('.match-display-number[data-match-id="UT-PLACE3"]')).toHaveText("A②");
   await expect(courtA).toContainText("A①の勝者");
   await expect(courtA).not.toContainText("UT-SF1の勝者");
-  await expect(
-    page.locator('#tournament-plan-view .match-display-number[data-match-id="UT-SF1"]'),
-  ).toHaveText("A①");
   const semifinalNode = upperBracket.locator(
     '.bracket-match-node[data-match-id="UT-SF1"]',
   );
   await expect(semifinalNode).toContainText("A①");
   await expect(semifinalNode).toContainText("09:30〜10:05 Aコート");
   await expect(courtA.locator("table")).toHaveAttribute("aria-label", "Aコートの日程");
+  await expect(courtA.locator("thead")).not.toContainText("セクション");
 
   await toggle.getByLabel("時間順").check();
   await expect(page.locator('#day2-schedule-view [data-schedule-view="time"]')).toBeVisible();
+  expect(await page.locator(
+    '#day2-schedule-view [data-schedule-view="time"] thead th',
+  ).allTextContents()).toEqual(["試合", "時間", "コート", "区分", "対戦", "審判"]);
   await expect(courtView).toBeHidden();
   await page.context().setOffline(true);
   await page.reload();
@@ -201,7 +238,7 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toBeVisible();
 });
 
-test("現行日程は決勝配置を表示し、下位決勝が早い理由を印刷にも載せる", async ({ page }) => {
+test("現行日程は内部の決勝配置値を隠し、利用者向けの注意だけを印刷にも載せる", async ({ page }) => {
   const fixture = structuredClone(scheduleViewTournamentFixture());
   const result = fixture.tournament.result as Record<string, unknown>;
   const schedule = result.day2_schedule as Record<string, unknown>;
@@ -225,8 +262,7 @@ test("現行日程は決勝配置を表示し、下位決勝が早い理由を�
   await importDocument(page, fixture);
 
   const day2View = page.locator("#day2-schedule-view");
-  await expect(day2View).toContainText("上位決勝は第5セクション（最終）");
-  await expect(day2View).toContainText("下位決勝は第4セクション");
+  await expect(day2View).not.toContainText("決勝配置：");
   await expect(day2View).toContainText("下位決勝は第4セクションが最も遅い配置");
   await expect(day2View.locator(".legacy-schedule-warning")).toHaveCount(0);
 
@@ -240,6 +276,7 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   delete result.day2_schedule;
   delete result.integrated_validation;
   const invalidResponse = structuredClone(scheduleViewDay2ScheduleResult) as Record<string, unknown>;
+  const tournamentPlan = result.tournament_plan;
   const metrics = invalidResponse.metrics as Record<string, unknown>;
   metrics.upper_tournament_final_section = 4;
   metrics.lower_tournament_final_section = 5;
@@ -250,14 +287,17 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   await importDocument(page, fixture);
   await page.unroute("**/api/v1/schedules:generate");
   await page.route("**/api/v1/schedules:generate", async (route) => {
+    const request = route.request().postDataJSON() as { request_kind?: unknown };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(invalidResponse),
+      body: JSON.stringify(
+        request.request_kind === "tournament_plan" ? tournamentPlan : invalidResponse,
+      ),
     });
   });
 
-  await page.getByRole("button", { name: "2日目の日程を作成する" }).click();
+  await page.getByRole("button", { name: "2日目を作成する" }).click();
 
   await expect(page.locator("#day2-status")).toContainText("保存せず");
   await expect(page.locator("#day2-status")).toContainText("日程を再作成");
@@ -283,11 +323,7 @@ test("標準ブラケットだけを上位・下位のA4横ページとして印
   await expect(page.locator("#tournament-plan-view .tournament-pool")).toHaveCount(2);
   await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
   await expect(page.locator("#tournament-plan-view .tournament-bracket-sheet")).toHaveCount(2);
-  expect(
-    await page.locator("#tournament-plan-view .seed-list").evaluateAll(
-      (lists) => lists.every((list) => getComputedStyle(list).display === "none"),
-    ),
-  ).toBe(true);
+  await expect(page.locator("#tournament-plan-view .seed-list")).toHaveCount(0);
   await expect(page.locator("#day2-schedule-view")).toBeHidden();
   const printVisibility = await page
     .locator("#tournament-plan-view .tournament-bracket-sheet")
@@ -324,13 +360,10 @@ test("mirroredな8チームは上下とも本番水平版となり、A4縦と局
   const visibleDiagramText = (await brackets.nth(0).locator("svg text").allTextContents()).join(" ");
   expect(visibleDiagramText).not.toMatch(/UT-/u);
   expect(visibleDiagramText).not.toMatch(/\d{2}:\d{2}/u);
-  const lowerStages = await page
-    .locator('#tournament-plan-view .tournament-pool:nth-of-type(2) table tbody td:nth-child(2)')
-    .allTextContents();
-  expect(lowerStages).toContain("決勝");
-  expect(lowerStages).toContain("3位決定戦");
-  expect(lowerStages.filter((stage) => stage === "準決勝")).toHaveLength(2);
-  expect(lowerStages.some((stage) => /9位決定戦/u.test(stage))).toBe(false);
+  await expect(page.locator("#tournament-plan-view table")).toHaveCount(0);
+  const placementGuides = page.locator("#tournament-plan-view .result-disclosure");
+  await expect(placementGuides).toHaveCount(2);
+  await expect(placementGuides.nth(0)).not.toHaveAttribute("open", "");
 
   const pageWidth = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,
@@ -396,20 +429,21 @@ test("mirroredな16チームは上位・下位を独立に本番水平版へ選�
   )).toHaveCount(1);
 });
 
-test("2日目設定を変更すると日程とトーナメント一覧の派生番号をともに外す", async ({
+test("2日目設定を変更すると日程とブラケットの派生番号をともに外す", async ({
   page,
 }) => {
   await openScheduleViewFixture(page);
-  await expect(
-    page.locator('#tournament-plan-view .match-display-number[data-match-id="UT-SF1"]'),
-  ).toHaveText("A①");
+  const semifinal = page.locator(
+    '#tournament-plan-view .bracket-match-node[data-match-id="UT-SF1"]',
+  );
+  await expect(semifinal).toContainText("A①");
 
   await page.locator("#day2-margin-minutes").fill("15");
   await page.locator("#day2-margin-minutes").blur();
 
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
-  await expect(page.locator("#tournament-plan-view .match-display-number")).toHaveCount(0);
-  await expect(page.locator("#tournament-plan-view")).toContainText("UT-SF1");
+  await expect(semifinal).toContainText("UT-SF1");
+  await expect(semifinal).not.toContainText("A①");
   await expect(page.locator("#day2-status")).toContainText("以前の日程を取り消しました");
 });
 

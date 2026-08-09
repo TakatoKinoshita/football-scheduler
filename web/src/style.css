@@ -102,6 +102,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .danger { color: var(--danger); background: white; border-color: var(--danger); }
 .file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .turnstile-box { min-height: 66px; margin-bottom: 1rem; color: var(--muted); }
+.day2-turnstile-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .status-message { min-height: 1.65em; margin-bottom: 0; font-weight: 700; }
 
 .results { border-top: 7px solid var(--green); }
@@ -112,6 +113,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .result-content dt { color: var(--muted); font-size: .82rem; font-weight: 700; }
 .result-content dd { margin: .2rem 0 0; font-size: 1.1rem; font-weight: 800; overflow-wrap: anywhere; }
 .result-content h3 { margin: 1.7rem 0 .7rem; color: var(--green); }
+.result-disclosure { margin-top: 1.4rem; padding: .8rem 1rem; background: #f8fbf9; border: 1px solid var(--border); border-radius: .5rem; }
+.result-disclosure summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--green); font-size: 1.08rem; font-weight: 800; }
+.result-disclosure summary::before { content: "▶"; margin-right: .55rem; font-size: .8rem; }
+.result-disclosure[open] summary::before { content: "▼"; }
+.result-disclosure[open] summary { margin-bottom: .8rem; border-bottom: 1px solid var(--border); }
+.result-disclosure summary:focus-visible { outline: 4px solid #efb244; outline-offset: 2px; }
 .score-input { display: inline-block; width: 4.5rem; min-height: 44px; padding: .45rem; text-align: center; }
 .tournament-results-table { min-width: 900px; }
 .penalty-score-fields { display: inline-flex; align-items: center; gap: .25rem; }
@@ -199,6 +206,7 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   main { width: min(100% - 1rem, 1100px); margin-top: 1rem; }
   .steps { grid-template-columns: 1fr 1fr; }
   .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list { grid-template-columns: 1fr; }
+  .day2-turnstile-group { grid-template-columns: 1fr; }
   .manual-block-team-row { grid-template-columns: 1fr; }
   .schedule-view-toggle label { flex: 1 1 8rem; }
   .field-wide { grid-column: auto; }
@@ -230,6 +238,9 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   body[data-print-scope="day2"] #day2-results-panel,
   body[data-print-scope="bracket"] #day2-results-panel { display: block; padding: 0; border-top: 0; }
   .result-content { background: white; border: 1px solid #777; }
+  .result-disclosure { background: white; border: 0; padding: 0; }
+  .result-disclosure > :not(summary) { display: block !important; }
+  .result-disclosure summary { margin-bottom: .8rem; border-bottom: 1px solid #777; }
   .table-wrap { overflow: visible; }
   table { min-width: 0; font-size: 9pt; }
   #day1-schedule-view-toggle, #day2-schedule-view-toggle { display: none !important; }

@@ -121,7 +121,7 @@ export function renderTournamentBracketExploration(
   title.textContent = `${heading} ${geometry.orientation === "vertical" ? "垂直版" : "水平版"}`;
   const description = svgElement("desc", { id: descriptionId });
   description.textContent =
-    "チーム枠から実線で勝者、破線で敗者の進路を示します。試合番号、開始時刻、特別試合名を表示し、完全な対戦・結果・順位情報は後続の一覧表でも確認できます。";
+    "チーム枠から実線で勝者、破線で敗者の進路を示します。試合番号、開始時刻、特別試合名を表示し、完全な対戦・結果・順位情報は図の読み上げ用説明でも確認できます。";
   svg.append(title, description);
   for (const segment of [...geometry.segments].sort(
     (left, right) => (left.outcome === "loser" ? 0 : 1) - (right.outcome === "loser" ? 0 : 1),
