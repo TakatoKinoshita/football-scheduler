@@ -714,17 +714,20 @@ def _derive_placement_template_entry(
                 }
             )
         )
+        candidate_horizon = source.used_sections
+        if candidate_horizon is None:
+            continue
         base_request = solver._base_request(target_key)
         request = base_request.model_copy(
             update={
-                "day": base_request.day.model_copy(update={"max_sections": lower_horizon}),
+                "day": base_request.day.model_copy(update={"max_sections": candidate_horizon}),
             }
         )
         path_model = day2_schedule._build_path_model(request.tournament_plan)
         schedule = day2_schedule._generate_day2_schedule_from_template(
             request,
             path_model,
-            lower_horizon,
+            candidate_horizon,
             candidate,
         )
         if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
