@@ -51,7 +51,7 @@ from football_scheduler.timekeeping import expected_end_time, section_timings
 from football_scheduler.tournament import generate_tournament_plan
 from football_scheduler.validator import validate_day2_schedule
 
-GENERATOR_VERSION = "placement-template-generator-v3"
+GENERATOR_VERSION = "placement-template-generator-v4"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"
@@ -130,9 +130,13 @@ class StabilizedPlacementTemplateSolver:
         slot_bound = 1 + math.ceil(max(0, match_count - first_section_capacity) / key.court_count)
         dependency_depth = key.pool_size.bit_length() - 1
         dependency_bound = dependency_depth * 2 - 1
+        strict_referee_bound = 0
+        if key.day2_fallback is Day2Fallback.STRICT:
+            final_count = key.pool_count
+            strict_referee_bound = math.ceil((match_count - final_count) / key.organizer_capacity)
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(
-            lower_horizon=max(slot_bound, dependency_bound),
+            lower_horizon=max(slot_bound, dependency_bound, strict_referee_bound),
             upper_horizon=match_count,
         )
 
@@ -666,7 +670,7 @@ def _derive_placement_template_entry(
             and entry.used_sections == lower_horizon
             and entry.key.pool_count == target_key.pool_count
             and entry.key.pool_size == target_key.pool_size
-            and entry.key.court_count == target_key.court_count
+            and entry.key.court_count <= target_key.court_count
             and entry.key.organizer_capacity <= target_key.organizer_capacity
             and (
                 entry.key.day2_fallback is target_key.day2_fallback
@@ -683,9 +687,19 @@ def _derive_placement_template_entry(
         ),
     )
     for source in compatible:
+        court_counts = Counter(slot.court_index for slot in source.slots)
+        counts = [court_counts[index] for index in range(target_key.court_count)]
+        court_usage_difference = max(counts, default=0) - min(counts, default=0)
         objectives = tuple(
             objective.model_copy(
-                update={"optimality_proven": index == 0},
+                update={
+                    "value": (
+                        court_usage_difference
+                        if objective.objective == "court_usage_difference"
+                        else objective.value
+                    ),
+                    "optimality_proven": index == 0,
+                },
             )
             for index, objective in enumerate(source.objectives)
         )
