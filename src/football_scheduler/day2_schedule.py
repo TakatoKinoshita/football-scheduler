@@ -302,6 +302,14 @@ class _SolvedLayout:
 def generate_day2_schedule(
     request: Day2ScheduleRequest | Mapping[str, object],
 ) -> Day2Schedule:
+    """公開境界。テンプレート導入前は安定化したソルバーへ委譲する。"""
+
+    return _generate_day2_schedule_with_solver(request)
+
+
+def _generate_day2_schedule_with_solver(
+    request: Day2ScheduleRequest | Mapping[str, object],
+) -> Day2Schedule:
     """仮または確定済みトーナメントから、1日目を変更せず日程を返す。"""
 
     data = (
@@ -620,7 +628,7 @@ def _build_path_model(plan: TournamentPlan) -> _PathModel:
                     rank=rank_key[1],
                 )
         merged: dict[_RankKey, frozenset[frozenset[str]]] = {}
-        for rank_key in set(home) | set(away):
+        for rank_key in sorted(set(home) | set(away)):
             merged[rank_key] = frozenset((*home.get(rank_key, ()), *away.get(rank_key, ())))
         visiting.remove(match_id)
         paths_by_match[match_id] = merged
@@ -743,7 +751,7 @@ def _build_cp_model(
     used_sections = model.new_int_var(1, horizon, "used_sections")
     model.add(used_sections == sum(active))
 
-    for left, right in path_model.conflict_pairs:
+    for left, right in sorted(path_model.conflict_pairs):
         for section in sections:
             model.add(match_in_section[left, section] + match_in_section[right, section] <= 1)
         for section in range(horizon - 1):
@@ -759,9 +767,9 @@ def _build_cp_model(
             value
             == sum((section + 1) * match_in_section[match_index, section] for section in sections)
         )
-    for match_id, dependency_ids in path_model.dependencies.items():
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
         target = index_by_id[match_id]
-        for dependency_id in dependency_ids:
+        for dependency_id in sorted(dependency_ids):
             model.add(section_number[target] >= section_number[index_by_id[dependency_id]] + 2)
 
     model.add(section_number[path_model.primary_final_index] == used_sections)
@@ -794,9 +802,9 @@ def _build_cp_model(
         )
 
     wait_vars: list[cp_model.IntVar] = []
-    for match_id, dependency_ids in path_model.dependencies.items():
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
         target = index_by_id[match_id]
-        for dependency_id in dependency_ids:
+        for dependency_id in sorted(dependency_ids):
             wait = model.new_int_var(1, horizon, f"wait_{dependency_id}_{match_id}")
             model.add(
                 wait == section_number[target] - section_number[index_by_id[dependency_id]] - 1
@@ -809,9 +817,9 @@ def _build_cp_model(
         model.add(maximum_wait == 0)
 
     court_moves: list[cp_model.IntVar] = []
-    for match_id, dependency_ids in path_model.dependencies.items():
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
         target = index_by_id[match_id]
-        for dependency_id in dependency_ids:
+        for dependency_id in sorted(dependency_ids):
             source = index_by_id[dependency_id]
             same_court_vars: list[cp_model.IntVar] = []
             for court in courts:
@@ -975,7 +983,15 @@ def _assign_referees(
     referee_paths_by_section: defaultdict[
         int, list[Mapping[_RankKey, frozenset[frozenset[str]]]]
     ] = defaultdict(list)
-    for slot in sorted(occupied, key=lambda item: (item.section_no, item.court_id)):
+    court_order = {court.id: index for index, court in enumerate(data.courts)}
+    for slot in sorted(
+        occupied,
+        key=lambda item: (
+            item.section_no,
+            court_order.get(item.court_id, len(court_order)),
+            item.court_id,
+        ),
+    ):
         assert slot.match_id is not None
         match = match_by_id[slot.match_id]
         if slot.section_no == 1:
@@ -1048,7 +1064,7 @@ def _team_routes(path_model: _PathModel, slots: tuple[Slot, ...]) -> tuple[TeamR
     for slot in slots:
         if slot.match_id is None:
             continue
-        for rank_key, conditions in path_model.paths_by_match[slot.match_id].items():
+        for rank_key, conditions in sorted(path_model.paths_by_match[slot.match_id].items()):
             for condition in conditions:
                 routes.append(
                     TeamRouteEntry(
@@ -1069,7 +1085,7 @@ def _team_routes(path_model: _PathModel, slots: tuple[Slot, ...]) -> tuple[TeamR
             assignment.source_match_id,
             "W",
         )
-        for rank_key, conditions in referee_paths.items():
+        for rank_key, conditions in sorted(referee_paths.items()):
             for condition in conditions:
                 routes.append(
                     TeamRouteEntry(
@@ -1128,7 +1144,7 @@ def _audit_metrics(
             section_no=positions[path_model.matches[index].id],
             final_section_gap=used_section_count - positions[path_model.matches[index].id],
         )
-        for pool_id, index in path_model.final_index_by_pool.items()
+        for pool_id, index in sorted(path_model.final_index_by_pool.items())
     )
     referee_then_match_count, adjacent_move_count = _route_transition_counts(routes)
     league_counts, league_minimum, league_maximum, league_difference, previous_same_court = (
@@ -1232,7 +1248,7 @@ def _route_transition_counts(routes: tuple[TeamRouteEntry, ...]) -> tuple[int, i
         by_team[route.rank_ref.block_id, route.rank_ref.rank].append(route)
     referee_then_match: set[tuple[_RankKey, str, str]] = set()
     adjacent_moves: set[tuple[_RankKey, str, str]] = set()
-    for rank_key, entries in by_team.items():
+    for rank_key, entries in sorted(by_team.items()):
         for left in entries:
             for right in entries:
                 if right.section_no != left.section_no + 1:
@@ -1408,7 +1424,7 @@ def _outcome_paths(
 ) -> dict[_RankKey, frozenset[frozenset[str]]]:
     return {
         rank_key: frozenset(condition | {f"{outcome}:{match_id}"} for condition in conditions)
-        for rank_key, conditions in source.items()
+        for rank_key, conditions in sorted(source.items())
     }
 
 

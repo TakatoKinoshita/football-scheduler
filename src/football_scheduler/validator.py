@@ -799,7 +799,20 @@ def _validate_day2_referees(
     referee_paths_by_section: defaultdict[
         int, list[Mapping[_RankKey, frozenset[frozenset[str]]]]
     ] = defaultdict(list)
-    for slot in sorted(occupied, key=lambda item: (int(item["section_no"]), str(item["court_id"]))):
+    court_ids = [
+        str(court["id"])
+        for court in _as_mapping_list(_config(data).get("courts"))
+        if court.get("id") not in (None, "")
+    ]
+    court_order = {court_id: index for index, court_id in enumerate(court_ids)}
+    for slot in sorted(
+        occupied,
+        key=lambda item: (
+            int(item["section_no"]),
+            court_order.get(str(item["court_id"]), len(court_order)),
+            str(item["court_id"]),
+        ),
+    ):
         match_id = str(slot["match_id"])
         match = matches_by_id[match_id]
         section = int(slot["section_no"])
