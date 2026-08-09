@@ -2,7 +2,13 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 import { sameRankWebFixture } from "./fixtures";
-import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
+import {
+  GENERATE_API,
+  importDocument,
+  mockExternalServices,
+  openApp,
+  scheduleCreationResponse,
+} from "./helpers";
 
 function sameRankScheduleIdentity(schedule: Record<string, unknown>): unknown {
   return {
@@ -153,29 +159,27 @@ test("18チーム4ブロックは端数方針未選択のまま進めず、16チ
   await page.locator("#teams").fill(
     Array.from({ length: 18 }, (_, index) => `チーム${String(index + 1)}`).join("\n"),
   );
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("4");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート\nBコート");
   await expect(page.locator("#same-rank-uneven-policy-field")).toBeVisible();
   await expect(page.locator("#same-rank-uneven-policy")).toHaveValue("");
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#same-rank-uneven-policy-error")).toContainText("選択してください");
-  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
   await page.locator("#same-rank-uneven-policy").selectOption("merge_bottom");
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
-  await expect(page.locator('[data-panel="3"]')).toBeVisible();
 
-  await page.locator('.step[data-step="1"]').click();
+  await page.locator("#tab-tournament").click();
   await page.locator("#teams").fill(
     Array.from({ length: 16 }, (_, index) => `チーム${String(index + 1)}`).join("\n"),
   );
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await expect(page.locator("#same-rank-uneven-policy-field")).toBeHidden();
   await expect(page.locator("#same-rank-uneven-policy")).toHaveValue("strict_same_rank");
 });
 
-test("同順位リーグのday2_creationで仮計画と仮日程を作成し、印刷・オフラインで復元する", async ({
+test("同順位リーグの統合生成で仮計画と仮日程を作成し、印刷・オフラインで復元する", async ({
   context,
   page,
 }) => {
@@ -196,22 +200,25 @@ test("同順位リーグのday2_creationで仮計画と仮日程を作成し、�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        schema_version: "0.2.0",
-        status: "OPTIMAL",
+      body: JSON.stringify(scheduleCreationResponse({
+        ...sourceResult,
         same_rank_plan: generatedResult.same_rank_plan,
         day2_schedule: generatedResult.day2_schedule,
-      }),
+        integrated_validation: generatedResult.integrated_validation,
+      }, "day2_only")),
     });
   });
-  await page.locator('.step[data-step="5"]').click();
-  await page.getByRole("button", { name: "2日目を作成する" }).click();
+  await page.locator("#tab-schedule-settings").click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#same-rank-plan-view")).toContainText("【仮】同順位リーグ");
   expect(request).toMatchObject({
-    request_kind: "day2_creation",
+    request_kind: "schedule_creation",
+    generation_scope: "day2_only",
     final_stage: { format: "same_rank_league", uneven_policy: "strict_same_rank" },
+    existing_result: expect.objectContaining({ league_plan: expect.any(Object) }),
   });
   expect(request).not.toHaveProperty("league_standings");
+  await page.locator("#tab-day2").click();
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#same-rank-plan-view")).toBeVisible();
   await page.emulateMedia({ media: "screen" });
@@ -220,7 +227,7 @@ test("同順位リーグのday2_creationで仮計画と仮日程を作成し、�
   await page.reload();
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.locator('.step[data-step="5"]').click();
+  await page.locator("#tab-day2").click();
   await expect(page.locator("#same-rank-plan-view")).toContainText("【仮】同順位リーグ");
 });
 
@@ -244,7 +251,7 @@ test("仮の同順位リーグは1日目順位確定後も対戦ID・配置・�
     expect(request.request_kind).toBe("league_standings");
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(standings) });
   });
-  await page.locator('.step[data-step="4"]').click();
+  await page.locator("#tab-day1").click();
   const rows = page.getByRole("table", { name: "1日目の試合結果入力" }).locator("tbody tr");
   const rowCount = await rows.count();
   for (let index = 0; index < rowCount; index += 1) {
@@ -257,7 +264,7 @@ test("仮の同順位リーグは1日目順位確定後も対戦ID・配置・�
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
   await page.getByRole("button", { name: "順位を確定する" }).click();
   await expect(page.locator("#league-standings-view")).toBeVisible();
-  await page.locator('.step[data-step="5"]').click();
+  await page.locator("#tab-day2").click();
   await expect(page.locator("#same-rank-plan-view")).not.toContainText("【仮】");
 
   const downloadPromise = page.waitForEvent("download");
@@ -276,7 +283,7 @@ test("仮の同順位リーグは1日目順位確定後も対戦ID・配置・�
   await page.reload();
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.locator('.step[data-step="5"]').click();
+  await page.locator("#tab-day2").click();
   await expect(page.locator("#same-rank-plan-view")).not.toContainText("【仮】");
   await expect(page.locator("#same-rank-plan-view")).toContainText("チーム1");
 });

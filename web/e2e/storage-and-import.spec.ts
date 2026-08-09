@@ -10,9 +10,9 @@ test("自動保存後の再読み込みで入力を復元する", async ({ page 
   await openApp(page);
   await page.locator("#tournament-name").fill("自動保存大会");
   await page.locator("#teams").fill("青空FC\nみどりSC");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
-  await page.locator("#block-count").selectOption("1");
   await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
+  await page.locator("#block-count").selectOption("1");
   await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
 
   await page.reload();
@@ -29,10 +29,10 @@ test("手動ブロックの入力途中を自動保存・JSON・オフライン�
   await openApp(page);
   await page.locator("#tournament-name").fill("手動保存大会");
   await page.locator("#teams").fill("青\n赤\n白\n緑");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
-  await page.locator("#courts").fill("Aコート");
   await page.getByLabel("青", { exact: true }).selectOption("A");
   await page.getByLabel("赤", { exact: true }).selectOption("B");
   await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
@@ -53,18 +53,18 @@ test("手動ブロックの入力途中を自動保存・JSON・オフライン�
   });
 
   await page.reload();
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await expect(page.locator("#assignment-mode")).toHaveValue("manual");
   await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
   await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
 
   await importDocument(page, exported);
-  await page.locator('.step[data-step="2"]').click();
+  await page.locator("#tab-schedule-settings").click();
   await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
   await page.evaluate(async () => navigator.serviceWorker.ready);
   await page.context().setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
 });
 
@@ -103,9 +103,9 @@ test("JSONを書き出し、別の有効な大会を読み込める", async ({ p
   await openApp(page);
   await page.locator("#tournament-name").fill("書き出し大会");
   await page.locator("#teams").fill("青空FC\nみどりSC");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
-  await page.locator("#block-count").selectOption("1");
   await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
+  await page.locator("#block-count").selectOption("1");
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "ファイルへ保存" }).click();

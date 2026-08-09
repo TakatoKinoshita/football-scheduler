@@ -66,6 +66,7 @@ def _placement_plan() -> dict[str, Any]:
         "day2_schedule",
         "same_rank_day2_schedule",
         "day2_creation",
+        "schedule_creation",
     ],
 )
 def test_generation_api_requires_explicit_schema_0_2_0(request_kind: str) -> None:

@@ -6,6 +6,18 @@ export const TURNSTILE_SCRIPT =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 export const GENERATE_API = "**/api/v1/schedules:generate";
 
+export function scheduleCreationResponse(
+  tournamentResult: unknown,
+  generationScope: "all" | "day2_only" = "all",
+): Record<string, unknown> {
+  return {
+    schema_version: "0.2.0",
+    status: "OPTIMAL",
+    generation_scope: generationScope,
+    tournament_result: tournamentResult,
+  };
+}
+
 export async function mockExternalServices(
   page: Page,
   { completeTurnstile = true }: { completeTurnstile?: boolean } = {},
@@ -55,18 +67,25 @@ export async function mockExternalServices(
   await page.route(GENERATE_API, async (route) => {
     const request = route.request().postDataJSON() as {
       request_kind?: unknown;
+      generation_scope?: unknown;
       courts?: Array<{ id?: unknown }>;
     } | null;
     const requestedCourtId =
-      request?.request_kind === "day1_league" && typeof request.courts?.[0]?.id === "string"
+      request?.request_kind === "schedule_creation" && typeof request.courts?.[0]?.id === "string"
         ? request.courts[0].id
         : undefined;
-    const response = requestedCourtId === undefined
+    const tournamentResult = requestedCourtId === undefined
       ? scheduleResult
       : {
           ...scheduleResult,
           slots: scheduleResult.slots.map((slot) => ({ ...slot, court_id: requestedCourtId })),
         };
+    const response = request?.request_kind === "schedule_creation"
+      ? scheduleCreationResponse(
+          tournamentResult,
+          request.generation_scope === "day2_only" ? "day2_only" : "all",
+        )
+      : tournamentResult;
     await route.fulfill({
       contentType: "application/json",
       status: 200,
@@ -80,14 +99,14 @@ export async function openReadyApp(page: Page): Promise<void> {
   await openApp(page);
   await page.locator("#tournament-name").fill("E2E地区大会");
   await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート");
   await advanceToGeneration(page);
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
   await expect(page.locator("#generation-status")).toContainText("安全確認が完了しました");
-  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
 }
 
 export async function openApp(page: Page): Promise<void> {
@@ -96,9 +115,9 @@ export async function openApp(page: Page): Promise<void> {
 }
 
 export async function advanceToGeneration(page: Page): Promise<void> {
-  const stepOne = page.locator('[data-panel="1"]');
-  if (await stepOne.isVisible()) {
-    await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  const tournamentPanel = page.locator("#tournament-panel");
+  if (await tournamentPanel.isVisible()) {
+    await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   }
   const blockCount = page.locator("#block-count");
   if ((await blockCount.inputValue()) === "") await blockCount.selectOption("2");
@@ -106,7 +125,7 @@ export async function advanceToGeneration(page: Page): Promise<void> {
   if ((await finalStage.inputValue()) === "") {
     await finalStage.selectOption("same_rank_league");
   }
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
 }
 
 export async function importDocument(page: Page, document: unknown): Promise<void> {

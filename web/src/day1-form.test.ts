@@ -181,7 +181,7 @@ describe("1日目リーグ入力", () => {
     expect(normalized.document).toBe(document);
   });
 
-  it("ブロック数未選択を手順2の具体的なエラーにする", () => {
+  it("ブロック数未選択をタブ2の具体的なエラーにする", () => {
     const document = createTournamentDocument();
     document.tournament.name = "地区大会";
     document.tournament.input.teams = [
@@ -194,6 +194,21 @@ describe("1日目リーグ入力", () => {
       field: "block-count",
       step: 2,
       message: "ブロック数を選択してください。",
+    });
+  });
+
+  it("使用コート未入力をタブ1の具体的なエラーにする", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+    ];
+
+    expect(validateDay1LeagueDocument(document, 1)).toContainEqual({
+      field: "courts",
+      step: 1,
+      message: "使用コートを1行に1コート、1つ以上入力してください。",
     });
   });
 
@@ -345,7 +360,7 @@ describe("1日目リーグ入力", () => {
     document.tournament.input.courts = [{ id: "court-01", name: "Aコート" }];
     document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
 
-    expect(validateDay1LeagueDocument(document, 3)).toContainEqual({
+    expect(validateDay1LeagueDocument(document, 2)).toContainEqual({
       field: "final-stage-format",
       step: 2,
       message: "2日目の決勝方式を選択してください。",
@@ -360,8 +375,60 @@ describe("1日目リーグ入力", () => {
     ).toEqual([
       {
         field: "game-duration",
-        step: 3,
+        step: 2,
         message: "試合時間の入力値を確認してください。",
+      },
+    ]);
+  });
+
+  it("統合APIの2日目設定field詳細をタブ2の入力へ対応付ける", () => {
+    expect(
+      issuesFromApiDetails({
+        errors: [
+          { field: "day2.start_time", type: "time_parsing" },
+          { field: "day2.game_duration_minutes", type: "greater_than" },
+          { field: "day2.margin_minutes", type: "greater_than_equal" },
+          { field: "day2.end_time", type: "time_parsing" },
+          { field: "day2.max_sections", type: "greater_than_equal" },
+          { field: "day2.breaks.0.duration_minutes", type: "greater_than" },
+          { field: "referees.day2_fallback", type: "literal_error" },
+        ],
+      }),
+    ).toEqual([
+      {
+        field: "day2-start-time",
+        step: 2,
+        message: "2日目の開始時刻の入力値を確認してください。",
+      },
+      {
+        field: "day2-game-duration",
+        step: 2,
+        message: "2日目の試合時間の入力値を確認してください。",
+      },
+      {
+        field: "day2-margin-minutes",
+        step: 2,
+        message: "2日目の試合間隔の入力値を確認してください。",
+      },
+      {
+        field: "day2-end-time",
+        step: 2,
+        message: "2日目の終了時刻の入力値を確認してください。",
+      },
+      {
+        field: "day2-max-sections",
+        step: 2,
+        message: "2日目の最大セクション数の入力値を確認してください。",
+      },
+      {
+        field: "day2-breaks",
+        step: 2,
+        message: "2日目の休憩の入力値を確認してください。",
+      },
+      {
+        field: "day2-fallback",
+        step: 2,
+        message: "2日目の審判フォールバックの入力値を確認してください。",
       },
     ]);
   });

@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 import { scheduleResult, tournamentFixture } from "./fixtures";
-import { GENERATE_API, importDocument, mockExternalServices, openApp } from "./helpers";
+import {
+  GENERATE_API,
+  importDocument,
+  mockExternalServices,
+  openApp,
+  scheduleCreationResponse,
+} from "./helpers";
 
 function generatedRolePathResult(
   request: {
@@ -138,32 +144,33 @@ function manualGeneratedResult(request: {
 async function fillThroughGeneration(page: import("@playwright/test").Page): Promise<void> {
   await page.locator("#tournament-name").fill("本番確認大会");
   await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("seeded_snake");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート\nBコート");
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
   await expect(page.locator("#generation-status")).toContainText("安全確認が完了しました");
 }
 
-test("各手順の不備を項目付近に表示して次へ進まない", async ({ page }) => {
+test("生成時に全設定を検証し、不備のあるタブと項目へ戻る", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
 
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#tab-schedule-settings").click();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#tournament-name-error")).toContainText("大会名を入力");
   await expect(page.locator("#teams-error")).toContainText("2チーム以上");
-  await expect(page.locator('[data-panel="1"]')).toBeVisible();
+  await expect(page.locator("#tournament-panel")).toBeVisible();
 
   await page.locator("#tournament-name").fill("地区大会");
   await page.locator("#teams").fill("青空FC\nみどりSC");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
   await page.locator("#courts").fill("Aコート");
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await page.locator("#tab-schedule-settings").click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#block-count-error")).toContainText("選択してください");
-  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
 });
 
 test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼ぶ", async ({ page }) => {
@@ -181,21 +188,22 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(generatedRolePathResult(request)),
+      body: JSON.stringify(scheduleCreationResponse(generatedRolePathResult(request))),
     });
   });
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({
-    request_kind: "day1_league",
+    request_kind: "schedule_creation",
+    generation_scope: "all",
     league: { block_count: 2, assignment_mode: "seeded_snake" },
     teams: [{ seed: 1 }, { seed: 2 }, { seed: 3 }, { seed: 4 }],
     courts: [{ name: "Aコート" }, { name: "Bコート" }],
   });
-  expect(requests[0]).not.toHaveProperty("day2");
+  expect(requests[0]).toHaveProperty("day2");
 });
 
 test("手動で各チームを均衡ブロックへ割り当て、その所属のまま生成する", async ({
@@ -205,11 +213,11 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await openApp(page);
   await page.locator("#tournament-name").fill("手動割当て大会");
   await page.locator("#teams").fill("青空FC\nみどりSC\n中央キッカーズ\n海浜ユナイテッド");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート\nBコート");
 
   await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
   const blue = page.getByLabel("青空FC");
@@ -227,7 +235,6 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
     true,
   );
 
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await expect(page.getByTestId("turnstile-widget-mock")).toBeVisible();
   await page.unroute(GENERATE_API);
   let request: Record<string, unknown> | undefined;
@@ -236,11 +243,11 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(manualGeneratedResult(request)),
+      body: JSON.stringify(scheduleCreationResponse(manualGeneratedResult(request))),
     });
   });
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   expect(request).toMatchObject({
     league: {
@@ -256,7 +263,7 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await expect(page.locator(".block-card").first()).toContainText("青空FC");
   await expect(page.locator(".block-card").first()).toContainText("中央キッカーズ");
 
-  await page.locator('.step[data-step="2"]').click();
+  await page.locator("#tab-schedule-settings").click();
   await page.getByLabel("青空FC", { exact: true }).selectOption("B");
   await expect(page.locator("#result-summary")).toContainText("まだ生成結果はありません");
 });
@@ -266,11 +273,11 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
   await openApp(page);
   await page.locator("#tournament-name").fill("部分手動割当て大会");
   await page.locator("#teams").fill("青\n赤\n白\n緑");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート\nBコート");
   await page.getByLabel("青", { exact: true }).selectOption("A");
   await page.getByLabel("緑", { exact: true }).selectOption("B");
   await expect(page.locator("#manual-block-summary")).toContainText(
@@ -281,7 +288,6 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
     true,
   );
 
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
   await page.unroute(GENERATE_API);
   let request: Record<string, unknown> | undefined;
   await page.route(GENERATE_API, async (route) => {
@@ -289,10 +295,10 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(manualGeneratedResult(request)),
+      body: JSON.stringify(scheduleCreationResponse(manualGeneratedResult(request))),
     });
   });
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   expect(request).toMatchObject({
     league: {
@@ -329,7 +335,7 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
   expect(exported.tournament.result.league_plan.manual_completion.automatic_assignments).toHaveLength(2);
   await importDocument(page, exported);
   await expect(page.locator(".automatic-assignment")).toHaveCount(2);
-  await page.locator('.step[data-step="2"]').click();
+  await page.locator("#tab-schedule-settings").click();
   await expect(page.getByLabel("青", { exact: true })).toHaveValue("A");
   await expect(page.getByLabel("緑", { exact: true })).toHaveValue("B");
   await expect(page.getByLabel("赤", { exact: true })).toHaveValue("");
@@ -337,8 +343,7 @@ test("一部だけ手動指定し、残りを自動配置して入力との区�
   await page.getByLabel("青", { exact: true }).selectOption("");
   await page.getByLabel("緑", { exact: true }).selectOption("");
   await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   expect(request).toMatchObject({
     league: {
       manual_blocks: [
@@ -355,18 +360,18 @@ test("手動指定の人数超過では次へ進まない", async ({ page }) => 
   await openApp(page);
   await page.locator("#tournament-name").fill("入力確認大会");
   await page.locator("#teams").fill("青\n赤\n白\n緑\n黄");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
   await page.locator("#final-stage-format").selectOption("same_rank_league");
-  await page.locator("#courts").fill("Aコート");
   for (const name of ["青", "赤", "白", "緑"]) {
     await page.getByLabel(name, { exact: true }).selectOption("A");
   }
 
-  await page.getByRole("button", { name: "次へ：時刻・生成" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#manual-block-team-team-01-error")).toContainText("2〜3チーム");
-  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
 });
 
 test("名称変更・追加・ブロック変更では有効な手動割当てだけを保持する", async ({
@@ -376,7 +381,8 @@ test("名称変更・追加・ブロック変更では有効な手動割当て�
   await openApp(page);
   await page.locator("#tournament-name").fill("割当て編集大会");
   await page.locator("#teams").fill("青\n赤\n白\n緑");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.locator("#courts").fill("Aコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await page.locator("#block-count").selectOption("2");
   await page.locator("#assignment-mode").selectOption("manual");
   await page.getByLabel("青", { exact: true }).selectOption("A");
@@ -384,9 +390,9 @@ test("名称変更・追加・ブロック変更では有効な手動割当て�
   await page.getByLabel("白", { exact: true }).selectOption("A");
   await page.getByLabel("緑", { exact: true }).selectOption("B");
 
-  await page.getByRole("button", { name: "戻る" }).click();
+  await page.getByRole("button", { name: "大会・チームへ戻る" }).click();
   await page.locator("#teams").fill("青空\n赤\n白\n緑\n黄");
-  await page.getByRole("button", { name: "次へ：ブロック・会場" }).click();
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
   await expect(page.getByLabel("青空", { exact: true })).toHaveValue("A");
   await expect(page.getByLabel("赤", { exact: true })).toHaveValue("B");
   await expect(page.getByLabel("黄", { exact: true })).toHaveValue("");
@@ -413,11 +419,11 @@ test("生成した1日目の全担当経路が隣接同一コートなら保存�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(generatedRolePathResult(request)),
+      body: JSON.stringify(scheduleCreationResponse(generatedRolePathResult(request))),
     });
   });
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
   await expect(page.locator(".legacy-schedule-warning")).toHaveCount(0);
@@ -436,11 +442,11 @@ test("旧バックエンドから届いた隣接コート違反の日程は保�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(generatedRolePathResult(request, true)),
+      body: JSON.stringify(scheduleCreationResponse(generatedRolePathResult(request, true))),
     });
   });
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   await expect(page.locator("#generation-status")).toContainText(
     "隣接セクションの担当を同じコート",
@@ -469,7 +475,7 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
       .replaceAll("court-a", "main-pitch"),
   ) as { tournament: { result: unknown } };
   await importDocument(page, customized);
-  await page.locator('.step[data-step="3"]').click();
+  await page.locator("#tab-schedule-settings").click();
   await page.locator("#game-duration").fill("40");
   await page.unroute(GENERATE_API);
   let request: Record<string, unknown> | undefined;
@@ -478,12 +484,12 @@ test("読込み済み文書のチームIDとコートIDを設定変更後の再�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(generatedRolePathResult(request)),
+      body: JSON.stringify(scheduleCreationResponse(generatedRolePathResult(request))),
     });
   });
 
-  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
   await expect(page.locator("#result-summary")).toContainText("配置済み 2試合");
 
   expect(request).toMatchObject({ day: { game_duration_minutes: 40 } });
@@ -508,10 +514,10 @@ test("生成直前の無効入力ではAPIを呼ばず安全確認を維持す�
   });
   await page.locator("#game-duration").fill("");
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
   await expect(page.locator("#game-duration-error")).toContainText("1分以上");
-  await expect(page.getByRole("button", { name: "1日目の日程を生成する" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
   expect(requestCount).toBe(0);
 });
 
@@ -537,8 +543,8 @@ test("APIのfield詳細を日本語項目へ表示して該当手順へ戻る", 
     });
   });
 
-  await page.getByRole("button", { name: "1日目の日程を生成する" }).click();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
 
-  await expect(page.locator('[data-panel="2"]')).toBeVisible();
+  await expect(page.locator("#schedule-settings-panel")).toBeVisible();
   await expect(page.locator("#block-count-error")).toContainText("ブロック数の入力値");
 });

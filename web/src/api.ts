@@ -20,6 +20,8 @@ function turnstileAction(input: JsonObject): string {
       return "generate_same_rank_day2_schedule";
     case "day2_creation":
       return "create_day2";
+    case "schedule_creation":
+      return "create_schedule";
     case "day2_schedule":
       return "generate_day2_schedule";
     default:
@@ -163,6 +165,15 @@ export function generateDay2Schedule(
 
 /** 1つの安全確認でトーナメント表と2日目日程を一括生成する。 */
 export function createDay2(
+  input: JsonObject,
+  turnstileToken: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<JsonObject> {
+  return generateSchedule(input, turnstileToken, fetchImplementation);
+}
+
+/** 1回の安全確認で1日目と2日目の日程を一括生成または安全に再生成する。 */
+export function createSchedule(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

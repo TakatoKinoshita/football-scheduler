@@ -7,11 +7,11 @@ import {
 } from "./types";
 import { analyzeManualBlocks, manualBlocksFromUnknown } from "./manual-blocks";
 
-export type WizardStep = 1 | 2 | 3 | 4 | 5;
+export type WizardStep = 1 | 2 | 3 | 4;
 
 export interface FieldIssue {
   field: string;
-  step: Exclude<WizardStep, 4 | 5>;
+  step: Exclude<WizardStep, 3 | 4>;
   message: string;
 }
 
@@ -176,7 +176,7 @@ function validTime(value: unknown): boolean {
 
 export function validateDay1LeagueDocument(
   document: TournamentDocument,
-  throughStep: Exclude<WizardStep, 4 | 5> = 3,
+  throughStep: Exclude<WizardStep, 3 | 4> = 2,
 ): FieldIssue[] {
   const issues: FieldIssue[] = [];
   const input = document.tournament.input;
@@ -196,18 +196,18 @@ export function validateDay1LeagueDocument(
           : "参加チームは32チームまでにしてください。",
     });
   }
-  if (throughStep === 1) return issues;
-
   if (courtCount < 1 || courtCount > 16) {
     issues.push({
       field: "courts",
-      step: 2,
+      step: 1,
       message:
         courtCount < 1
           ? "使用コートを1行に1コート、1つ以上入力してください。"
           : "使用コートは16コートまでにしてください。",
     });
   }
+  if (throughStep === 1) return issues;
+
   const league = objectValue(input.league);
   const blockCount = numberValue(league?.block_count);
   if (blockCount === undefined || !Number.isInteger(blockCount)) {
@@ -348,13 +348,11 @@ export function validateDay1LeagueDocument(
       message: "2日目の決勝方式を選択してください。",
     });
   }
-  if (throughStep === 2) return issues;
-
   const day = objectValue(input.day);
   if (!validTime(day?.start_time)) {
     issues.push({
       field: "start-time",
-      step: 3,
+      step: 2,
       message: "開始時刻を00:00から23:59の範囲で入力してください。",
     });
   }
@@ -362,7 +360,7 @@ export function validateDay1LeagueDocument(
   if (duration === undefined || !Number.isInteger(duration) || duration <= 0) {
     issues.push({
       field: "game-duration",
-      step: 3,
+      step: 2,
       message: "試合時間を1分以上の整数で入力してください。",
     });
   }
@@ -370,7 +368,7 @@ export function validateDay1LeagueDocument(
   if (margin === undefined || !Number.isInteger(margin) || margin < 0) {
     issues.push({
       field: "margin-minutes",
-      step: 3,
+      step: 2,
       message: "試合間隔を0分以上の整数で入力してください。",
     });
   }
@@ -382,7 +380,7 @@ export function validateDay1LeagueDocument(
   ) {
     issues.push({
       field: "max-sections",
-      step: 3,
+      step: 2,
       message: "最大セクション数は1から128までの整数で入力してください。",
     });
   }
@@ -391,14 +389,14 @@ export function validateDay1LeagueDocument(
   if (capacity === undefined || !Number.isInteger(capacity) || capacity < 0) {
     issues.push({
       field: "organizer-capacity",
-      step: 3,
+      step: 2,
       message: "同時に担当できる主催者審判数を0以上の整数で入力してください。",
     });
   }
   if (!Number.isInteger(input.random_seed)) {
     issues.push({
       field: "random-seed",
-      step: 3,
+      step: 2,
       message: "抽選番号を整数で入力してください。",
     });
   }
@@ -406,21 +404,28 @@ export function validateDay1LeagueDocument(
 }
 
 const API_FIELD_MAP: Array<
-  readonly [string, string, Exclude<WizardStep, 4 | 5>, string]
+  readonly [string, string, Exclude<WizardStep, 3 | 4>, string]
 > = [
   ["teams", "teams", 1, "参加チーム"],
-  ["courts", "courts", 2, "使用コート"],
+  ["courts", "courts", 1, "使用コート"],
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
   ["league.manual_blocks", "manual-blocks", 2, "手動ブロック割当て"],
   ["final_stage", "final-stage-format", 2, "2日目の決勝方式"],
-  ["day.start_time", "start-time", 3, "開始時刻"],
-  ["day.game_duration_minutes", "game-duration", 3, "試合時間"],
-  ["day.margin_minutes", "margin-minutes", 3, "試合間隔"],
-  ["day.max_sections", "max-sections", 3, "最大セクション数"],
-  ["referees.organizer_capacity", "organizer-capacity", 3, "主催者審判能力"],
-  ["referees.team_referees_required_after_first", "team-referees", 3, "チーム審判"],
-  ["random_seed", "random-seed", 3, "抽選番号"],
+  ["day.start_time", "start-time", 2, "開始時刻"],
+  ["day.game_duration_minutes", "game-duration", 2, "試合時間"],
+  ["day.margin_minutes", "margin-minutes", 2, "試合間隔"],
+  ["day.max_sections", "max-sections", 2, "最大セクション数"],
+  ["day2.start_time", "day2-start-time", 2, "2日目の開始時刻"],
+  ["day2.game_duration_minutes", "day2-game-duration", 2, "2日目の試合時間"],
+  ["day2.margin_minutes", "day2-margin-minutes", 2, "2日目の試合間隔"],
+  ["day2.end_time", "day2-end-time", 2, "2日目の終了時刻"],
+  ["day2.max_sections", "day2-max-sections", 2, "2日目の最大セクション数"],
+  ["day2.breaks", "day2-breaks", 2, "2日目の休憩"],
+  ["referees.organizer_capacity", "organizer-capacity", 2, "主催者審判能力"],
+  ["referees.team_referees_required_after_first", "team-referees", 2, "チーム審判"],
+  ["referees.day2_fallback", "day2-fallback", 2, "2日目の審判フォールバック"],
+  ["random_seed", "random-seed", 2, "抽選番号"],
 ];
 
 export function issuesFromApiDetails(details: JsonObject | undefined): FieldIssue[] {

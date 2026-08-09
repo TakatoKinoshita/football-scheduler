@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 _SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 _EXPECTED_ACTIONS = frozenset(
     {
+        "create_schedule",
         "generate_schedule",
         "calculate_standings",
         "generate_tournament",
