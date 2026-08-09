@@ -3801,6 +3801,27 @@ generateButton.addEventListener("click", () => {
       asObject(previousResult.day2_schedule) === undefined
     ? "day2_only"
     : "all";
+  if (generationScope === "all" && previousResult !== undefined) {
+    const replacedItems = ["1・2日目の生成済み日程"];
+    if (asObjectArray(previousResult.league_results).length > 0) {
+      replacedItems.push("入力済みの1日目結果");
+    }
+    if (
+      asObjectArray(previousResult.tournament_results).length > 0 ||
+      asObjectArray(previousResult.same_rank_league_results).length > 0
+    ) {
+      replacedItems.push("入力済みの2日目結果");
+    }
+    if (asObject(previousResult.final_standings) !== undefined) {
+      replacedItems.push("確定済みの総合最終順位");
+    }
+    if (!window.confirm(`${replacedItems.join("、")}を削除して作り直します。よろしいですか？`)) {
+      generationStatusOwner = "generation";
+      generationStatus.textContent = "日程の再生成を取り消しました。現在の生成結果は保持しています。";
+      refreshGenerateEnabled();
+      return;
+    }
+  }
   const referees = {
     ...(asObject(documentState.tournament.input.referees) ?? {}),
     day2_fallback: day2FallbackInput.value,

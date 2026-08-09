@@ -138,6 +138,22 @@ test("順位未確定でも1回の操作で仮トーナメントと仮日程を�
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#tournament-plan-view")).toBeVisible();
   await page.emulateMedia({ media: "screen" });
+  await page.locator("#tab-schedule-settings").click();
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  const confirmationMessage = new Promise<string>((resolve) => {
+    page.once("dialog", async (dialog) => {
+      resolve(dialog.message());
+      await dialog.dismiss();
+    });
+  });
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect(confirmationMessage).resolves.toContain(
+    "1・2日目の生成済み日程を削除して作り直します",
+  );
+  expect(requests).toHaveLength(1);
+  await expect(page.locator("#generation-status")).toContainText("現在の生成結果は保持");
+  await page.locator("#tab-day2").click();
+  await expect(page.locator("#day2-schedule-view")).toBeVisible();
   await page.context().setOffline(true);
   await page.reload();
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
