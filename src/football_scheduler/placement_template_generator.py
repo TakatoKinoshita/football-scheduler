@@ -132,12 +132,16 @@ class StabilizedPlacementTemplateSolver:
         dependency_bound = dependency_depth * 2 - 1
         referee_capacity_bound = 0
         if key.day2_fallback is Day2Fallback.STRICT:
+            earliest_final_section = max(
+                dependency_bound,
+                math.ceil((key.pool_size - 2) / key.organizer_capacity) + 2,
+            )
             referee_capacity_bound = _strict_referee_capacity_lower_horizon(
                 match_count=match_count,
                 court_count=key.court_count,
                 organizer_capacity=key.organizer_capacity,
                 final_count=key.pool_count,
-                earliest_final_section=dependency_bound,
+                earliest_final_section=earliest_final_section,
             )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
         return PlacementProblemBounds(

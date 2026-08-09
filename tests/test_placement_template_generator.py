@@ -199,7 +199,7 @@ def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() 
 
 @pytest.mark.parametrize(
     ("pool_count", "pool_size", "expected"),
-    ((3, 8, 20), (2, 16, 35)),
+    ((3, 8, 22), (2, 16, 40)),
 )
 def test_strict_capacity_bound_delays_new_courts_until_finals(
     pool_count: int,
@@ -207,7 +207,8 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
     expected: int,
 ) -> None:
     match_count = pool_count * pool_size * (pool_size.bit_length() - 1) // 2
-    earliest_final = (pool_size.bit_length() - 1) * 2 - 1
+    dependency_bound = (pool_size.bit_length() - 1) * 2 - 1
+    earliest_final = max(dependency_bound, pool_size)
 
     assert (
         _strict_referee_capacity_lower_horizon(
@@ -218,6 +219,16 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
             earliest_final_section=earliest_final,
         )
         == expected
+    )
+    key = PlacementTemplateKey(
+        pool_count=pool_count,
+        pool_size=pool_size,
+        court_count=2,
+        organizer_capacity=1,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
+        expected
     )
 
 
