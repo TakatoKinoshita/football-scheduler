@@ -74,6 +74,40 @@ uv run python scripts/generate_placement_templates.py --merge
 uv run python scripts/generate_placement_templates.py --check
 ```
 
+8・16チームの下位目的を再最適化する場合は、証明済みの最小horizonを変更せず、対象shardを
+個別に処理する。24・32チームの3shardはraw file SHA-256と内部canonical digestの両方を
+処理前後に検査し、1 byteでも変更されていれば停止する。
+
+```console
+uv run python scripts/generate_placement_templates.py --optimize-lower-objectives --topology 2x4 --workers 2 --resume
+uv run python scripts/generate_placement_templates.py --optimize-lower-objectives --topology 2x8 --workers 2 --resume
+uv run python scripts/generate_placement_templates.py --merge
+uv run python scripts/generate_placement_templates.py --check
+```
+
+optimizerは基礎generator `placement-template-generator-v8`を維持し、対象entryのprovenanceにだけ
+`placement-lower-objective-optimizer-v1`を記録する。未処理entryではfield自体をJSONへ出力しないため、
+既存entryと対象外shardのdigestは変化しない。各key・各目的段階はversion付きcheckpointへatomicに
+保存し、入力entry digestが一致する完全な6段階だけを`--resume`で再利用する。証明フラグは常に
+`true...true,false...false`の連続prefixとし、gap 0、最大待ち1、コート移動0、コート利用偏りの
+算術下限へ到達した実配置は、hydrateと独立validatorに合格した後だけ安全に証明済みへ昇格する。
+
+全列挙後はcurrent・legacyの決定的gzip fixtureとoptimizer shard/checkpointを単一aggregatorへ渡す。
+aggregatorは全候補を現行規則で再監査し、currentと同値ならcurrentのslot配置、legacyとoptimizerが
+同じ改善値ならoptimizer配置を採用する。最終候補はcurrentと全available legacyのどちらよりも
+辞書式に悪化できない。出力は2x4・2x8 shardとmanifestだけで、対象外3 shardは二重digest guardを
+再確認する。品質レポートには証明数、A/B比較、legacy status、optimizer stageの証明方法と実行時間を
+固定順・小数3桁で記録する。
+
+```console
+uv run python scripts/aggregate_placement_templates.py \
+  --current-baseline tests/fixtures/placement-template-ab/current-pre-optimizer.json.gz \
+  --legacy-baseline tests/fixtures/placement-template-ab/legacy-2ccf91d.json.gz \
+  --optimizer-directory artifacts/optimized-catalog \
+  --catalog-directory src/football_scheduler/placement_templates \
+  --report docs/architecture/issue-71-placement-quality-report.md
+```
+
 generatorは理論下限から固定horizonを増やし、目的変数を持たない実行可能性モデルで探索する。
 より短いhorizonの実行不能証明後、最初の実行可能配置を採用するため、使用
 セクション数の最小性は必ず証明される。下位目的は非負下限0へ到達した辞書順の段階までを証明済み

@@ -167,6 +167,7 @@ jobs:
           uv run pytest
           uv run python scripts/generate_placement_templates.py --check | tee /tmp/placement-template-check.txt
           cat /tmp/placement-template-check.txt >> "$GITHUB_STEP_SUMMARY"
+          uv run python scripts/verify_production_path.py --profile sixteen --repeat 2 --maximum-seconds 30
           uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
 
       - name: Build and test PWA and Pages Function
@@ -383,6 +384,18 @@ jobs:
             --no-cli-pager /tmp/lambda-smoke-response.json
           uv run python scripts/check_lambda_smoke_response.py \
             /tmp/lambda-smoke-response.json --release-id "$RELEASE_ID"
+          uv run python scripts/write_lambda_smoke_event.py \
+            /tmp/lambda-sixteen-day2-event.json --sixteen-day2
+          aws lambda invoke \
+            --function-name "${{ steps.stack.outputs.function }}" \
+            --qualifier live \
+            --payload fileb:///tmp/lambda-sixteen-day2-event.json \
+            --cli-binary-format raw-in-base64-out \
+            --no-cli-pager /tmp/lambda-sixteen-day2-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/lambda-sixteen-day2-response.json \
+            --release-id "$RELEASE_ID" \
+            --sixteen-day2
           uv run python scripts/write_lambda_smoke_event.py \
             /tmp/lambda-maximum-day2-event.json --maximum-day2
           aws lambda invoke \

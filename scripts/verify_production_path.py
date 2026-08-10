@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""最大構成の両日生成をhash seedの異なる本番HTTP adapterで検証する。"""
+"""順位決定トーナメントの両日生成をhash seedの異なる本番HTTP adapterで検証する。"""
 
 from __future__ import annotations
 
@@ -14,14 +14,23 @@ from pathlib import Path
 from typing import Any
 
 from football_scheduler.api_handler import MAX_HTTP_BODY_BYTES, lambda_handler
-from football_scheduler.fixtures import make_maximum_schedule_creation_request
+from football_scheduler.fixtures import (
+    make_maximum_schedule_creation_request,
+    make_sixteen_team_schedule_creation_request,
+)
 
 _HASH_SEEDS = ("1", "987654321")
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="32チーム・2トーナメントの本番経路を別プロセスで検証します。"
+        description="順位決定トーナメントの本番経路を別プロセスで検証します。"
+    )
+    parser.add_argument(
+        "--profile",
+        choices=("sixteen", "maximum"),
+        default="maximum",
+        help="検証構成。既定は32チームのmaximum",
     )
     parser.add_argument("--repeat", type=int, default=2, help="再現性確認の実行回数。既定は2回")
     parser.add_argument(
@@ -53,9 +62,14 @@ def _normalized_hash(result: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _event() -> dict[str, object]:
+def _event(profile: str) -> dict[str, object]:
+    request = (
+        make_sixteen_team_schedule_creation_request()
+        if profile == "sixteen"
+        else make_maximum_schedule_creation_request()
+    )
     body = json.dumps(
-        make_maximum_schedule_creation_request(),
+        request,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -71,9 +85,9 @@ def _event() -> dict[str, object]:
     }
 
 
-def _worker(maximum_seconds: float) -> int:
+def _worker(profile: str, maximum_seconds: float) -> int:
     started = time.perf_counter()
-    response = lambda_handler(_event(), None)
+    response = lambda_handler(_event(profile), None)
     elapsed = time.perf_counter() - started
     response_bytes = len(response["body"].encode())
     result: Any = json.loads(response["body"])
@@ -91,21 +105,34 @@ def _worker(maximum_seconds: float) -> int:
     )
     validation = day2.get("validation") if isinstance(day2, dict) else None
     integrated = day2.get("integrated_validation") if isinstance(day2, dict) else None
+    diagnostics = day2.get("diagnostics") if isinstance(day2, dict) else None
+    template_fallback = any(
+        isinstance(item, dict) and item.get("code") == "PLACEMENT_TEMPLATE_FALLBACK_USED"
+        for item in diagnostics or ()
+    )
+    expected_match_count = 24 if profile == "sixteen" else 64
     errors: list[str] = []
     if result.get("status") not in {"OPTIMAL", "FEASIBLE"}:
         errors.append("STATUS")
-    if not isinstance(matches, list) or len(matches) != 64 or occupied_count != 64:
+    if (
+        not isinstance(matches, list)
+        or len(matches) != expected_match_count
+        or occupied_count != expected_match_count
+    ):
         errors.append("MATCH_COUNT")
     if not isinstance(validation, dict) or validation.get("valid") is not True:
         errors.append("VALIDATION")
     if not isinstance(integrated, dict) or integrated.get("valid") is not True:
         errors.append("INTEGRATED_VALIDATION")
+    if template_fallback:
+        errors.append("TEMPLATE_FALLBACK")
     if elapsed > maximum_seconds:
         errors.append("TIME_LIMIT")
     if response_bytes > MAX_HTTP_BODY_BYTES:
         errors.append("RESPONSE_LIMIT")
     payload = {
         "status": result.get("status"),
+        "profile": profile,
         "elapsed_seconds": elapsed,
         "response_bytes": response_bytes,
         "match_count": len(matches) if isinstance(matches, list) else -1,
@@ -117,13 +144,15 @@ def _worker(maximum_seconds: float) -> int:
     return int(bool(errors))
 
 
-def _run_worker(hash_seed: str, maximum_seconds: float) -> dict[str, Any]:
+def _run_worker(profile: str, hash_seed: str, maximum_seconds: float) -> dict[str, Any]:
     environment = os.environ.copy()
     environment["PYTHONHASHSEED"] = hash_seed
     command = [
         sys.executable,
         str(Path(__file__).resolve()),
         "--worker",
+        "--profile",
+        profile,
         "--maximum-seconds",
         str(maximum_seconds),
     ]
@@ -153,7 +182,7 @@ def main() -> int:
         print("--maximum-secondsは0より大きくしてください。", file=sys.stderr)
         return 2
     if args.worker:
-        return _worker(args.maximum_seconds)
+        return _worker(args.profile, args.maximum_seconds)
     if args.repeat < 2:
         print("再現性確認のため、--repeatは2以上にしてください。", file=sys.stderr)
         return 2
@@ -162,12 +191,13 @@ def main() -> int:
     try:
         for attempt in range(args.repeat):
             seed = _HASH_SEEDS[attempt % len(_HASH_SEEDS)]
-            payload = _run_worker(seed, args.maximum_seconds)
+            payload = _run_worker(args.profile, seed, args.maximum_seconds)
             payloads.append(payload)
+            expected_match_count = 24 if args.profile == "sixteen" else 64
             print(
                 f"{attempt + 1}回目(hash seed={seed}): {payload['status']}、"
                 f"{payload['elapsed_seconds']:.3f}秒、{payload['response_bytes']:,}バイト、"
-                f"2日目64試合・独立制約検証=合格"
+                f"2日目{expected_match_count}試合・独立制約検証=合格"
             )
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(str(exc), file=sys.stderr)

@@ -24,3 +24,4 @@ samconfig.toml
 benchmark-results/
 .worktrees/
 src/football_scheduler/placement_templates/.checkpoints/
+src/football_scheduler/placement_templates/.optimization-checkpoints/

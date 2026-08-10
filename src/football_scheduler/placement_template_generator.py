@@ -14,10 +14,12 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from hashlib import sha256
+from importlib import import_module
 from importlib.metadata import version
 from itertools import combinations_with_replacement, pairwise
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from ortools.sat.python import cp_model
 
@@ -31,10 +33,13 @@ from football_scheduler.models import (
     SolverStatus,
 )
 from football_scheduler.placement_template_contract import (
+    LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     PLACEMENT_OBJECTIVES,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
     CanonicalMatchPosition,
     CanonicalRefereeAssignment,
+    OptimizationProofMethod,
+    PlacementOptimizationStageCheckpoint,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateManifest,
@@ -47,6 +52,7 @@ from football_scheduler.placement_template_contract import (
     expected_placement_template_keys,
     manifest_digest,
     placement_entry_digest,
+    placement_optimization_checkpoint_digest,
     placement_referee_signature,
     placement_shard_digest,
 )
@@ -54,13 +60,34 @@ from football_scheduler.timekeeping import expected_end_time, section_timings
 from football_scheduler.tournament import generate_tournament_plan
 from football_scheduler.validator import validate_day2_schedule
 
+Topology = tuple[int, int]
+
 GENERATOR_VERSION = "placement-template-generator-v8"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"
 MANIFEST_FILE = "manifest.json"
+OPTIMIZATION_CHECKPOINT_DIRECTORY = ".optimization-checkpoints"
+LOWER_OBJECTIVE_TARGET_TOPOLOGIES: tuple[Topology, ...] = ((2, 4), (2, 8))
 
-Topology = tuple[int, int]
+# Issue #71 must not rewrite the 24/32-team shards.  Both the bytes committed by
+# Issue #69 and their parsed canonical digest are pinned, so whitespace-only or
+# semantic rewrites are caught before an optimization run starts.
+UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
+    (3, 8): (
+        "f05dc54dcc148e6a3dab6c75867dad84e8be6706329aae2d5ffa2c0ed8b67d38",
+        "5450d7e20501c6f14d6a36b4de2267ef68c7178b46f3e018d9733bfafb27fe2b",
+    ),
+    (2, 16): (
+        "4e44e1485c054a4de93cb902c13b439a86a4c6ef6b707ab5eba540cf3c1ab083",
+        "8942027d9f81366b2dd7ef2d278e62c32d4846086000cabe71d0d8d7d9666580",
+    ),
+    (4, 8): (
+        "9b4ebce9d4ab53110c10d59f5e8f59aed474d0ca6a32c29d5cd72f6db59c348a",
+        "8ba3869afbe4e8f789da9aa97a758bfb51dd5edd0a8617da99fc26af79025b70",
+    ),
+}
+
 ValidationReport = Mapping[str, object]
 CandidateValidator = Callable[[object], ValidationReport]
 
@@ -114,6 +141,34 @@ class PlacementTemplateSolver(Protocol):
     def bounds(self, key: PlacementTemplateKey) -> PlacementProblemBounds: ...
 
     def solve_horizon(self, key: PlacementTemplateKey, horizon: int) -> PlacementSolveAttempt: ...
+
+
+class LowerObjectiveStageResultLike(Protocol):
+    objective: str
+    value: int
+    status: SolverStatus
+    optimality_proven: bool
+    proof_method: OptimizationProofMethod
+    best_bound: float | None
+    wall_time_seconds: float
+    model_fingerprint: str
+
+
+class LowerObjectiveOptimizationResultLike(Protocol):
+    schedule: Day2Schedule
+    objectives: tuple[LowerObjectiveStageResultLike, ...]
+    proven_objectives: tuple[str, ...]
+    wall_time_seconds: float
+
+
+class LowerObjectiveOptimizer(Protocol):
+    def __call__(
+        self,
+        request: Day2ScheduleRequest,
+        incumbent: Day2Schedule,
+        *,
+        max_time_per_stage: float,
+    ) -> LowerObjectiveOptimizationResultLike: ...
 
 
 class StabilizedPlacementTemplateSolver:
@@ -715,32 +770,47 @@ def validate_catalog_hydration(
         for entry in shard.entries:
             if entry.status is PlacementTemplateStatus.PROVEN_INFEASIBLE:
                 continue
-            if entry.used_sections is None:
-                raise PlacementTemplateIntegrityError(
-                    f"{entry.key.catalog_id}: available entryに使用セクション数がありません"
-                )
-            base_request = request_factory._base_request(entry.key)
-            request = base_request.model_copy(
-                update={
-                    "day": base_request.day.model_copy(
-                        update={"max_sections": entry.used_sections}
-                    ),
-                }
-            )
-            path_model = day2_schedule._build_path_model(request.tournament_plan)
-            schedule = day2_schedule._generate_day2_schedule_from_template(
-                request,
-                path_model,
-                entry.used_sections,
+            _hydrate_and_validate_entry(
                 entry,
+                request_factory=request_factory,
+                validator=validator,
             )
-            if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
-                raise PlacementTemplateIntegrityError(
-                    f"{entry.key.catalog_id}: template hydrateが成功しませんでした"
-                )
-            _validate_hydrated_candidate(entry, request, schedule, validator)
             hydrated_count += 1
     return hydrated_count
+
+
+def _hydrate_and_validate_entry(
+    entry: PlacementTemplateEntry,
+    *,
+    request_factory: StabilizedPlacementTemplateSolver | None = None,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> tuple[Day2ScheduleRequest, Day2Schedule]:
+    """単一entryを実planへ復元し、目的値と独立制約を再監査する。"""
+
+    if entry.status is not PlacementTemplateStatus.AVAILABLE or entry.used_sections is None:
+        raise PlacementTemplateIntegrityError(
+            f"{entry.key.catalog_id}: available entryに使用セクション数がありません"
+        )
+    factory = request_factory or StabilizedPlacementTemplateSolver(max_time_seconds=1)
+    base_request = factory._base_request(entry.key)
+    request = base_request.model_copy(
+        update={
+            "day": base_request.day.model_copy(update={"max_sections": entry.used_sections}),
+        }
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    schedule = day2_schedule._generate_day2_schedule_from_template(
+        request,
+        path_model,
+        entry.used_sections,
+        entry,
+    )
+    if schedule.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        raise PlacementTemplateIntegrityError(
+            f"{entry.key.catalog_id}: template hydrateが成功しませんでした"
+        )
+    _validate_hydrated_candidate(entry, request, schedule, validator)
+    return request, schedule
 
 
 def load_entry(path: Path) -> PlacementTemplateEntry:
@@ -814,6 +884,168 @@ def current_provenance() -> PlacementTemplateProvenance:
     )
 
 
+def optimizer_provenance() -> PlacementTemplateProvenance:
+    """基礎generator版を変えず、下位目的optimizerだけを識別する。"""
+
+    return current_provenance().model_copy(
+        update={"optimization_version": LOWER_OBJECTIVE_OPTIMIZER_VERSION}
+    )
+
+
+def guard_untouched_shards(output_directory: Path) -> None:
+    """Issue #71対象外の24/32-team shardが一切変わっていないことを検査する。"""
+
+    for topology, (expected_raw, expected_internal) in UNTOUCHED_SHARD_DIGESTS.items():
+        path = shard_file(output_directory, topology)
+        try:
+            raw_digest = sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise PlacementTemplateIntegrityError(
+                f"対象外shardを読み込めません: {path}: {exc}"
+            ) from exc
+        if raw_digest != expected_raw:
+            raise PlacementTemplateIntegrityError(
+                f"対象外shardのraw SHA-256が変更されています: {path.name}"
+            )
+        if load_shard(path).sha256 != expected_internal:
+            raise PlacementTemplateIntegrityError(
+                f"対象外shardの内部SHA-256が変更されています: {path.name}"
+            )
+
+
+def reaudit_absolute_lower_bound_proofs(
+    entry: PlacementTemplateEntry,
+    *,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateEntry:
+    """独立検証済み実値が絶対下限なら、連続prefixの範囲で証明を昇格する。"""
+
+    if entry.status is not PlacementTemplateStatus.AVAILABLE:
+        return entry
+    _hydrate_and_validate_entry(entry, validator=validator)
+    match_count = len(entry.slots)
+    court_lower_bound = int(match_count % entry.key.court_count != 0)
+    lower_bounds: tuple[int | None, ...] = (
+        entry.used_sections,
+        0,
+        0,
+        1,
+        0,
+        court_lower_bound,
+    )
+    proof_prefix = True
+    changed = False
+    objectives: list[PlacementTemplateObjective] = []
+    for objective, lower_bound in zip(entry.objectives, lower_bounds, strict=True):
+        promoted = proof_prefix and (
+            objective.optimality_proven
+            or (lower_bound is not None and objective.value == lower_bound)
+        )
+        changed = changed or promoted != objective.optimality_proven
+        objectives.append(objective.model_copy(update={"optimality_proven": promoted}))
+        proof_prefix = promoted
+    if not changed:
+        return entry
+    return _with_entry_digest(
+        entry.model_copy(update={"objectives": tuple(objectives), "sha256": ""})
+    )
+
+
+def select_best_validated_template_candidate(
+    current: PlacementTemplateEntry,
+    candidates: Iterable[PlacementTemplateEntry],
+    *,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateEntry:
+    """current/legacy/new候補を監査し、同値ならcurrentを維持して辞書式最良を返す。"""
+
+    _hydrate_and_validate_entry(current, validator=validator)
+    best = current
+    current_primary = current.objectives[0].value
+    for candidate in candidates:
+        if candidate.key != current.key:
+            raise PlacementTemplateIntegrityError("比較候補のkeyがcurrentと一致しません")
+        _hydrate_and_validate_entry(candidate, validator=validator)
+        candidate_primary = candidate.objectives[0].value
+        if candidate_primary < current_primary:
+            raise PlacementTemplateIntegrityError(
+                f"{current.key.catalog_id}: 証明済み最小horizonより短い候補を検出しました"
+            )
+        if _objective_vector(candidate) < _objective_vector(best):
+            best = candidate
+    return best
+
+
+def optimization_checkpoint_directory(
+    output_directory: Path,
+    key: PlacementTemplateKey,
+) -> Path:
+    key_name = checkpoint_file_name(key).removesuffix(".json")
+    return (
+        output_directory
+        / OPTIMIZATION_CHECKPOINT_DIRECTORY
+        / LOWER_OBJECTIVE_OPTIMIZER_VERSION
+        / f"p{key.pool_count}-s{key.pool_size}"
+        / key_name
+    )
+
+
+def optimization_stage_checkpoint_file(
+    directory: Path,
+    stage_index: int,
+) -> Path:
+    if not 0 <= stage_index < len(PLACEMENT_OBJECTIVES):
+        raise ValueError("最適化stage indexが範囲外です")
+    return directory / f"{stage_index:02d}-{PLACEMENT_OBJECTIVES[stage_index]}.json"
+
+
+def write_optimization_stage_checkpoint(
+    checkpoint: PlacementOptimizationStageCheckpoint,
+    directory: Path,
+) -> Path:
+    completed = checkpoint.model_copy(
+        update={"sha256": placement_optimization_checkpoint_digest(checkpoint)}
+    )
+    checked = PlacementOptimizationStageCheckpoint.model_validate(completed.model_dump(mode="json"))
+    path = optimization_stage_checkpoint_file(directory, checked.stage_index)
+    write_json_atomic(path, checked.model_dump(mode="json"))
+    return path
+
+
+def load_optimization_stage_checkpoint(
+    path: Path,
+) -> PlacementOptimizationStageCheckpoint:
+    checkpoint = PlacementOptimizationStageCheckpoint.model_validate(_read_json(path))
+    if not checkpoint.sha256 or checkpoint.sha256 != placement_optimization_checkpoint_digest(
+        checkpoint
+    ):
+        raise PlacementTemplateIntegrityError(f"最適化checkpointのdigestが一致しません: {path}")
+    return checkpoint
+
+
+def _load_resumable_optimization_candidate(
+    source: PlacementTemplateEntry,
+    directory: Path,
+) -> PlacementTemplateEntry | None:
+    paths = tuple(
+        optimization_stage_checkpoint_file(directory, index)
+        for index in range(len(PLACEMENT_OBJECTIVES))
+    )
+    if not any(path.exists() for path in paths):
+        return None
+    if not all(path.exists() for path in paths):
+        return None
+    checkpoints = tuple(load_optimization_stage_checkpoint(path) for path in paths)
+    if any(checkpoint.key != source.key for checkpoint in checkpoints):
+        raise PlacementTemplateIntegrityError("最適化checkpointのkeyが一致しません")
+    if any(checkpoint.input_entry_sha256 != source.sha256 for checkpoint in checkpoints):
+        raise PlacementTemplateIntegrityError("最適化checkpointの入力entryが一致しません")
+    candidate_digests = {checkpoint.candidate.sha256 for checkpoint in checkpoints}
+    if len(candidate_digests) != 1:
+        raise PlacementTemplateIntegrityError("最適化checkpointのcandidateが一致しません")
+    return checkpoints[-1].candidate
+
+
 def _available_entry(
     key: PlacementTemplateKey,
     request: Day2ScheduleRequest,
@@ -869,6 +1101,251 @@ def _available_entry(
         referee_signature=placement_referee_signature(assignments),
         provenance=current_provenance(),
     )
+
+
+def optimize_template_entry_lower_objectives(
+    source: PlacementTemplateEntry,
+    *,
+    output_directory: Path,
+    resume: bool = False,
+    max_time_per_stage: float = DEFAULT_MAX_TIME_SECONDS,
+    optimizer: LowerObjectiveOptimizer | None = None,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateEntry:
+    """検証済みentryを固定horizonで再最適化し、段階checkpointを保存する。"""
+
+    if not 0 < max_time_per_stage <= 840:
+        raise ValueError("1段階の探索時間は0秒より大きく840秒以下にしてください")
+    if source.status is not PlacementTemplateStatus.AVAILABLE:
+        return source
+    if not source.sha256:
+        raise PlacementTemplateIntegrityError("最適化元entryにSHA-256がありません")
+    if source.provenance.optimization_version == LOWER_OBJECTIVE_OPTIMIZER_VERSION:
+        _hydrate_and_validate_entry(source, validator=validator)
+        return source
+
+    checkpoint_directory = optimization_checkpoint_directory(output_directory, source.key)
+    if resume:
+        resumed = _load_resumable_optimization_candidate(source, checkpoint_directory)
+        if resumed is not None:
+            _hydrate_and_validate_entry(resumed, validator=validator)
+            if _objective_vector(resumed) > _objective_vector(source):
+                raise PlacementTemplateIntegrityError(
+                    f"{source.key.catalog_id}: resume候補が元entryより悪化しています"
+                )
+            return resumed
+
+    request, incumbent_schedule = _hydrate_and_validate_entry(source, validator=validator)
+    reaudited_source = reaudit_absolute_lower_bound_proofs(source, validator=validator)
+    active_optimizer = optimizer or _default_lower_objective_optimizer()
+    result = active_optimizer(
+        request,
+        incumbent_schedule,
+        max_time_per_stage=max_time_per_stage,
+    )
+    stages = tuple(result.objectives)
+    if tuple(stage.objective for stage in stages) != PLACEMENT_OBJECTIVES:
+        raise PlacementTemplateIntegrityError("optimizerの目的順が規則と一致しません")
+    result_proven = tuple(stage.objective for stage in stages if stage.optimality_proven)
+    if result_proven != tuple(result.proven_objectives):
+        raise PlacementTemplateIntegrityError("optimizerの証明prefix情報が一致しません")
+    if result_proven != PLACEMENT_OBJECTIVES[: len(result_proven)]:
+        raise PlacementTemplateIntegrityError("optimizerの証明はtrueの連続prefixではありません")
+
+    schedule_entry = _available_entry(source.key, request, result.schedule)
+    schedule_values = {item.objective: item.value for item in schedule_entry.objectives}
+    if any(schedule_values[stage.objective] != stage.value for stage in stages):
+        raise PlacementTemplateIntegrityError("optimizer目的値が実配置の監査値と一致しません")
+    candidate = _with_entry_digest(
+        schedule_entry.model_copy(
+            update={
+                "objectives": tuple(
+                    PlacementTemplateObjective(
+                        objective=stage.objective,
+                        value=stage.value,
+                        optimality_proven=stage.optimality_proven,
+                    )
+                    for stage in stages
+                ),
+                "provenance": optimizer_provenance(),
+                "sha256": "",
+            }
+        )
+    )
+    candidate = reaudit_absolute_lower_bound_proofs(candidate, validator=validator)
+    _hydrate_and_validate_entry(candidate, validator=validator)
+    source_vector = _objective_vector(reaudited_source)
+    candidate_vector = _objective_vector(candidate)
+    if candidate_vector > source_vector:
+        raise PlacementTemplateIntegrityError(
+            f"{source.key.catalog_id}: optimizer候補が元entryより辞書式に悪化しました"
+        )
+    if candidate_vector == source_vector:
+        proof_flags = tuple(
+            current.optimality_proven or optimized.optimality_proven
+            for current, optimized in zip(
+                reaudited_source.objectives,
+                candidate.objectives,
+                strict=True,
+            )
+        )
+        chosen = _with_entry_digest(
+            reaudited_source.model_copy(
+                update={
+                    "objectives": tuple(
+                        objective.model_copy(update={"optimality_proven": proof})
+                        for objective, proof in zip(
+                            reaudited_source.objectives,
+                            proof_flags,
+                            strict=True,
+                        )
+                    ),
+                    "provenance": optimizer_provenance(),
+                    "sha256": "",
+                }
+            )
+        )
+    else:
+        chosen = candidate
+    _hydrate_and_validate_entry(chosen, validator=validator)
+    _write_optimization_result_checkpoints(
+        source=source,
+        chosen=chosen,
+        stages=stages,
+        directory=checkpoint_directory,
+    )
+    return chosen
+
+
+def optimize_topology_lower_objectives(
+    topology: Topology,
+    output_directory: Path,
+    *,
+    resume: bool = False,
+    workers: int = 1,
+    max_time_per_stage: float = DEFAULT_MAX_TIME_SECONDS,
+    optimizer: LowerObjectiveOptimizer | None = None,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateShard:
+    """2x4/2x8 shardだけを再最適化し、単一のatomic shardとして確定する。"""
+
+    if topology not in LOWER_OBJECTIVE_TARGET_TOPOLOGIES:
+        raise ValueError("下位目的の再最適化対象は2x4と2x8だけです")
+    if workers < 1:
+        raise ValueError("workersは1以上にしてください")
+    if optimizer is not None and workers != 1:
+        raise ValueError("差し替えoptimizerはworkers=1で使用してください")
+    guard_untouched_shards(output_directory)
+    source_shard = load_shard(shard_file(output_directory, topology))
+    if workers == 1:
+        entries = tuple(
+            optimize_template_entry_lower_objectives(
+                entry,
+                output_directory=output_directory,
+                resume=resume,
+                max_time_per_stage=max_time_per_stage,
+                optimizer=optimizer,
+                validator=validator,
+            )
+            for entry in source_shard.entries
+        )
+    else:
+        payloads = tuple(
+            (
+                entry.model_dump(mode="json"),
+                str(output_directory),
+                resume,
+                max_time_per_stage,
+            )
+            for entry in source_shard.entries
+        )
+        by_id: dict[str, PlacementTemplateEntry] = {}
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_optimize_entry_worker, payload): payload[0]["key"]
+                for payload in payloads
+            }
+            for future in as_completed(futures):
+                entry = PlacementTemplateEntry.model_validate(future.result())
+                by_id[entry.key.catalog_id] = entry
+        entries = tuple(by_id[entry.key.catalog_id] for entry in source_shard.entries)
+    shard = PlacementTemplateShard(
+        pool_count=topology[0],
+        pool_size=topology[1],
+        entries=entries,
+    )
+    shard = shard.model_copy(update={"sha256": placement_shard_digest(shard)})
+    shard = PlacementTemplateShard.model_validate(shard.model_dump(mode="json"))
+    write_json_atomic(shard_file(output_directory, topology), shard.model_dump(mode="json"))
+    guard_untouched_shards(output_directory)
+    return shard
+
+
+def _write_optimization_result_checkpoints(
+    *,
+    source: PlacementTemplateEntry,
+    chosen: PlacementTemplateEntry,
+    stages: Sequence[LowerObjectiveStageResultLike],
+    directory: Path,
+) -> None:
+    original_proofs = tuple(item.optimality_proven for item in source.objectives)
+    for index, (stage, objective) in enumerate(zip(stages, chosen.objectives, strict=True)):
+        if objective.optimality_proven and stage.optimality_proven:
+            proof_method = stage.proof_method
+        elif objective.optimality_proven and original_proofs[index]:
+            proof_method = "existing"
+        elif objective.optimality_proven:
+            proof_method = "analytic_lower_bound"
+        else:
+            proof_method = "unproven"
+        best_bound = (
+            float(objective.value)
+            if proof_method in {"existing", "analytic_lower_bound"}
+            else stage.best_bound
+        )
+        checkpoint = PlacementOptimizationStageCheckpoint(
+            key=source.key,
+            stage_index=index,
+            objective=objective.objective,
+            input_entry_sha256=source.sha256,
+            candidate=chosen,
+            status=stage.status,
+            value=objective.value,
+            optimality_proven=objective.optimality_proven,
+            proof_method=proof_method,
+            best_bound=best_bound,
+            wall_time_seconds=stage.wall_time_seconds,
+            model_fingerprint=stage.model_fingerprint,
+        )
+        write_optimization_stage_checkpoint(checkpoint, directory)
+
+
+def _default_lower_objective_optimizer() -> LowerObjectiveOptimizer:
+    try:
+        module = import_module("football_scheduler.placement_lower_objective_optimizer")
+    except ImportError as exc:
+        raise PlacementTemplateGenerationError(
+            "下位目的optimizerを読み込めません。Wave 1A実装を統合してください"
+        ) from exc
+    return cast(LowerObjectiveOptimizer, module.optimize_lower_objectives)
+
+
+def _objective_vector(entry: PlacementTemplateEntry) -> tuple[int, ...]:
+    return tuple(item.value for item in entry.objectives)
+
+
+def _optimize_entry_worker(
+    payload: tuple[dict[str, Any], str, bool, float],
+) -> dict[str, Any]:
+    entry_data, output_directory, resume, max_time_per_stage = payload
+    entry = PlacementTemplateEntry.model_validate(entry_data)
+    result = optimize_template_entry_lower_objectives(
+        entry,
+        output_directory=Path(output_directory),
+        resume=resume,
+        max_time_per_stage=max_time_per_stage,
+    )
+    return result.model_dump(mode="json")
 
 
 def _derive_placement_template_entry(
@@ -1173,7 +1650,13 @@ __all__ = [
     "CHECKPOINT_DIRECTORY",
     "DEFAULT_MAX_TIME_SECONDS",
     "GENERATOR_VERSION",
+    "LOWER_OBJECTIVE_TARGET_TOPOLOGIES",
     "MANIFEST_FILE",
+    "OPTIMIZATION_CHECKPOINT_DIRECTORY",
+    "UNTOUCHED_SHARD_DIGESTS",
+    "LowerObjectiveOptimizationResultLike",
+    "LowerObjectiveOptimizer",
+    "LowerObjectiveStageResultLike",
     "PlacementProblemBounds",
     "PlacementSolveAttempt",
     "PlacementTemplateGenerationError",
@@ -1186,12 +1669,22 @@ __all__ = [
     "current_provenance",
     "generate_template_entry",
     "generate_topology_shard",
+    "guard_untouched_shards",
     "load_entry",
     "load_manifest",
+    "load_optimization_stage_checkpoint",
     "load_shard",
     "merge_shards",
+    "optimization_checkpoint_directory",
+    "optimization_stage_checkpoint_file",
+    "optimize_template_entry_lower_objectives",
+    "optimize_topology_lower_objectives",
+    "optimizer_provenance",
+    "reaudit_absolute_lower_bound_proofs",
+    "select_best_validated_template_candidate",
     "shard_file",
     "topology_keys",
     "validate_catalog_hydration",
     "write_entry_checkpoint",
+    "write_optimization_stage_checkpoint",
 ]

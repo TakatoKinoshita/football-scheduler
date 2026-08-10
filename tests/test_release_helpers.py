@@ -7,7 +7,11 @@ from football_scheduler.api_handler import lambda_handler
 from football_scheduler.schedule_creation import ScheduleCreationRequest
 from scripts.find_cloudflare_production_deployment import find_deployment_id
 from scripts.write_cloudflare_release_headers import write_release_id
-from scripts.write_lambda_smoke_event import build_maximum_day2_event, build_smoke_event
+from scripts.write_lambda_smoke_event import (
+    build_maximum_day2_event,
+    build_sixteen_day2_event,
+    build_smoke_event,
+)
 
 
 def test_write_release_id_replaces_exact_placeholder(tmp_path: Path) -> None:
@@ -74,6 +78,21 @@ def test_maximum_day2_event_uses_exact_template_release_case() -> None:
     assert len(request.teams) == 32
     assert len(request.courts) == 4
     assert request.league.block_count == 8
+    assert request.final_stage.format.value == "placement_tournament"
+    assert request.final_stage.tournament_count == 2  # type: ignore[union-attr]
+    assert request.referees.organizer_capacity == 4
+
+
+def test_sixteen_day2_event_uses_optimized_template_release_case() -> None:
+    event = build_sixteen_day2_event()
+    headers = event["headers"]
+
+    assert isinstance(headers, dict)
+    assert headers["x-turnstile-action"] == "create_schedule"
+    request = ScheduleCreationRequest.model_validate_json(str(event["body"]))
+    assert len(request.teams) == 16
+    assert len(request.courts) == 4
+    assert request.league.block_count == 4
     assert request.final_stage.format.value == "placement_tournament"
     assert request.final_stage.tournament_count == 2  # type: ignore[union-attr]
     assert request.referees.organizer_capacity == 4

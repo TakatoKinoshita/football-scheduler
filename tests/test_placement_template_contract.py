@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from football_scheduler.models import Day2Fallback
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
@@ -81,3 +83,22 @@ def test_entry_digest_round_trips_through_contract() -> None:
     restored = PlacementTemplateEntry.model_validate(entry.model_dump(mode="json"))
 
     assert restored.sha256 == placement_entry_digest(restored)
+
+
+def test_optional_optimizer_provenance_is_omitted_when_unused() -> None:
+    entry = _entry()
+
+    dumped = entry.model_dump(mode="json")
+
+    assert "optimization_version" not in dumped["provenance"]
+
+
+def test_entry_rejects_non_prefix_objective_proofs() -> None:
+    entry = _entry()
+    broken = entry.model_dump(mode="json")
+    broken["sha256"] = ""
+    broken["objectives"][3]["optimality_proven"] = False
+    broken["objectives"][4]["optimality_proven"] = True
+
+    with pytest.raises(ValueError, match="連続prefix"):
+        PlacementTemplateEntry.model_validate(broken)

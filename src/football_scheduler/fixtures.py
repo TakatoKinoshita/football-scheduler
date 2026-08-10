@@ -160,3 +160,43 @@ def make_maximum_schedule_creation_request() -> dict[str, Any]:
         "random_seed": 20260803,
         "solver": {"max_time_seconds": 20},
     }
+
+
+def make_sixteen_team_schedule_creation_request() -> dict[str, Any]:
+    """16チーム・2トーナメントの対象catalogを通る本番経路検証入力を返す。"""
+
+    return {
+        "schema_version": "0.2.0",
+        "request_kind": "schedule_creation",
+        "generation_scope": "all",
+        "teams": [
+            {"id": f"team-{index + 1:02d}", "name": f"チーム{index + 1}"} for index in range(16)
+        ],
+        "courts": [
+            {"id": f"court-{letter.lower()}", "name": f"{letter}コート"}
+            for letter in ("A", "B", "C", "D")
+        ],
+        "league": {"block_count": 4, "assignment_mode": "random"},
+        "final_stage": {"format": "placement_tournament", "tournament_count": 2},
+        "day": {
+            "id": "day1",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 5,
+            "max_sections": 16,
+        },
+        "day2": {
+            "id": "day2",
+            "start_time": "09:30",
+            "game_duration_minutes": 35,
+            "margin_minutes": 10,
+            "max_sections": 20,
+        },
+        "referees": {
+            "organizer_capacity": 4,
+            "team_referees_required_after_first": False,
+            "day2_fallback": "organizer",
+        },
+        "random_seed": 20260803,
+        "solver": {"max_time_seconds": 20},
+    }
