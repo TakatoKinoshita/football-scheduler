@@ -23,6 +23,13 @@ PLACEMENT_RULESET_ID: Literal["placement-schedule-v1"] = "placement-schedule-v1"
 LOWER_OBJECTIVE_OPTIMIZER_VERSION: Literal["placement-lower-objective-optimizer-v1"] = (
     "placement-lower-objective-optimizer-v1"
 )
+LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION: Literal["placement-lower-objective-optimizer-v2"] = (
+    "placement-lower-objective-optimizer-v2"
+)
+PlacementOptimizationVersion = Literal[
+    "placement-lower-objective-optimizer-v1",
+    "placement-lower-objective-optimizer-v2",
+]
 SUPPORTED_PLACEMENT_TOPOLOGIES: tuple[tuple[int, int], ...] = (
     (2, 4),
     (2, 8),
@@ -144,7 +151,7 @@ class PlacementTemplateProvenance(ContractModel):
     generator_version: NonEmptyText
     python_version: NonEmptyText
     ortools_version: NonEmptyText
-    optimization_version: Literal["placement-lower-objective-optimizer-v1"] | None = Field(
+    optimization_version: PlacementOptimizationVersion | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -199,9 +206,7 @@ class PlacementOptimizationStageCheckpoint(ContractModel):
     """下位目的optimizerのkey・目的段階ごとの再開可能な正本。"""
 
     format_version: Literal[1] = 1
-    optimization_version: Literal["placement-lower-objective-optimizer-v1"] = (
-        LOWER_OBJECTIVE_OPTIMIZER_VERSION
-    )
+    optimization_version: PlacementOptimizationVersion = LOWER_OBJECTIVE_OPTIMIZER_VERSION
     key: PlacementTemplateKey
     stage_index: Annotated[int, Field(ge=0, le=5)]
     objective: Identifier
@@ -214,6 +219,19 @@ class PlacementOptimizationStageCheckpoint(ContractModel):
     best_bound: float | None = None
     wall_time_seconds: Annotated[float, Field(ge=0)] = 0
     model_fingerprint: Sha256Digest
+    current_entry_sha256: Sha256Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    legacy_incumbent_sha256: Sha256Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    target_manifest_sha256: Sha256Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    fixed_objectives: tuple[PlacementTemplateObjective, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    termination_reason: str | None = Field(default=None, exclude_if=lambda value: value is None)
     sha256: str = ""
 
     @model_validator(mode="after")
@@ -232,8 +250,96 @@ class PlacementOptimizationStageCheckpoint(ContractModel):
             raise ValueError("証明済みcheckpointにunprovenは指定できません")
         if not self.optimality_proven and self.proof_method != "unproven":
             raise ValueError("未証明checkpointのproof_methodはunprovenにしてください")
+        if self.optimization_version == LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION:
+            if (
+                self.current_entry_sha256 is None
+                or self.legacy_incumbent_sha256 is None
+                or self.target_manifest_sha256 is None
+            ):
+                raise ValueError("v2 checkpointにはcurrent・legacy・target manifest SHAが必要です")
+            expected_fixed = PLACEMENT_OBJECTIVES[: self.stage_index]
+            if tuple(item.objective for item in self.fixed_objectives) != expected_fixed:
+                raise ValueError("v2 checkpointの固定目的prefixが不正です")
+            if tuple(item.value for item in self.fixed_objectives) != tuple(
+                item.value for item in self.candidate.objectives[: self.stage_index]
+            ):
+                raise ValueError("v2 checkpointの固定目的値がcandidateと一致しません")
+        elif (
+            any(
+                value is not None
+                for value in (
+                    self.current_entry_sha256,
+                    self.legacy_incumbent_sha256,
+                    self.target_manifest_sha256,
+                )
+            )
+            or self.fixed_objectives
+            or self.termination_reason is not None
+        ):
+            raise ValueError("v1 checkpointにv2専用fieldは指定できません")
         if self.sha256 and self.sha256 != placement_optimization_checkpoint_digest(self):
             raise ValueError("最適化checkpointのSHA-256が一致しません")
+        return self
+
+
+class PlacementOptimizationTarget(ContractModel):
+    """currentより良い検証済みlegacy候補を持つ1 key。"""
+
+    key: PlacementTemplateKey
+    current_entry_sha256: Sha256Digest
+    legacy_entry_sha256: Sha256Digest
+    current_objectives: tuple[Annotated[int, Field(ge=0)], ...]
+    legacy_objectives: tuple[Annotated[int, Field(ge=0)], ...]
+    first_differing_objective: Identifier
+
+    @model_validator(mode="after")
+    def validate_comparison(self) -> Self:
+        if len(self.current_objectives) != len(PLACEMENT_OBJECTIVES) or len(
+            self.legacy_objectives
+        ) != len(PLACEMENT_OBJECTIVES):
+            raise ValueError("targetの目的ベクトルは6要素にしてください")
+        if self.legacy_objectives >= self.current_objectives:
+            raise ValueError("targetにはcurrentより良いlegacy候補が必要です")
+        differing_index = next(
+            index
+            for index, (current, legacy) in enumerate(
+                zip(self.current_objectives, self.legacy_objectives, strict=True)
+            )
+            if current != legacy
+        )
+        if self.first_differing_objective != PLACEMENT_OBJECTIVES[differing_index]:
+            raise ValueError("targetの最初に異なる目的が一致しません")
+        return self
+
+
+class PlacementOptimizationTargetManifest(ContractModel):
+    """Issue #73で探索する疎なkey集合の決定的な正本。"""
+
+    format_version: Literal[1] = 1
+    optimization_version: Literal["placement-lower-objective-optimizer-v2"] = (
+        LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    )
+    current_fixture_sha256: Sha256Digest
+    legacy_fixture_sha256: Sha256Digest
+    topologies: tuple[tuple[int, int], ...]
+    targets: tuple[PlacementOptimizationTarget, ...]
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> Self:
+        expected_topologies = ((3, 8), (2, 16), (4, 8))
+        if self.topologies != expected_topologies:
+            raise ValueError("target manifestのトポロジー範囲が不正です")
+        ids = tuple(item.key.catalog_id for item in self.targets)
+        if ids != tuple(sorted(ids)) or len(ids) != len(set(ids)):
+            raise ValueError("targetはcatalog ID順かつ一意にしてください")
+        if any(
+            (item.key.pool_count, item.key.pool_size) not in self.topologies
+            for item in self.targets
+        ):
+            raise ValueError("target manifestの範囲外keyです")
+        if self.sha256 and self.sha256 != placement_optimization_target_manifest_digest(self):
+            raise ValueError("target manifestのSHA-256が一致しません")
         return self
 
 
@@ -347,6 +453,13 @@ def placement_optimization_checkpoint_digest(
     checkpoint: PlacementOptimizationStageCheckpoint,
 ) -> str:
     payload = checkpoint.model_dump(mode="json", exclude={"sha256"})
+    return sha256_hex(payload)
+
+
+def placement_optimization_target_manifest_digest(
+    manifest: PlacementOptimizationTargetManifest,
+) -> str:
+    payload = manifest.model_dump(mode="json", exclude={"sha256"})
     return sha256_hex(payload)
 
 
