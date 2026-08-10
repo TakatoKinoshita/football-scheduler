@@ -1,4 +1,4 @@
-"""8・16チーム用テンプレートの再現可能なA/B比較基盤。
+"""順位決定トーナメント用テンプレートの再現可能なA/B比較基盤。
 
 このmoduleはcatalog生成のruntime経路から独立したoffline toolingである。旧solverの
 自己申告metricsは採用せず、canonical配置を現行規則でhydrateしてから独立validatorで
@@ -27,6 +27,7 @@ from football_scheduler import day2_schedule
 from football_scheduler.models import ContractModel, Day2Fallback, Slot, SolverStatus
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
+    SUPPORTED_PLACEMENT_TOPOLOGIES,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateObjective,
@@ -53,7 +54,10 @@ LEGACY_PYTHON_PREFIX = "3.14."
 LEGACY_ORTOOLS_VERSION = "9.15.6755"
 BASELINE_FORMAT_VERSION: Literal[1] = 1
 BASELINE_RANDOM_SEED = 20260803
+LEGACY_RUN_CONTRACT_FILE = ".legacy-run-contract.json"
+# Issue #71の呼び出し側とfixtureの互換性のため旧名は維持する。
 TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((2, 4), (2, 8))
+LARGE_TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((3, 8), (2, 16), (4, 8))
 ObjectiveVector = tuple[int, int, int, int, int, int]
 
 
@@ -135,10 +139,17 @@ class PlacementBaselineFixture(ContractModel):
 
     @model_validator(mode="after")
     def validate_coverage(self) -> Self:
-        if not self.topologies or any(item not in TARGET_TOPOLOGIES for item in self.topologies):
-            raise ValueError("baselineの対象は2x4または2x8です")
+        if not self.topologies or any(
+            item not in SUPPORTED_PLACEMENT_TOPOLOGIES for item in self.topologies
+        ):
+            raise ValueError("baselineの対象は対応済みトポロジーにしてください")
         if tuple(dict.fromkeys(self.topologies)) != self.topologies:
             raise ValueError("baselineのtopologyが重複しています")
+        canonical_topologies = tuple(
+            item for item in SUPPORTED_PLACEMENT_TOPOLOGIES if item in self.topologies
+        )
+        if self.topologies != canonical_topologies:
+            raise ValueError("baselineのtopologyは正規順にしてください")
         ids = [record.key.catalog_id for record in self.records]
         if ids != sorted(ids) or len(ids) != len(set(ids)):
             raise ValueError("baseline recordはcatalog ID順かつ一意にしてください")
@@ -156,6 +167,32 @@ class PlacementBaselineFixture(ContractModel):
             raise ValueError("legacy baselineの固定実行環境が一致しません")
         if self.sha256 and self.sha256 != baseline_fixture_digest(self):
             raise ValueError("baseline fixtureのSHA-256が一致しません")
+        return self
+
+
+class LegacyRunContract(ContractModel):
+    """checkpoint directoryを固定legacy実行条件へ束縛するsidecar。"""
+
+    format_version: Literal[1] = 1
+    commit_sha: str = LEGACY_SOLVER_COMMIT
+    python_version_prefix: str = LEGACY_PYTHON_PREFIX
+    ortools_version: str = LEGACY_ORTOOLS_VERSION
+    random_seed: Literal[20260803] = 20260803
+    max_time_seconds: Annotated[float, Field(gt=0, le=840)]
+    num_search_workers: Literal[1] = 1
+    pythonhashseed: Literal["0"] = "0"
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        if (
+            self.commit_sha != LEGACY_SOLVER_COMMIT
+            or self.python_version_prefix != LEGACY_PYTHON_PREFIX
+            or self.ortools_version != LEGACY_ORTOOLS_VERSION
+        ):
+            raise ValueError("legacy run contractの固定環境が一致しません")
+        if self.sha256 and self.sha256 != legacy_run_contract_digest(self):
+            raise ValueError("legacy run contractのSHA-256が一致しません")
         return self
 
 
@@ -178,6 +215,47 @@ def baseline_fixture_digest(fixture: PlacementBaselineFixture) -> str:
 def with_fixture_digest(fixture: PlacementBaselineFixture) -> PlacementBaselineFixture:
     updated = fixture.model_copy(update={"sha256": baseline_fixture_digest(fixture)})
     return PlacementBaselineFixture.model_validate(updated.model_dump(mode="json"))
+
+
+def legacy_run_contract_digest(contract: LegacyRunContract) -> str:
+    return sha256_hex(contract.model_dump(mode="json", exclude={"sha256"}))
+
+
+def _expected_legacy_run_contract(max_time_seconds: float) -> LegacyRunContract:
+    contract = LegacyRunContract(max_time_seconds=max_time_seconds)
+    completed = contract.model_copy(update={"sha256": legacy_run_contract_digest(contract)})
+    return LegacyRunContract.model_validate(completed.model_dump(mode="json"))
+
+
+def _bind_legacy_run_contract(
+    checkpoint_directory: Path,
+    *,
+    max_time_seconds: float,
+    resume: bool,
+) -> LegacyRunContract:
+    """resume前にcheckpoint directoryの実行条件を検査し、初回はatomic保存する。"""
+
+    expected = _expected_legacy_run_contract(max_time_seconds)
+    path = checkpoint_directory / LEGACY_RUN_CONTRACT_FILE
+    if path.exists():
+        try:
+            actual = LegacyRunContract.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PlacementABError(f"legacy run contractを読み込めません: {path}") from exc
+        if actual != expected:
+            raise PlacementABError("legacy checkpointの実行条件が現在のrunと一致しません")
+        return actual
+    existing = tuple(item for item in checkpoint_directory.glob("*.json") if item != path)
+    if resume and existing:
+        raise PlacementABError("実行条件に束縛されていないlegacy checkpointは再利用できません")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(expected.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return expected
 
 
 def write_deterministic_gzip(path: Path, fixture: PlacementBaselineFixture) -> None:
@@ -205,6 +283,62 @@ def read_deterministic_gzip(path: Path) -> PlacementBaselineFixture:
     if not fixture.sha256 or fixture.sha256 != baseline_fixture_digest(fixture):
         raise PlacementABError(f"baseline fixtureのdigestが一致しません: {path}")
     return fixture
+
+
+def merge_baseline_fixtures(
+    fixtures: Sequence[PlacementBaselineFixture],
+    expected_topologies: Sequence[tuple[int, int]],
+) -> PlacementBaselineFixture:
+    """digest付きpartial fixtureを環境とcoverageを確認して統合する。"""
+
+    if not fixtures:
+        raise PlacementABError("統合するbaseline fixtureがありません")
+    requested = tuple(expected_topologies)
+    expected = tuple(item for item in SUPPORTED_PLACEMENT_TOPOLOGIES if item in requested)
+    if not requested or len(requested) != len(set(requested)) or requested != expected:
+        raise PlacementABError("統合対象topologyは重複のない正規順にしてください")
+
+    first = fixtures[0]
+    records: list[PlacementBaselineRecord] = []
+    actual_topologies: list[tuple[int, int]] = []
+    for fixture in fixtures:
+        # in-memoryで組み立てたfixtureでも、ファイル読込み時と同じ検査を行う。
+        checked = PlacementBaselineFixture.model_validate(fixture.model_dump(mode="json"))
+        if not checked.sha256 or checked.sha256 != baseline_fixture_digest(checked):
+            raise PlacementABError("partial baseline fixtureのdigestが一致しません")
+        if not checked.complete:
+            raise PlacementABError("partial baseline fixtureのcompleteがfalseです")
+        if checked.source is not first.source:
+            raise PlacementABError("partial baseline fixtureのsourceが一致しません")
+        if checked.environment != first.environment:
+            raise PlacementABError("partial baseline fixtureの実行環境が一致しません")
+        overlap = set(actual_topologies) & set(checked.topologies)
+        if overlap:
+            names = ", ".join(
+                f"{pool_count}x{pool_size}" for pool_count, pool_size in sorted(overlap)
+            )
+            raise PlacementABError(f"partial baseline fixtureのtopologyが重複しています: {names}")
+        actual_topologies.extend(checked.topologies)
+        records.extend(checked.records)
+
+    if set(actual_topologies) != set(expected):
+        actual = ", ".join(
+            f"{pool_count}x{pool_size}" for pool_count, pool_size in actual_topologies
+        )
+        wanted = ", ".join(f"{pool_count}x{pool_size}" for pool_count, pool_size in expected)
+        raise PlacementABError(
+            f"partial baseline fixtureのtopology coverageが一致しません: "
+            f"expected={wanted}, actual={actual}"
+        )
+
+    merged = PlacementBaselineFixture(
+        source=first.source,
+        topologies=expected,
+        environment=first.environment,
+        complete=True,
+        records=tuple(sorted(records, key=lambda item: item.key.catalog_id)),
+    )
+    return with_fixture_digest(merged)
 
 
 def compare_objective_vectors(
@@ -623,6 +757,11 @@ def run_legacy_records(
         raise ValueError("max_time_secondsは0より大きく840以下にしてください")
     ordered = tuple(sorted(entries, key=lambda item: item.key.catalog_id))
     checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    _bind_legacy_run_contract(
+        checkpoint_directory,
+        max_time_seconds=max_time_seconds,
+        resume=resume,
+    )
     records: dict[str, PlacementBaselineRecord] = {}
     pending: list[PlacementTemplateEntry] = []
     for entry in ordered:
@@ -738,7 +877,13 @@ def render_comparison_markdown(
         "| Topology | Fallback | Better | Equal | Worse | Unavailable |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    for topology in ("2x4", "2x8"):
+    report_topologies = tuple(
+        topology
+        for topology in SUPPORTED_PLACEMENT_TOPOLOGIES
+        if topology in set(baseline.topologies) | set(candidate.topologies)
+    )
+    for pool_count, pool_size in report_topologies:
+        topology = f"{pool_count}x{pool_size}"
         for fallback in (Day2Fallback.ORGANIZER.value, Day2Fallback.STRICT.value):
             lines.append(
                 f"| {topology} | {fallback} | {grouped[topology, fallback, 'better']} | "

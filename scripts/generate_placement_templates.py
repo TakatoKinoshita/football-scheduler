@@ -7,7 +7,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from football_scheduler.placement_template_contract import SUPPORTED_PLACEMENT_TOPOLOGIES
+from football_scheduler.placement_template_ab import PlacementABError, read_deterministic_gzip
+from football_scheduler.placement_template_contract import (
+    SUPPORTED_PLACEMENT_TOPOLOGIES,
+    PlacementOptimizationTargetManifest,
+)
 from football_scheduler.placement_template_generator import (
     DEFAULT_MAX_TIME_SECONDS,
     MANIFEST_FILE,
@@ -16,6 +20,7 @@ from football_scheduler.placement_template_generator import (
     generate_topology_shard,
     load_manifest,
     merge_shards,
+    optimize_issue73_targets,
     optimize_topology_lower_objectives,
     validate_catalog_hydration,
 )
@@ -75,6 +80,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="2x4/2x8の証明済み最小horizonを固定して下位目的を再最適化する",
     )
+    mode.add_argument(
+        "--optimize-large-lower-objectives",
+        action="store_true",
+        help="Issue #73 target manifestの24/32-team entryだけをoptimizer-v2で処理する",
+    )
+    parser.add_argument("--target-manifest", type=Path)
+    parser.add_argument("--current-baseline", type=Path)
+    parser.add_argument("--legacy-baseline", type=Path)
     return parser
 
 
@@ -96,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--mergeは全5 shardを対象とするため--topologyを併用できません")
     if args.optimize_lower_objectives and not args.topology:
         parser.error("--optimize-lower-objectivesには--topology 2x4/2x8が必要です")
+    if args.optimize_large_lower_objectives and args.topology:
+        parser.error("--optimize-large-lower-objectivesは--topologyを併用できません")
 
     output = args.output.resolve()
     try:
@@ -106,6 +121,52 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         topologies = _selected_topologies(args.topology)
+        if args.optimize_large_lower_objectives:
+            if any(
+                value is None
+                for value in (
+                    args.target_manifest,
+                    args.current_baseline,
+                    args.legacy_baseline,
+                )
+            ):
+                parser.error(
+                    "optimizer-v2には--target-manifest、--current-baseline、"
+                    "--legacy-baselineが必要です"
+                )
+            assert args.target_manifest is not None
+            assert args.current_baseline is not None
+            assert args.legacy_baseline is not None
+            target_manifest = PlacementOptimizationTargetManifest.model_validate_json(
+                args.target_manifest.read_text(encoding="utf-8")
+            )
+            current_fixture = read_deterministic_gzip(args.current_baseline.resolve())
+            legacy_fixture = read_deterministic_gzip(args.legacy_baseline.resolve())
+            current_by_id = {record.key.catalog_id: record for record in current_fixture.records}
+            legacy_by_id = {record.key.catalog_id: record for record in legacy_fixture.records}
+            current_entries = {}
+            legacy_entries = {}
+            for target in target_manifest.targets:
+                catalog_id = target.key.catalog_id
+                current_candidate = current_by_id[catalog_id].candidate
+                legacy_candidate = legacy_by_id[catalog_id].candidate
+                if current_candidate is None or legacy_candidate is None:
+                    raise PlacementTemplateGenerationError(
+                        f"{catalog_id}: targetのcurrent/legacy candidateがありません"
+                    )
+                current_entries[catalog_id] = current_candidate
+                legacy_entries[catalog_id] = legacy_candidate
+            results = optimize_issue73_targets(
+                target_manifest,
+                current_entries,
+                legacy_entries,
+                output,
+                resume=args.resume,
+                workers=args.workers,
+                max_time_per_stage=args.max_seconds,
+            )
+            print(f"optimizer-v2で{len(results)} target entriesを処理しました")
+            return 0
         if args.optimize_lower_objectives:
             unsupported = set(topologies) - {(2, 4), (2, 8)}
             if unsupported:
@@ -163,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"({len(shard.entries)} entries, SHA-256={shard.sha256})"
             )
         return 0
-    except (OSError, ValueError, PlacementTemplateGenerationError) as exc:
+    except (OSError, ValueError, PlacementABError, PlacementTemplateGenerationError) as exc:
         print(f"テンプレート処理に失敗しました: {exc}", file=sys.stderr)
         return 1
 

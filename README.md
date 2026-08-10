@@ -209,7 +209,9 @@ uv run pytest
 uv run python scripts/generate_placement_templates.py --check
 uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
 uv run python scripts/verify_production_path.py --profile sixteen --repeat 2 --maximum-seconds 30
+uv run python scripts/verify_production_path.py --profile twenty-four --repeat 2 --maximum-seconds 30
 uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
+uv run python scripts/verify_production_path.py --profile maximum-four --repeat 2 --maximum-seconds 30
 cd web
 npm run lint
 npm test
@@ -218,10 +220,13 @@ npm run build:functions
 npm run test:e2e
 ```
 
-16・32チームの本番経路検証は異なる`PYTHONHASHSEED`の別プロセスで2回実行する。API adapter、
-2トーナメント24・64試合、独立・統合制約検証、30秒上限、1 MB応答上限、同じ入力の再現性を
-まとめて確認する。8・16チーム用テンプレートの下位目的再最適化結果は、
-[Issue #71品質レポート](docs/architecture/issue-71-placement-quality-report.md)に記録する。
+16・24・32チームの本番経路検証は異なる`PYTHONHASHSEED`の別プロセスで2回実行する。API adapter、
+2・3・4トーナメントの24・36・48・64試合、独立・統合制約検証、30秒上限、1 MB応答上限、
+同じ入力の再現性をまとめて確認する。全1,360キーのcatalog整合性は、その前の`--check`で検証する。
+8・16チーム用テンプレートの下位目的再最適化結果は
+[Issue #71品質レポート](docs/architecture/issue-71-placement-quality-report.md)に記録している。24・32チーム用
+テンプレートのcurrent／legacy比較、採用元、証明数、探索時間などの実測品質統計は、集約完了時に
+`docs/architecture/issue-73-placement-quality-report.md`へ記録する。
 
 ## Lambdaコンテナのローカル検証
 

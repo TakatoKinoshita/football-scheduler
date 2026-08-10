@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from football_scheduler.fixtures import (
+    make_maximum_four_tournament_schedule_creation_request,
     make_maximum_schedule_creation_request,
     make_sixteen_team_schedule_creation_request,
     make_smoke_request,
+    make_twenty_four_team_schedule_creation_request,
 )
 
 
@@ -37,11 +41,23 @@ def build_smoke_event() -> dict[str, object]:
 def build_maximum_day2_event() -> dict[str, object]:
     """テンプレート同梱を確認する32チーム両日生成eventを返す。"""
 
-    request_body = json.dumps(
-        make_maximum_schedule_creation_request(),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    return _build_day2_event(make_maximum_schedule_creation_request)
+
+
+def build_twenty_four_day2_event() -> dict[str, object]:
+    """24チーム・3トーナメントのcatalogを確認する両日生成eventを返す。"""
+
+    return _build_day2_event(make_twenty_four_team_schedule_creation_request)
+
+
+def build_maximum_four_day2_event() -> dict[str, object]:
+    """32チーム・4トーナメントのcatalogを確認する両日生成eventを返す。"""
+
+    return _build_day2_event(make_maximum_four_tournament_schedule_creation_request)
+
+
+def _build_day2_event(factory: Callable[[], dict[str, Any]]) -> dict[str, object]:
+    request_body = json.dumps(factory(), ensure_ascii=False, separators=(",", ":"))
     return {
         "httpMethod": "POST",
         "headers": {
@@ -57,21 +73,7 @@ def build_maximum_day2_event() -> dict[str, object]:
 def build_sixteen_day2_event() -> dict[str, object]:
     """再最適化対象の16チームcatalogを確認する両日生成eventを返す。"""
 
-    request_body = json.dumps(
-        make_sixteen_team_schedule_creation_request(),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return {
-        "httpMethod": "POST",
-        "headers": {
-            "content-type": "application/json",
-            "content-length": str(len(request_body.encode("utf-8"))),
-            "x-turnstile-action": "create_schedule",
-        },
-        "body": request_body,
-        "isBase64Encoded": False,
-    }
+    return _build_day2_event(make_sixteen_team_schedule_creation_request)
 
 
 def main() -> int:
@@ -79,13 +81,19 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     profile = parser.add_mutually_exclusive_group()
     profile.add_argument("--sixteen-day2", action="store_true")
+    profile.add_argument("--twenty-four-day2", action="store_true")
     profile.add_argument("--maximum-day2", action="store_true")
+    profile.add_argument("--maximum-four-day2", action="store_true")
     args = parser.parse_args()
     event = (
         build_sixteen_day2_event()
         if args.sixteen_day2
+        else build_twenty_four_day2_event()
+        if args.twenty_four_day2
         else build_maximum_day2_event()
         if args.maximum_day2
+        else build_maximum_four_day2_event()
+        if args.maximum_four_day2
         else build_smoke_event()
     )
     args.output.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")

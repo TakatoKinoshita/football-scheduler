@@ -71,6 +71,12 @@ jobs:
       - name: Verify deterministic 16-team optimized template path
         run: uv run python scripts/verify_production_path.py --profile sixteen --repeat 2 --maximum-seconds 30
 
+      - name: Verify deterministic 24-team three-tournament path
+        run: uv run python scripts/verify_production_path.py --profile twenty-four --repeat 2 --maximum-seconds 30
+
+      - name: Verify deterministic 32-team four-tournament path
+        run: uv run python scripts/verify_production_path.py --profile maximum-four --repeat 2 --maximum-seconds 30
+
       - name: Verify placement templates in wheel
         run: |
           uv build --wheel --out-dir /tmp/football-scheduler-wheel

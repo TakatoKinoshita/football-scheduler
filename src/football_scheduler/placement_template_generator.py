@@ -33,6 +33,7 @@ from football_scheduler.models import (
     SolverStatus,
 )
 from football_scheduler.placement_template_contract import (
+    LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     PLACEMENT_OBJECTIVES,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
@@ -40,6 +41,8 @@ from football_scheduler.placement_template_contract import (
     CanonicalRefereeAssignment,
     OptimizationProofMethod,
     PlacementOptimizationStageCheckpoint,
+    PlacementOptimizationTarget,
+    PlacementOptimizationTargetManifest,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateManifest,
@@ -69,22 +72,41 @@ CHECKPOINT_DIRECTORY = ".checkpoints"
 MANIFEST_FILE = "manifest.json"
 OPTIMIZATION_CHECKPOINT_DIRECTORY = ".optimization-checkpoints"
 LOWER_OBJECTIVE_TARGET_TOPOLOGIES: tuple[Topology, ...] = ((2, 4), (2, 8))
+LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES: tuple[Topology, ...] = (
+    (3, 8),
+    (2, 16),
+    (4, 8),
+)
+_ISSUE73_WORKER_TARGET_MANIFEST: PlacementOptimizationTargetManifest | None = None
 
-# Issue #71 must not rewrite the 24/32-team shards.  Both the bytes committed by
-# Issue #69 and their parsed canonical digest are pinned, so whitespace-only or
-# semantic rewrites are caught before an optimization run starts.
+# An Issue #71 rerun must not rewrite the 24/32-team shards.  Pin the bytes and
+# parsed canonical digests finalized by Issue #73, so a future small-topology
+# campaign preserves the latest large-topology catalog.
 UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
     (3, 8): (
-        "f05dc54dcc148e6a3dab6c75867dad84e8be6706329aae2d5ffa2c0ed8b67d38",
-        "5450d7e20501c6f14d6a36b4de2267ef68c7178b46f3e018d9733bfafb27fe2b",
+        "a8c425447529b7044fc35f9655d3e678c786ab26320536d5ad5e0dcda726a7f6",
+        "ffc05d6de33aee8a336aa26e181c0d1fad5c1e101a82b80d13ce682c5fd2dcfd",
     ),
     (2, 16): (
-        "4e44e1485c054a4de93cb902c13b439a86a4c6ef6b707ab5eba540cf3c1ab083",
-        "8942027d9f81366b2dd7ef2d278e62c32d4846086000cabe71d0d8d7d9666580",
+        "2336584da1bbf68eea8145b9f0654734e3a90a8ed8d560d0d24e36b48a33ecf1",
+        "7efcaefb7d4cad6c9ae8c5b695a1cb9b990c480134c676e116ac9ec17e82d02a",
     ),
     (4, 8): (
-        "9b4ebce9d4ab53110c10d59f5e8f59aed474d0ca6a32c29d5cd72f6db59c348a",
-        "8ba3869afbe4e8f789da9aa97a758bfb51dd5edd0a8617da99fc26af79025b70",
+        "8682c1e8e093799ead83c4c6fa25da3922e0292f4baef948f76d2e10338fa117",
+        "cf83b99ecf85d76d7ec3caddfa6b5c4e8283d101163a8f4ed95a8e77c1ade362",
+    ),
+}
+
+# Issue #73 may only rewrite the 24/32-team shards.  Keep the optimized 8/16-team
+# catalog from Issue #71 byte-for-byte and semantically pinned throughout a run.
+ISSUE73_UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
+    (2, 4): (
+        "61dc331b0fb0e96171e9412d61181330bdd0e017c51c150a7ab88f82298e9115",
+        "9050f9844ec034b08dffa9acb74b4d45db454168ade33e5b1c28533e18f0bf2c",
+    ),
+    (2, 8): (
+        "3e4f1fedd96bc3cf8fc3b76a7279bacb9ff043105034a9af70fa6267cc1e55cb",
+        "1c1e80ede74d3c538a1dd57902f5d22de181a0970b8dbd4ffcf53ddb3ea32055",
     ),
 }
 
@@ -169,6 +191,31 @@ class LowerObjectiveOptimizer(Protocol):
         *,
         max_time_per_stage: float,
     ) -> LowerObjectiveOptimizationResultLike: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LargeObjectiveOptimizationRequest:
+    """Issue #73 optimizerへ渡す、永続化から独立した1 targetの入力。"""
+
+    current_entry: PlacementTemplateEntry
+    legacy_incumbent: PlacementTemplateEntry
+    target: PlacementOptimizationTarget
+    target_manifest_sha256: str
+    completed_checkpoints: tuple[PlacementOptimizationStageCheckpoint, ...]
+    max_time_per_stage: float
+
+
+LargeObjectiveCheckpointSink = Callable[[PlacementOptimizationStageCheckpoint], None]
+
+
+class LargeObjectiveOptimizer(Protocol):
+    """目的段階ごとのcheckpointをsinkへ渡すIssue #73 optimizer境界。"""
+
+    def __call__(
+        self,
+        request: LargeObjectiveOptimizationRequest,
+        emit_checkpoint: LargeObjectiveCheckpointSink,
+    ) -> PlacementTemplateEntry: ...
 
 
 class StabilizedPlacementTemplateSolver:
@@ -892,10 +939,21 @@ def optimizer_provenance() -> PlacementTemplateProvenance:
     )
 
 
-def guard_untouched_shards(output_directory: Path) -> None:
-    """Issue #71対象外の24/32-team shardが一切変わっていないことを検査する。"""
+def large_optimizer_provenance() -> PlacementTemplateProvenance:
+    """Issue #73で選択したlegacy/new候補をv2 campaignとして識別する。"""
 
-    for topology, (expected_raw, expected_internal) in UNTOUCHED_SHARD_DIGESTS.items():
+    return current_provenance().model_copy(
+        update={"optimization_version": LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION}
+    )
+
+
+def guard_campaign_shards(
+    output_directory: Path,
+    expected_digests: Mapping[Topology, tuple[str, str]],
+) -> None:
+    """campaign対象外shardをraw bytesとparsed digestの両方で固定する。"""
+
+    for topology, (expected_raw, expected_internal) in expected_digests.items():
         path = shard_file(output_directory, topology)
         try:
             raw_digest = sha256(path.read_bytes()).hexdigest()
@@ -911,6 +969,18 @@ def guard_untouched_shards(output_directory: Path) -> None:
             raise PlacementTemplateIntegrityError(
                 f"対象外shardの内部SHA-256が変更されています: {path.name}"
             )
+
+
+def guard_untouched_shards(output_directory: Path) -> None:
+    """Issue #71対象外の24/32-team shardが一切変わっていないことを検査する。"""
+
+    guard_campaign_shards(output_directory, UNTOUCHED_SHARD_DIGESTS)
+
+
+def guard_issue73_untouched_shards(output_directory: Path) -> None:
+    """Issue #73対象外の8/16-team shardが一切変わっていないことを検査する。"""
+
+    guard_campaign_shards(output_directory, ISSUE73_UNTOUCHED_SHARD_DIGESTS)
 
 
 def reaudit_absolute_lower_bound_proofs(
@@ -1021,6 +1091,434 @@ def load_optimization_stage_checkpoint(
     ):
         raise PlacementTemplateIntegrityError(f"最適化checkpointのdigestが一致しません: {path}")
     return checkpoint
+
+
+def issue73_optimization_checkpoint_directory(
+    output_directory: Path,
+    key: PlacementTemplateKey,
+) -> Path:
+    """Issue #73の疎なtarget専用checkpoint directory。"""
+
+    key_name = checkpoint_file_name(key).removesuffix(".json")
+    return (
+        output_directory
+        / OPTIMIZATION_CHECKPOINT_DIRECTORY
+        / LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+        / f"p{key.pool_count}-s{key.pool_size}"
+        / key_name
+    )
+
+
+def issue73_optimizer_candidate_file(
+    output_directory: Path,
+    key: PlacementTemplateKey,
+) -> Path:
+    """単一aggregatorが読む、target単位の最終候補artifact。"""
+
+    return (
+        output_directory
+        / ".optimization-candidates"
+        / LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+        / f"p{key.pool_count}-s{key.pool_size}"
+        / checkpoint_file_name(key)
+    )
+
+
+def load_issue73_optimization_checkpoints(
+    directory: Path,
+    *,
+    key: PlacementTemplateKey,
+) -> tuple[PlacementOptimizationStageCheckpoint, ...]:
+    """先頭から連続したv2 checkpointだけを再開入力として読み込む。"""
+
+    paths = tuple(
+        optimization_stage_checkpoint_file(directory, index)
+        for index in range(len(PLACEMENT_OBJECTIVES))
+    )
+    present = tuple(path.exists() for path in paths)
+    if any(present[index] and not all(present[:index]) for index in range(len(present))):
+        raise PlacementTemplateIntegrityError("v2 checkpointに途中の欠落があります")
+    checkpoints = tuple(
+        load_optimization_stage_checkpoint(path)
+        for path, exists in zip(paths, present, strict=True)
+        if exists
+    )
+    if any(
+        checkpoint.optimization_version != LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+        or checkpoint.key != key
+        or checkpoint.stage_index != index
+        for index, checkpoint in enumerate(checkpoints)
+    ):
+        raise PlacementTemplateIntegrityError("v2 checkpointのversion・key・段階が不正です")
+    return checkpoints
+
+
+def optimize_issue73_target_entry(
+    *,
+    current_entry: PlacementTemplateEntry,
+    legacy_incumbent: PlacementTemplateEntry,
+    target: PlacementOptimizationTarget,
+    target_manifest: PlacementOptimizationTargetManifest,
+    output_directory: Path,
+    optimizer: LargeObjectiveOptimizer,
+    resume: bool = False,
+    max_time_per_stage: float = 60.0,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateEntry:
+    """1 targetをadapterで処理し、各stageと最終候補をatomicに保存する。"""
+
+    if not 0 < max_time_per_stage <= 840:
+        raise ValueError("1段階の探索時間は0秒より大きく840秒以下にしてください")
+    if not target_manifest.sha256:
+        raise PlacementTemplateIntegrityError("target manifestにSHA-256がありません")
+    if target not in target_manifest.targets:
+        raise PlacementTemplateIntegrityError("targetがmanifestに含まれていません")
+    if (
+        current_entry.key != target.key
+        or legacy_incumbent.key != target.key
+        or current_entry.sha256 != target.current_entry_sha256
+        or legacy_incumbent.sha256 != target.legacy_entry_sha256
+        or _objective_vector(current_entry) != target.current_objectives
+        or _objective_vector(legacy_incumbent) != target.legacy_objectives
+    ):
+        raise PlacementTemplateIntegrityError("targetとcurrent/legacy incumbentが一致しません")
+    _hydrate_and_validate_entry(current_entry, validator=validator)
+    _hydrate_and_validate_entry(legacy_incumbent, validator=validator)
+
+    checkpoint_directory = issue73_optimization_checkpoint_directory(output_directory, target.key)
+    completed = (
+        load_issue73_optimization_checkpoints(checkpoint_directory, key=target.key)
+        if resume
+        else ()
+    )
+    for checkpoint in completed:
+        _validate_issue73_checkpoint(
+            checkpoint,
+            current_entry=current_entry,
+            legacy_incumbent=legacy_incumbent,
+            target_manifest_sha256=target_manifest.sha256,
+        )
+    candidate_path = issue73_optimizer_candidate_file(output_directory, target.key)
+    if len(completed) == len(PLACEMENT_OBJECTIVES):
+        checkpoint_candidate = completed[-1].candidate
+        if candidate_path.exists():
+            resumed = load_entry(candidate_path)
+            if resumed.sha256 != checkpoint_candidate.sha256:
+                raise PlacementTemplateIntegrityError(
+                    "v2最終候補と最後のcheckpoint candidateが一致しません"
+                )
+            return resumed
+        _hydrate_and_validate_entry(checkpoint_candidate, validator=validator)
+        write_entry_checkpoint(checkpoint_candidate, candidate_path.parent)
+        restored_path = candidate_path.parent / checkpoint_file_name(checkpoint_candidate.key)
+        if restored_path != candidate_path:
+            raise PlacementTemplateIntegrityError("v2 optimizer候補の復元先が一致しません")
+        return checkpoint_candidate
+
+    emitted = list(completed)
+
+    def emit_checkpoint(checkpoint: PlacementOptimizationStageCheckpoint) -> None:
+        expected_index = len(emitted)
+        if expected_index >= len(PLACEMENT_OBJECTIVES):
+            raise PlacementTemplateIntegrityError("v2 optimizerが余分なstageを出力しました")
+        _validate_issue73_checkpoint(
+            checkpoint,
+            current_entry=current_entry,
+            legacy_incumbent=legacy_incumbent,
+            target_manifest_sha256=target_manifest.sha256,
+        )
+        if checkpoint.stage_index != expected_index:
+            raise PlacementTemplateIntegrityError("v2 optimizerのstage出力が連続していません")
+        write_optimization_stage_checkpoint(checkpoint, checkpoint_directory)
+        emitted.append(checkpoint)
+
+    request = LargeObjectiveOptimizationRequest(
+        current_entry=current_entry,
+        legacy_incumbent=legacy_incumbent,
+        target=target,
+        target_manifest_sha256=target_manifest.sha256,
+        completed_checkpoints=completed,
+        max_time_per_stage=max_time_per_stage,
+    )
+    candidate = optimizer(request, emit_checkpoint)
+    if len(emitted) != len(PLACEMENT_OBJECTIVES):
+        raise PlacementTemplateIntegrityError("v2 optimizerのtarget x 6 stage coverageが不正です")
+    if (
+        candidate.key != target.key
+        or candidate.sha256 != emitted[-1].candidate.sha256
+        or candidate.provenance.optimization_version != LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    ):
+        raise PlacementTemplateIntegrityError(
+            "v2 optimizer最終候補のkey・SHA・provenanceが不正です"
+        )
+    _hydrate_and_validate_entry(candidate, validator=validator)
+    if (
+        _objective_vector(candidate) > target.current_objectives
+        or _objective_vector(candidate) > target.legacy_objectives
+    ):
+        raise PlacementTemplateIntegrityError("v2 optimizer最終候補が品質floorより悪化しました")
+    write_entry_checkpoint(candidate, candidate_path.parent)
+    written_path = candidate_path.parent / checkpoint_file_name(candidate.key)
+    if written_path != candidate_path:
+        raise PlacementTemplateIntegrityError("v2 optimizer候補の保存先が一致しません")
+    return candidate
+
+
+def optimize_issue73_targets(
+    target_manifest: PlacementOptimizationTargetManifest,
+    current_entries: Mapping[str, PlacementTemplateEntry],
+    legacy_entries: Mapping[str, PlacementTemplateEntry],
+    output_directory: Path,
+    *,
+    resume: bool = False,
+    workers: int = 1,
+    max_time_per_stage: float = 60.0,
+    optimizer: LargeObjectiveOptimizer | None = None,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> dict[str, PlacementTemplateEntry]:
+    """manifestの疎なtargetだけを最適化し、shardを書かずにcandidateを返す。"""
+
+    if workers < 1:
+        raise ValueError("workersは1以上にしてください")
+    if optimizer is not None and workers != 1:
+        raise ValueError("差し替えIssue #73 optimizerはworkers=1で使用してください")
+    target_ids = {target.key.catalog_id for target in target_manifest.targets}
+    if set(current_entries) != target_ids or set(legacy_entries) != target_ids:
+        raise PlacementTemplateIntegrityError(
+            "Issue #73 optimizer入力の疎target coverageが不正です"
+        )
+    if workers == 1:
+        active_optimizer = optimizer or _default_large_objective_optimizer()
+        results = {
+            target.key.catalog_id: optimize_issue73_target_entry(
+                current_entry=current_entries[target.key.catalog_id],
+                legacy_incumbent=legacy_entries[target.key.catalog_id],
+                target=target,
+                target_manifest=target_manifest,
+                output_directory=output_directory,
+                optimizer=active_optimizer,
+                resume=resume,
+                max_time_per_stage=max_time_per_stage,
+                validator=validator,
+            )
+            for target in target_manifest.targets
+        }
+    else:
+        payloads = tuple(
+            (
+                current_entries[target.key.catalog_id].model_dump(mode="json"),
+                legacy_entries[target.key.catalog_id].model_dump(mode="json"),
+                target.model_dump(mode="json"),
+                str(output_directory),
+                resume,
+                max_time_per_stage,
+            )
+            for target in target_manifest.targets
+        )
+        results = {}
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_initialize_issue73_worker,
+            initargs=(target_manifest.model_dump(mode="json"),),
+        ) as executor:
+            futures = {
+                executor.submit(_optimize_issue73_entry_worker, payload): payload[2]
+                for payload in payloads
+            }
+            for future in as_completed(futures):
+                entry = PlacementTemplateEntry.model_validate(future.result())
+                results[entry.key.catalog_id] = entry
+    if set(results) != target_ids:
+        raise PlacementTemplateIntegrityError(
+            "Issue #73 optimizer出力の疎target coverageが不正です"
+        )
+    return results
+
+
+def _validate_issue73_checkpoint(
+    checkpoint: PlacementOptimizationStageCheckpoint,
+    *,
+    current_entry: PlacementTemplateEntry,
+    legacy_incumbent: PlacementTemplateEntry,
+    target_manifest_sha256: str,
+) -> None:
+    if (
+        checkpoint.optimization_version != LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+        or checkpoint.key != current_entry.key
+        or checkpoint.input_entry_sha256 != current_entry.sha256
+        or checkpoint.current_entry_sha256 != current_entry.sha256
+        or checkpoint.legacy_incumbent_sha256 != legacy_incumbent.sha256
+        or checkpoint.target_manifest_sha256 != target_manifest_sha256
+    ):
+        raise PlacementTemplateIntegrityError("v2 checkpointのcampaign SHA契約が一致しません")
+    if checkpoint.candidate.provenance.optimization_version != (
+        LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    ):
+        raise PlacementTemplateIntegrityError("v2 checkpoint candidateのprovenanceが不正です")
+
+
+def _default_large_objective_optimizer() -> LargeObjectiveOptimizer:
+    try:
+        module = import_module("football_scheduler.placement_lower_objective_optimizer")
+        native_optimizer = module.optimize_lower_objectives
+        progress_model = module.LowerObjectiveOptimizationProgress
+        stage_model = module.LowerObjectiveStageResult
+    except (AttributeError, ImportError) as exc:
+        raise PlacementTemplateGenerationError(
+            "Issue #73 optimizer adapterを読み込めません。optimizer-v2実装を統合してください"
+        ) from exc
+
+    def adapter(
+        request: LargeObjectiveOptimizationRequest,
+        emit_checkpoint: LargeObjectiveCheckpointSink,
+    ) -> PlacementTemplateEntry:
+        current_request, current_schedule = _hydrate_and_validate_entry(request.current_entry)
+        legacy_request, legacy_schedule = _hydrate_and_validate_entry(request.legacy_incumbent)
+        if current_request != legacy_request:
+            raise PlacementTemplateIntegrityError(
+                "Issue #73 current/legacyのhydrate requestが一致しません"
+            )
+        resume_from = None
+        if request.completed_checkpoints:
+            latest = request.completed_checkpoints[-1]
+            _resume_request, resume_schedule = _hydrate_and_validate_entry(latest.candidate)
+            stage_fields = stage_model.model_fields
+            stages = []
+            for checkpoint in request.completed_checkpoints:
+                values: dict[str, object] = {
+                    "objective": checkpoint.objective,
+                    "value": checkpoint.value,
+                    "status": checkpoint.status,
+                    "optimality_proven": checkpoint.optimality_proven,
+                    "proof_method": checkpoint.proof_method,
+                    "best_bound": checkpoint.best_bound,
+                    "wall_time_seconds": checkpoint.wall_time_seconds,
+                    "model_fingerprint": checkpoint.model_fingerprint,
+                }
+                if "termination_reason" in stage_fields:
+                    values["termination_reason"] = checkpoint.termination_reason
+                stages.append(stage_model(**values))
+            resume_from = progress_model(
+                optimizer_version=LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+                schedule=resume_schedule,
+                objectives=tuple(stages),
+                proven_objectives=tuple(
+                    stage.objective for stage in stages if stage.optimality_proven
+                ),
+                wall_time_seconds=sum(stage.wall_time_seconds for stage in stages),
+            )
+
+        latest_candidate: PlacementTemplateEntry | None = None
+
+        def stage_callback(progress: object) -> None:
+            nonlocal latest_candidate
+            progress_stages = tuple(progress.objectives)  # type: ignore[attr-defined]
+            if not progress_stages:
+                raise PlacementTemplateIntegrityError("optimizer-v2 progressに目的段階がありません")
+            schedule_entry = _available_entry(
+                request.current_entry.key,
+                current_request,
+                progress.schedule,  # type: ignore[attr-defined]
+            )
+            proof_by_name = {stage.objective: stage.optimality_proven for stage in progress_stages}
+            candidate = _with_entry_digest(
+                schedule_entry.model_copy(
+                    update={
+                        "objectives": tuple(
+                            objective.model_copy(
+                                update={
+                                    "optimality_proven": proof_by_name.get(
+                                        objective.objective, False
+                                    )
+                                }
+                            )
+                            for objective in schedule_entry.objectives
+                        ),
+                        "provenance": large_optimizer_provenance(),
+                        "sha256": "",
+                    }
+                )
+            )
+            stage = progress_stages[-1]
+            stage_index = len(progress_stages) - 1
+            checkpoint = PlacementOptimizationStageCheckpoint(
+                optimization_version=LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+                key=request.current_entry.key,
+                stage_index=stage_index,
+                objective=stage.objective,
+                input_entry_sha256=request.current_entry.sha256,
+                candidate=candidate,
+                status=stage.status,
+                value=stage.value,
+                optimality_proven=stage.optimality_proven,
+                proof_method=stage.proof_method,
+                best_bound=stage.best_bound,
+                wall_time_seconds=stage.wall_time_seconds,
+                model_fingerprint=stage.model_fingerprint,
+                current_entry_sha256=request.current_entry.sha256,
+                legacy_incumbent_sha256=request.legacy_incumbent.sha256,
+                target_manifest_sha256=request.target_manifest_sha256,
+                fixed_objectives=candidate.objectives[:stage_index],
+                termination_reason=getattr(stage, "termination_reason", None),
+            )
+            emit_checkpoint(checkpoint)
+            latest_candidate = candidate
+
+        native_optimizer(
+            current_request,
+            current_schedule,
+            legacy_incumbent=legacy_schedule,
+            resume_from=resume_from,
+            stage_callback=stage_callback,
+            max_time_per_stage=request.max_time_per_stage,
+        )
+        if latest_candidate is None:
+            raise PlacementTemplateIntegrityError("optimizer-v2が新しいstageを出力しませんでした")
+        return latest_candidate
+
+    return adapter
+
+
+def _optimize_issue73_entry_worker(
+    payload: tuple[
+        dict[str, Any],
+        dict[str, Any],
+        dict[str, Any],
+        str,
+        bool,
+        float,
+    ],
+) -> dict[str, Any]:
+    (
+        current_data,
+        legacy_data,
+        target_data,
+        output_directory,
+        resume,
+        max_time_per_stage,
+    ) = payload
+    if _ISSUE73_WORKER_TARGET_MANIFEST is None:
+        raise PlacementTemplateIntegrityError("Issue #73 worker manifestが初期化されていません")
+    result = optimize_issue73_target_entry(
+        current_entry=PlacementTemplateEntry.model_validate(current_data),
+        legacy_incumbent=PlacementTemplateEntry.model_validate(legacy_data),
+        target=PlacementOptimizationTarget.model_validate(target_data),
+        target_manifest=_ISSUE73_WORKER_TARGET_MANIFEST,
+        output_directory=Path(output_directory),
+        optimizer=_default_large_objective_optimizer(),
+        resume=resume,
+        max_time_per_stage=max_time_per_stage,
+    )
+    return result.model_dump(mode="json")
+
+
+def _initialize_issue73_worker(manifest_data: dict[str, Any]) -> None:
+    """target manifestをworkerごとに1回だけ復元し、targetごとの複製を避ける。"""
+
+    global _ISSUE73_WORKER_TARGET_MANIFEST
+    _ISSUE73_WORKER_TARGET_MANIFEST = PlacementOptimizationTargetManifest.model_validate(
+        manifest_data
+    )
 
 
 def _load_resumable_optimization_candidate(
@@ -1650,10 +2148,15 @@ __all__ = [
     "CHECKPOINT_DIRECTORY",
     "DEFAULT_MAX_TIME_SECONDS",
     "GENERATOR_VERSION",
+    "ISSUE73_UNTOUCHED_SHARD_DIGESTS",
+    "LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES",
     "LOWER_OBJECTIVE_TARGET_TOPOLOGIES",
     "MANIFEST_FILE",
     "OPTIMIZATION_CHECKPOINT_DIRECTORY",
     "UNTOUCHED_SHARD_DIGESTS",
+    "LargeObjectiveCheckpointSink",
+    "LargeObjectiveOptimizationRequest",
+    "LargeObjectiveOptimizer",
     "LowerObjectiveOptimizationResultLike",
     "LowerObjectiveOptimizer",
     "LowerObjectiveStageResultLike",
@@ -1669,14 +2172,22 @@ __all__ = [
     "current_provenance",
     "generate_template_entry",
     "generate_topology_shard",
+    "guard_campaign_shards",
+    "guard_issue73_untouched_shards",
     "guard_untouched_shards",
+    "issue73_optimization_checkpoint_directory",
+    "issue73_optimizer_candidate_file",
+    "large_optimizer_provenance",
     "load_entry",
+    "load_issue73_optimization_checkpoints",
     "load_manifest",
     "load_optimization_stage_checkpoint",
     "load_shard",
     "merge_shards",
     "optimization_checkpoint_directory",
     "optimization_stage_checkpoint_file",
+    "optimize_issue73_target_entry",
+    "optimize_issue73_targets",
     "optimize_template_entry_lower_objectives",
     "optimize_topology_lower_objectives",
     "optimizer_provenance",

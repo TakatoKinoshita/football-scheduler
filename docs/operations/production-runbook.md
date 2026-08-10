@@ -173,7 +173,8 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 1. `main`から`operation: plan`を選び、`release_sha`と`change_set_arn`は空欄にする。
 2. 影響確認欄を選択し、Environment承認後に実行する。
 3. workflowは設定値とquotaを確認し、Python、Web、Pages Function、順位決定トーナメントの
-   template catalog全1,360キー、最大32チーム・2トーナメント経路、SAM templateを検証する。
+   template catalog全1,360キー、16チーム・2トーナメント、24チーム・3トーナメント、
+   32チーム・2トーナメント、32チーム・4トーナメントの本番経路、SAM templateを検証する。
    catalog root SHA、利用可能数、証明済み実行不能数をActions summaryで確認する。
 4. commit SHAをtagにしたsolver imageをECRへpushし、SAM artifactをS3へuploadする。
 5. CloudFormation change setを作成するが実行しない。初回planでは本番stackは
@@ -184,6 +185,16 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 初回planでは全resourceが`Add`で、`Remove`、`Modify`、replacementがないことを必須とする。
 change setが`CREATE_COMPLETE`かつ`AVAILABLE`であることを確認し、ARNとrelease SHAをapply用に
 記録する。初回dry-runではここで停止し、change setを実行しない。
+
+Plan前に24・32チーム用catalog経路だけをローカルで再確認する場合は、次を実行する。各profileは
+異なる`PYTHONHASHSEED`で2回生成し、36・64・48試合、catalog fallbackなし、独立・統合制約検証、
+30秒上限、1 MB応答上限、正規化結果の一致を確認する。
+
+```console
+uv run python scripts/verify_production_path.py --profile twenty-four --repeat 2 --maximum-seconds 30
+uv run python scripts/verify_production_path.py --profile maximum --repeat 2 --maximum-seconds 30
+uv run python scripts/verify_production_path.py --profile maximum-four --repeat 2 --maximum-seconds 30
+```
 
 ### 4.2 Apply: 承認済みchange setの実行と公開
 
@@ -197,9 +208,10 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
    `REVIEW_IN_PROGRESS`なら初回`CREATE`、`CREATE_COMPLETE`、`UPDATE_COMPLETE`、
    `UPDATE_ROLLBACK_COMPLETE`なら`UPDATE`として完了待機方法を選ぶ。それ以外の不安定な状態では
    change setを実行しない。
-5. change setを実行し、新Lambda `live` aliasを直接invokeする。小規模疎通に加え、32チーム・
-   8ブロック・2トーナメント・4コート・主催者審判数4の両日生成で、2日目64試合、独立・統合
-   制約検証、1 MB応答上限を確認する。この確認はPages配信前に行い、失敗時はLambda aliasを戻す。
+5. change setを実行し、新Lambda `live` aliasを直接invokeする。小規模疎通に加え、16チーム・
+   2トーナメント、24チーム・3トーナメント、32チーム・2トーナメント、32チーム・4トーナメントの
+   両日生成を行う。それぞれ2日目24・36・64・48試合、catalog fallbackなし、独立・統合制約検証、
+   1 MB応答上限を確認する。この確認はPages配信前に行い、失敗時はLambda aliasを戻す。
 6. stack出力とGitHub secretsをPages Function secretへ同期し、Wranglerで静的assetとFunctionを
    同時配信する。
 7. 公開画面の`X-Release-Id`とapp shellを確認する。失敗時は直前のPages deploymentとLambda
@@ -215,6 +227,13 @@ IAM scope内に限定し、SAMやCloudFormationによる自動生成名の短縮
 通常release中にcatalogを再計算せず、コミット済みresourceを`--check`で検証する。日程規則を
 変更したreleaseでは全5shardを事前に再生成し、新しいcommit SHAからPlanを作成する。以前のSHAで
 作成したchange setを再利用しない。
+
+Issue #73のcatalog更新では、単一aggregatorが24・32チーム用3shardとmanifestを確定した後、
+8・16チーム用2shardのraw file SHA-256と内部canonical digestが不変であること、および全1,360キーの
+`--check`が成功することをPRの完了条件にする。current／legacy比較や探索時間などの実測品質統計は
+`docs/architecture/issue-73-placement-quality-report.md`で確認する。Issue #73のPR作業には本番releaseを
+含めず、`operation: plan`も`operation: apply`も実行しない。merge後に本番へ反映する場合は、別作業として
+影響を確認し、明示承認を得てから本節のPlan／Applyを行う。
 
 ### 4.2.1 公開後の受入確認
 

@@ -1,0 +1,5243 @@
+{
+  "current_fixture_sha256": "9bd7d61526e5b63f5d7b54af49c1f7851110de49b0882568e4d38039a3b69106",
+  "format_version": 1,
+  "legacy_fixture_sha256": "1216381d99f699af8690bbd578c0a42929184fa06217e136f574f1f5ef34f8b3",
+  "optimization_version": "placement-lower-objective-optimizer-v2",
+  "sha256": "9d09c406b3ab8002f1d03f66ed762b38300901b0acc8beaf70fd92583a72cc32",
+  "targets": [
+    {
+      "current_entry_sha256": "e77c8f61e0ec91ab1e2c9f88e415867896316a13a51678780c1fc273945a609a",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e2319a165c40599213b1cbc3e4c0dfb512305aadedca5de82759ed8bab98e17f",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "a83feb99dea49e262ca93267638822986f4eef363bd8f5a35a29e6859973d499",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        9
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "fd8e98c498527d653f63ca448e365574a25d4ec8a020ef9853dcbf6d492b3d64",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        93,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "24931d7b50aeaf76caf86aae24e20a1e826ad9b1a5e4aa016cf2fb5b838f96d3",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        9
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "be6a6a192fd7b8a1354221e46158866e9200e26e645f39a211e998fc16a5cfac",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        88,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "bb6a9e8c5ff6ee132086de92a55037af77ef661f784cac78221d574cb12e6d96",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        9
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "154dbd80db95e92dc5fdaadd2af31099b708c9eb3e5028623aaa347e1caec3ca",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        94,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "3c0b291789d2f301e55a67cbe9522ee4946aba9ca2f8a4148a8c5a2633e9c208",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c47dc58df1eee2e13d9bf55b709f744607038551b7aa52d579eb1d29f0630eb4",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        95,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "f9dd0e1d8bd292a0adf032295771c0fce9e6b3b72b7d28e1205c870427c54830",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "36597fd2bfc9dff0c66394e0c5f71ea2582e6e9c84b9070f39798633d576881e",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "7cdd44393f5b3a7de16a69c6874706c911456969088cf9e791c0d8ae4f6dbdf8",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "6831cdbe368fb5dc0b0927959b2bd1e0f11b35d164410a83c03ab77fd438c55b",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "19714532bc12a9a7f78a699f8b744ba1e90cce9ac451820858ca8f0685c08ffd",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "cb708cd2207a13da69ee3dcb72515963008b0efae49b36ff12e5bc393feae13a",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "2dced477659ff58277a240f7cd0038fc047d9a724b115eeea5fd40a9ba2d3f2c",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4807a3d635048606c84505d622c5c591a13c08ca6c4452fc414eab1969632ab9",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8525be586f22c3fc27d92fd44bfba548ef1467dfd9b6bd7afcb56d07a44cc17e",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "b9eedb1207b7928d74a4c93ec067696a051b1c3b2d79a110abdb04ec79a06dc9",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "22d2b15906a4df751dd2292cf5f13ef621f855fe9c53c26420c14c4fe024c095",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1d0ca8e61a73cff1008f595e4bc0f4435088e5dadf0f72c756651694a7fedf70",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "a0b12591b3ce97c408b52b03691ae512639bc846a94e5f806918e799f18cbdb6",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "b43497a6b9452628b88b99ed82607f3a0ff2f43b6cb20b16a7fba25fe47461c1",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "c2c3346fc0669c7ebf0e8f98db75c7af37a2162bfca6681ee0766a6f647ecd59",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "fa6489dc465d3907df460fb6c32b652fca9019958424cfdae559647132dd9199",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "1f4c5da82bfe3bab158b370d0920eff8a2c23f6d12251e6480c544e7def81733",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "fe5a066048321d1991cb146a88e7f285c72b550e0304c4f06bc2387ea88c487f",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        95,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "a683a6e80bdb49de69bf896303188f3ef0602bd7e1878f37cab012aba5f1affe",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "dd67ceb088430a2d8bc81c2621ab95748801d70bbc8454f411879e9bce6ec3d1",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "4cada31cee5a658ddfb91876c6c99908a736ae8d63f8b05a07e825c6bd067839",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e50b471650f4d5ad0d9ae116bfaed782cd05b4b3ef17f9895103ffb8f78682a3",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "96043d190d5169269a684e7b3190417dde58c6f84188b63079c264313e6cacde",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "08ac14b81426fd61ba6a050282d6b57f283757915babd54f2469914c448a65a8",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "56c7f6a1743eb631199f6ba553dbdd28b12b680251da9b2e36899444ae1ed5b7",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "71f161121e920e237f61cfcefd4b6aec9649fe5179bdd21378749732a66fa96e",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "88b5129fdd6d9819ebc3fe3cbf2f4a9e46946ef984a17cea938d9ed812e5c8c3",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "bb1d99527e68905e488248b5412f43674560e7b3861ae21ebdb94a5dbc8e6974",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "130f2d2f5fa6fc240e9c6181e3601029e1fd55520ad8ca4509663f2759acf061",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "582fc99ecc7f8927d51aadc88ac6fa339577b863cb30db2e32809a59e8511c3e",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "7ebf330ff0a84ca8c6a211487bbb6f824b308243444a45ed2cd849284c5d6084",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "041bb858745757a3643afa20a068851a736f4799210687d69c236305a97b9393",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        92,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "f5b227c2ccde428f4fdf669d8b3949fe9b42542eccaf0a3a6609d53358a0d1b6",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4ec2fcee3442d0b1a10c379f73dd8595aa60bfe2d9db11e695aa7adbf0fe50ec",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        92,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "594a0afaa1a3792ba61d27216b13ca9f16e0f910075d48e508152449991b3047",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d933cba6107561604f23497831dd4db21ecb87636890875d26b957a21dca1c6d",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        92,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "61db9a95624134556601ac75f40449739588c6ce23deae409a5b784ea4be0ae5",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "96230288117136c659494a4a50a23c21f07216eed2d4405f346c2bfd55ce02eb",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        92,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "3ddd611dba430ba7e1322d2072f0e919df21a288904f7b2b52677d7cec8eaf09",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 14,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3cce968aee7f1604241c8626b08087dc705717e8a8568cb9eec684c0f9706bb6",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "2dac8ab51a671999a3172203e7a3f9d7fd9b246a4d7140a1de2f6568dccd0df8",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 15,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3601b2e8c1bd324205c4859245f436b403103504221252b83c44f8ea4b13b3de",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "18407b4cbd48c57aa1136e4c193e8b36cc343a4452fe8da536867d333686bc12",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "bd4c2c2a1089fa2c5ae63ae8120774fe1f1388500ae0bee55c2cae742f5b27d0",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "409b315743747c320a1a5cfb48736b340e6685f5e7ccd51c82bace50dda53e0e",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c5605da616ae68586e86310be1714f2ab5073a5cc8b7abf5ebc4f0f9aee39afb",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "413a610c7ef539246451fc9cc5bc1d07c44c611a8871f7a64d32af216bfe6239",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "20c81c935fb094b6c5faf345c396514c3f2062b3e946471964ce47452379f271",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "dbb981247b4dbcb88058bfa402ddab4586e9f938c719fc8647781d478e008b63",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "167f0c8a9306f771b9bc93dffcf510a8b7a9814e33041a43cc1ac9893901f24d",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        8
+      ]
+    },
+    {
+      "current_entry_sha256": "f10c41ced36592e7ba65c6c3b8941124f770102f7a65fb1f02fa7eb9b422b28e",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 14,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7ba9ce84f2c7efef9d1ba2483ea5d30b2d127b3999d03e2befa0138b9feb8790",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "ef6d68d133dc435761649fd1901d928efcb7a99e519d4b0a8ae5d76be924cfeb",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 15,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "8e1b3449da88bc2553a567a45082c91ef1a83fd02b55ebe949ea9367c78ec824",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        94,
+        7
+      ]
+    },
+    {
+      "current_entry_sha256": "b88d9646d796153cb6dfafcb5fa854bf9273464adeafbbaa9e8ea0d8f471b3b8",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        9
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d579163f03d4b1bd93a06e8b0e8e58e06a7c0f13b3cdded71e48742f8377127e",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        3,
+        88,
+        9
+      ]
+    },
+    {
+      "current_entry_sha256": "ca05aad1ada7aba8e275c63ebf8d8a134a72d9121d8e76a2131777455fe54759",
+      "current_objectives": [
+        22,
+        5,
+        5,
+        14,
+        66,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "81faffb32ba3aee7a6180ae94eb4c6c4dcc4b9225f696c6d8052db92478d900f",
+      "legacy_objectives": [
+        22,
+        1,
+        1,
+        13,
+        72,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "d578360317b0b5c4ea3c243c9bc58d12227bd85f3bf703da2dfa4037639af550",
+      "current_objectives": [
+        13,
+        1,
+        1,
+        6,
+        76,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "41d7f17714dedca3d8d240ea00dc72e806836c69bac62aa71959091d3156c230",
+      "legacy_objectives": [
+        13,
+        0,
+        0,
+        3,
+        76,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "2611e58b357888f7b9083b415c9cc98d5a11f2db342952927fe3920c63a6fb7b",
+      "current_objectives": [
+        12,
+        0,
+        0,
+        5,
+        82,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "916af28d4631f2bcf6fbf82a5a37084bb63dd70a26396ad92899f64081f5b07f",
+      "legacy_objectives": [
+        12,
+        0,
+        0,
+        3,
+        84,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "cd7ac8b242b951d6e7d8dcf8569e4e69f5fae43ba6687da7f50c6914cc6ceb82",
+      "current_objectives": [
+        11,
+        1,
+        1,
+        4,
+        81,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e704fa5fa9d91a4f3c54bffab863f6e18019fc799ee705200793e336d66e5829",
+      "legacy_objectives": [
+        11,
+        0,
+        0,
+        3,
+        88,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "9c37ac77f7e6ca559ac29d4c9f304a584eb985b627b5cbf3abfd819efd6cece2",
+      "current_objectives": [
+        11,
+        1,
+        1,
+        4,
+        81,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "44b21f8648a589687bacd007479232e10a16a4bfd974f5b6870bc0be478217c2",
+      "legacy_objectives": [
+        11,
+        0,
+        0,
+        3,
+        92,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "df72de1a926983996f0ed23147eb1f438c3ae308e21497b9293fa3392840062c",
+      "current_objectives": [
+        11,
+        1,
+        1,
+        4,
+        81,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "99f0e5d9b392c18bd16ccb8a937f6d484454be5c36dae39dea5e029021e2abae",
+      "legacy_objectives": [
+        11,
+        0,
+        0,
+        3,
+        92,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "a4687c277ef529219a0db566368ba1f816e88a62b8399547d9298ceaa5d9de63",
+      "current_objectives": [
+        10,
+        2,
+        2,
+        3,
+        75,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "dfc55cee18c01022f0ce249ac81637701463197cb840d7cbf47d020b79e59a99",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        2,
+        88,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "3791b26bcd130e47ff8a0fe830b9c894219e5970e61122e6f7a475b4e415d9ef",
+      "current_objectives": [
+        10,
+        2,
+        2,
+        3,
+        75,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3f0c89824a0a4bf03c942b5bd36063c25f7ace2da910d5c423c897696ee6ff1f",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        2,
+        87,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "162a322587df35a13264af68f58467b31fc4b4046526dd478882301f41e19d58",
+      "current_objectives": [
+        10,
+        2,
+        2,
+        3,
+        75,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "6e63b79e059c28002d1f0da668da0340eef66bdcf0afc51eafe9de17f764c3b8",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        2,
+        89,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "9e9d19ab650e044a5b7263384a22e80f153e62dcd82beec388475b0ca6e0401b",
+      "current_objectives": [
+        10,
+        2,
+        2,
+        3,
+        75,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5e03baaad5444b8ae9d7df2fb432a64f56458e34df3aa7fda9f8ab4224d72db0",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        2,
+        84,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "0e38f8ed40c14005d655a6ec7e405314973c6f648dd174091712a3c01638af84",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "bcb6ea7b67bc30afbf5eaafe098dba947614052b0e4eeaa71b7f5925867aa993",
+      "legacy_objectives": [
+        9,
+        1,
+        1,
+        2,
+        90,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "0c145a960b7ff5a4b91a087205e2ecfa2d479c6be17fe7fbfa1973f005be5a73",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "91e81e96a247c776fe96b73b37e5c4c74f4d5bf7e02e1afb3446c387274d772a",
+      "legacy_objectives": [
+        9,
+        1,
+        1,
+        2,
+        92,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "0c7b1ba4918cac9b8d506684a5b6233db6b2fdfcae16e1d6036d699a9f65d4ed",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "096163864ab1cde16b1f56883cb8b3b4ebad8356421ccfaaf227d715852bbdd3",
+      "legacy_objectives": [
+        9,
+        1,
+        1,
+        2,
+        96,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "b4a14ef877f9554308994ba04a561ac598c475d21ed17abc522e2c40d83102ea",
+      "current_objectives": [
+        9,
+        1,
+        1,
+        3,
+        81,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5357b866a39221f8bf321ccde1f0bc7105c6dc1e949563279ad17dd917a870f7",
+      "legacy_objectives": [
+        9,
+        1,
+        1,
+        2,
+        93,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "7ab10a1076df1ec4319b0e090f80a92fd73e18a91276ab4548436077d8739e10",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        0
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5528528e85bfbf325d3e77f38ca9620b1fd9251de261051c24d8742f665d912f",
+      "legacy_objectives": [
+        8,
+        1,
+        1,
+        1,
+        48,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "29f4d090148c02b18b1fcfc428c5e3b031d731aec76fce4b5f1cbeb5aca36eab",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        0
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "strict",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1b6c79d020454e21e74d391c4c8a57e164dfd09a6ed277733577708525e321a0",
+      "legacy_objectives": [
+        8,
+        1,
+        1,
+        1,
+        48,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "db8ba11e9aa301c41830763bfce931e60d6ea7d6389108ab8be3928de83dbdb1",
+      "current_objectives": [
+        9,
+        0,
+        0,
+        3,
+        88,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c272fa5b0f99864d2343bc17a018f8c0ec81c963353ee398f55b2500ba3eb44d",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "acc6037ea8d836521df1917e81ca11fb95f825273ae5dfecd36051d6948ab00f",
+      "current_objectives": [
+        9,
+        0,
+        0,
+        3,
+        66,
+        8
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "42d05fc5240f3a41631dc9f2a314a32e3cb34175b0d30ae9ded306c25655b1ed",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        91,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "c762bb7cd7e832c3efc47d9ae9d1bf9871e0acdb17b5fc86fc970db47005cb92",
+      "current_objectives": [
+        9,
+        0,
+        0,
+        3,
+        70,
+        7
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "0e2a474bcce2e0de6374c469261b77dcd0f5464c640463a0e6898b364c5c077f",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        2,
+        90,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "f92fe7d6597088785c4dde774571b001f880699849a0630e62dcfe60f0e642b7",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "aaa3d9908a708df325ecb3d0adb5009fdacf81dbd7dc3f365d4138ef598f8b0c",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "653413c192482608ea2b67286d79cc27b91ae9c30d3d452a11fcbcf950624a31",
+      "current_objectives": [
+        8,
+        1,
+        1,
+        1,
+        76,
+        8
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 2,
+        "pool_size": 16,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1551fd62579ed82efc1cc3da7aa46f26d23803fdcc9fe7d943418a7d6a3526a7",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        2,
+        96,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8873a1b73f6839de3806125c6a78303c4705a9d67a939b6bcf7d022bced169f4",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "55d704026990b89761fcba281bed642a4fc5ccc026d7371aac60cddcea64ccc8",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "4e7219a73c3a35e8541cd1c1887b723a7c98d15f651115d1923162f0f50247ff",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2f98dc863cf9f59de2712c71a46ee6cb1e16dc7d89593689dc9d5d47ae2a4b6a",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "0c64f9392428ea266b8e7b9952dacbddb39980bb3219f35203b80a179e7b872f",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "20f1860bb0a67de2806bd8b09dd35db7bffdda92b2d78a6c1cf0b232615d7c94",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "691abef2fe18372e274fe746d8c8cb4a8a7c1080a7c24c6e21f0fc8525043f41",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7a973afec85126508e8e02acda08322c444cc209671b5d47927d526fad4267de",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "bd76c96df66f1ed0289bd190c873ae8ccf77bc9f985bccf612e8234956ef0e09",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "aa0d3f2c137a9b227159583d2cbc8e30518c7afdefad5e07a34c90b8b1b46e02",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8da15628d0bf9ef8660314bf8601b05e085b579ab04a18de71310366e4285421",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "46eae950f3ecb3834570d89a7eef643d638c49c8365532e2905e0474bb436b6e",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        24,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "7689a93e16c6ca15a51698bc3cad8e4e83001abca0c450a0462b397fc664b9d1",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "40a1aa4af7f22f52466873c434f882f39f64784526d62314e1789841dd0f75d5",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "b0d54e3d1ca8b7043de4149549d6833d5a40e86d075a1a8ddad3d31f1372eded",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7df66eaafbc98fae95591a8459186e1ea76a0511a5b8e0027436d73f82ef3530",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "9274ee876afbda31c34f8dcc79d9e66469dc128495a02e3b8685f0b3f4440224",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "53e017c2bbf7922cf3bd0532f7779cce7f61544403757ca6660cb01f0d55bcb9",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "7d7a28e819d6fa0f50f630b6da1218bde5e7762c0d2e9eb786628b6b9e6f0e11",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e1306086dcdeadea0a2cb4adcd9f658fcaced0309b4334925edf78e60a0e2ff1",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        24,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "90a91b004c73c26885133d6b11a95b92a56c7fe876ff98ec27f75bed98fb0e79",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "44887d0fb540453ae24caf0d2523d07d8b5477ca63326a5455d1019380565dc7",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "a6db7e5ad89be074e8bebc7a3169df80ca18467914a51c9844126c547ff15844",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2506c6ed561898a8d239a69bd4b55560f5765583d22def8c06cb14de96e53168",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "1301678a3842223a2deea22106c3e82b3889d4339cd898ec95ef729e9d9d11a2",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e09e3be7d0d41ba5c48b295779b61df80c32d15e5d38da94d06832100525a900",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8f1d6ca22d427bc8d05302e8f7109a437cdea1a04ccb1566c7e9edc0829339bf",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "a5075639f7ba0c1c6ad17d671fe2c0d0030d187203dc497bffbbfa2a3b5b172a",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "4fcef3d000d39773c77f34b192fd445ada7e20d9d68dcd81551963dac2bfc57d",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "119e55575ef3130edddb6a685ab24bdfccbe32b3bc22bad87e4b020f998e3be3",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "94fbfe56f1a74f63ec53fd019a638f32d27e93ed5c39cdaf164250d7d9a1ed17",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "9adab8d810af08d61963fb4df67c0e3dbc4e1489cba2d1db8f480193a3278ad1",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "cc35a405281a16ee1462f912ed2429b196f9c683399cbaed9752ae5dc0c89102",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "0eabfc281a7c10acf042603b8b05466124635a9fa3e77954524cc17395a31a04",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        24,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "1b2c06e2c989cf7f1ce6a8613b56dcb4d0591a731f8aa0cb52e0b44940f726af",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "88d2a051c09ecfcb4e065c9eae6d39a20839873be1b896054d9e57d79fa1b3ba",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "78ff0f23cb41e8e54c8f8b7071076efb8633212c4013f578246aa4be926fbacd",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "84bb3ae4c36f2abc0422e41d2a2b696da9b0014bddbaa509d095035629c76c13",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "f3233a4e29540a7468a8b5c30a3670696c4df63154ae587cedd13173a7e777b9",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "20bf69b8765fcf8cc055edbd52670cbec4c7628d6406b3b0d6bb755a67edb7c0",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "e3bfd93c15e9c99464c6ca9a39a2d44cac85151c6b06c172f658a4ed264960fe",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4f92723c225ffef44e27445c622bf18fb11edcba5d27b8a243b7c7d2ca54fe2e",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        24,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "ca55ca613e72187908f9e14613a88e0a622ac7b01222e636a2c2c54260a80a36",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2f8e697bf27f3fb889a689a9293909ac4ef70096acc733625ec7093fc4a79e03",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        24,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "5185c4b41d661f6a682118b89360901aa5cdcf97be34b6601ac2c0ddfce14401",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e79c098d2cc4b6deca4a1a28a906959e72345e05960c519f415703b2980447b9",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8bf252853d60fc57da620a6a133ddd662ca448d1caa2360a44d75270ce1293e3",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f1bb1e42cdac3488b7f7fea4d6f091cb31abbf63d361e2b52da71540332c7633",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "85e4fbbd18e177a45a0d78f13ffedc06d6848556216162c28487754ccba6c6ce",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f6bda9e27c74b49ad6f5dcf1c225ad6a56e3287a47f62552ac13326e10343b66",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8c28041a3edca2e51303303ba796929d40eb19636546738c00dc082444fb12ed",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "a022f834e97837585e2e42632840a2d91ead514645e9b9c52a63117c89fa3f47",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "4a43063bfc76d8fbaad4fc8fdc9b7124639670856c463803d04f0f54362bf2ab",
+      "current_objectives": [
+        13,
+        3,
+        4,
+        7,
+        38,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 2,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "38820d376dd682a08a76dc5520b6352afa409d69d0496100152a7cff42ffeac6",
+      "legacy_objectives": [
+        13,
+        1,
+        1,
+        5,
+        35,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "93d03ffd8ec5c1a5d031fd4cf31c2ea75d329f810ae897da3f64848b1b623159",
+      "current_objectives": [
+        12,
+        4,
+        8,
+        6,
+        26,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "174766040e085505defe0d39b7ef6fe7c44e66b0e32d144c77e3b2f9a8f9d385",
+      "legacy_objectives": [
+        12,
+        0,
+        0,
+        5,
+        36,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "32fd90b9ddbd7379d5f58c677b0407b65aa407f4c61a05bfc16749fcaec0bd41",
+      "current_objectives": [
+        12,
+        4,
+        8,
+        6,
+        26,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "strict",
+        "organizer_capacity": 3,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d277cb7d5145e14c5c393dc9f661e1fe7faa6a385129f8581a6e43d0487bf0f9",
+      "legacy_objectives": [
+        12,
+        0,
+        0,
+        5,
+        36,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "7c8626be38b5bd2477a35909e2c5cd26a46a63ba68642011833f4b93804404fe",
+      "current_objectives": [
+        10,
+        2,
+        4,
+        6,
+        36,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 2,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "14c01d100d70f799d846acc5346f4a29afd7d8dbaef16dfbdef03c64d8162da7",
+      "legacy_objectives": [
+        10,
+        1,
+        1,
+        3,
+        35,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "0959b673663cd7d6fd966b9b466bbbb6a2f45f185d0596895dd30b1dca246d01",
+      "current_objectives": [
+        10,
+        2,
+        4,
+        6,
+        36,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "da86e7447a1997484d834227e01d8e233b348c8225e3e150663b824a328b6dbd",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        4,
+        48,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "b6b0b85a7be27a98354a31ce37437806fe50010f5541eff688ae37f5b3c248f0",
+      "current_objectives": [
+        9,
+        1,
+        2,
+        4,
+        34,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "62055266fa9a224683fb595f3122ad32728ac6952a3e11f24c8ef0d06a3134fa",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        3,
+        36,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "0d481c991ff2057545e26b514b0a5003c88c6869249bca2936d1b4d3f7dfc6cf",
+      "current_objectives": [
+        9,
+        1,
+        2,
+        4,
+        34,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "strict",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "6dc4a044b99ea0cd6556f16fd069530deba1c63c983545fc6e218575083150af",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        3,
+        36,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "55207d46029d58ebf979e5923346d0efe2cc5ddbbcc51ed9310f55598d05148e",
+      "current_objectives": [
+        8,
+        1,
+        2,
+        4,
+        35,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "022dd9dc8990b7711dbfa5543ed3bcd95795e6a60f7e2517a7170180539cd691",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        47,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "40fc218b74468916d262736b1e3cd48682d243bead9b66b8ce8a358a5ab6d3d0",
+      "current_objectives": [
+        8,
+        1,
+        2,
+        4,
+        35,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4846e67da2d58a1ca4badbe4c7525913a9544684ecad38b46b90ec130c326571",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        47,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "f0214c97266505ca1a753fb50174086f03101cbfce656dd6e6eade8a35ef084b",
+      "current_objectives": [
+        8,
+        1,
+        2,
+        4,
+        35,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ce42fe36d6deb03af56adb64323b956b70112f0f3ca0a80eaaab80179074f9f1",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        44,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "f14676d9a2a19adc1891e010a2ef87d9952cf060b26c9242b0b7d0d64d51e458",
+      "current_objectives": [
+        7,
+        0,
+        0,
+        3,
+        40,
+        2
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ec3a1932493e58ca713e116e74059c2ac8f950698da1cbad08f7789398d32224",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        48,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "aa1991b46b994f7583641d468a9c7ef597038cd603c256d3f2f86d9594b0e6aa",
+      "current_objectives": [
+        7,
+        0,
+        0,
+        3,
+        40,
+        2
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "46e92ec69e63f8591360c5804060a82a886146795660406f6ed1f73279fbdfcc",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        42,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "1dd0d70ffd30df48ff3d0e7909f88879cfe437a0e6970f7047aa5e82d0376599",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        41,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2eeafeb3dcac1c9fcb9979ff9c1d69dba0b57704317f3b923b44528035bc531d",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        44,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "9bc9eea9ac836cb05d8c64e5ec155aef5123a6032e75f2ec1323cb85ea7318b4",
+      "current_objectives": [
+        7,
+        0,
+        0,
+        3,
+        39,
+        4
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f8e26db33f066943c5e1c3b947bf3c500d0512d999a3f88360626cd9533b0609",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        48,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "c0196d66a28d45df6e8db873c555e5b2945b6a1649f8469965828104002713f5",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        43,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3d6491abdb0651f85814d1fdc6940e525c7be9a0b54472d90ff812d6158a4a0f",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        48,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "77c1c8d78fd0fcb937b77ffbd8ee78bb5d337c5c69fea77dd5816c5342a35a4a",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        42,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3cc21ce07281d1dbc36b696cced7fb86f0195341149e56559bce5e239290d747",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        45,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "8c995c398cdf444f235267b8fd51fedd987201899271c212f09aaab45cb2001c",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        43,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1bd2165aad7f7f1e34db1f08660af399cfe54d1ac550bff732d8db2b132d9c86",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        48,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "31ba42583e377b6426c65f89c414165f1bcb45b0caea00a944f53325b39a210c",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        38,
+        3
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e4d23714808927198072383248bd84c264545447a373fb1b32249fa6ead86fd6",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        1,
+        24,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "1759bbf04e47a9e8ff6c322de38058ee31a7b6e0088d21347c1158ca085732a5",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        45,
+        4
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5f1738e20803f1a0ab64fb18ad8e6fdc6e9764dc81dfaa4d56a2a8b84eaef943",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        1,
+        24,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "8d5ae9a25d36696f4ba02a577189e607dbe0ddc9faec7a6be8d66479c1056ea1",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        43,
+        3
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d2b7a8600898a0b68f3a825ba90fbd938748b572cb19a8e2192e97578a278137",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        1,
+        24,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "914e961108ac4c13825953feb97e4823009dd365702666f41c37a65f06c701a6",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        1,
+        41,
+        3
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c4433181a4c5bd5a2669bf9208d04389bf1ed5e224fb1ca94be3762d502af03f",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        1,
+        24,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "24eb84d7131098dbbb61da389e169ad1f9da1282fe5ee1ba7a072d6f89bf52fe",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "145df8eff9912c94e962534be5b3e5b036ba1aca19388dd35cffc875faa735f2",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "d25233f4296b55d15b854f2d8aebf4e9fc1dca56489945dfac47349a27d6a924",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        46,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3fa6c4c30c1dab2a31ed1dce317dbb69be2d70f0efa96a5ad7e45bdd23048a5a",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "f310af316043e2a0ca636ba6aa1002a6ec077fd714436351e51dd9a9af1b9916",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        43,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "da52d1b6ccbf99ae549f1ce1d8d28d9ef4e14d489fe331e1665db402a7b9054c",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "426d17be5170ea0ec7d06cae9be770b0762b78b409e7c050650d113d541bd672",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        41,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 3,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "be5e27b302ed29700105e607e9a2891d65db99aecc6df9674725e68066032e9f",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        48,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "68603a501b682765394f5c232de9706e06ff90c2d6b5c8c282708110a5a95fcc",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        55,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4387f19e4e31309a092259ed23df7a9fdc6c2d89573558754bb9e7c366c6c49d",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        62,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "d3c0405cb77e5834cb7b94a6865874c358113d9207871ab114965e8db8f6dfbf",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        43,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f181e0cccbd98dd8efad8d0edbac27096d08238f169952c0e7e1dd7a895d6ecb",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "443764b4181956b8bd7fc20b237bd6f7ef65259864a3f6fcd30959181ecf62cc",
+      "current_objectives": [
+        7,
+        0,
+        0,
+        3,
+        57,
+        6
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e3e73b9ebcf264eed900e997e2ba65a247bd3e3ec4bad1a5fe2590ae5cedde2a",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        61,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "60335b2b71080d110807177143d434523668f258ece3472fdb4fcce04b37190e",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        51,
+        7
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1e00972eca55363a31115c1e051683753d6885a62cbdf3cd960f70b42fd6f0aa",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "8d8fcf42893c6454f0ea47007841e63f6e23fd842dfc0ac576a72fd0bda20dd8",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "cedb0152789e97426ad2e4a2a4c28b16513c310c89a62df9c9463fcccf3cf26c",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        62,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "deae602720accc21cb0332682d20e134e08e3a5159e52236f94bfa4a89490025",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        59,
+        5
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 10,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "735c87cc9c9b95622515c3e46cf90afb2f71451237873dd772ca23ea64645946",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        62,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "b6afd38abf5ee55d2d4fc4e882c0590c9f3d50e82e20fc69d4dd47f46dd2b6fd",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "db8459ad8ab958fb544001dd528a14319ec5c7850fecde1015b42f0a99ac631e",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "8a37bda04291220c4add78016e0c72fbb2bd10c171feb64d55ace66a707a9c61",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e42863eaf8c565acfbcf91e46bebbecf9b354209bb2c57a5d48349d6d60b308c",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "dd7e090c856851fda6b712c605225a7b223d79b5c19975b80c5132c0a016048d",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        47,
+        7
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4f45eb5b784c11dd968aec703d5c79ba84af51dc8013e7f12f5d047a76564576",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "5fab7d7ccad6b68e229f61b4f977f9eb540d524a574161230130f802440c6e9e",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        47,
+        7
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4c89f0b5aaaf4b227f8ebb319480c9f93f6c8be388b1adcfeac3728f54aaaf66",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "42e2c520a7696b2d7080524c61331762792c0ec77fb7588fa95f3ba27fed662e",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e9bdb61e5448428fce63e3df1a192fae761f706f593d6609de7424e5fd9a7b49",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        61,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "5ecb0a7840e86c97256c6251505e324f7ca68c238d87edb35e1a27d2c673e54b",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        44,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 11,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f77a474152cc48a8e9ab9b0d31f42cd6bc78278c08a365424f3a66dcd30561ce",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "13b0423ea31afa3a441347dbd382e34559f1c8357189410263e23ab6c8386742",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "6228be82e753ab6e8cec21647f7871ed7ac528fde044ffd927a2070dfddfc791",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "1e8f9a65fcdf262ce0e0c7d81ac685bb182e15af0b1c7f93dbbe646fadac11d7",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1aeb7c063c5a6c58079b771b8485536f595e4f45f2a15af812becc1a04e0922e",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "7db48c97b46dea2dd195b6a4ed744896bf1ef62ebc092db6440d47dd92d18438",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7999f7d13e3dc3cb3f3d31b29d243c1cc1e0b2188d2e372b9eef639454b183b6",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "8d9149ec7b651f9b53e08ad1a311184140509089b948d0865e41b02a7aaa9cb1",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 12,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "713c14c8c6ec65956770654f8f48d5bed90182e552fa429f8c6e3df50839236c",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "8caf725c9a761af5752e9a8179e427be8c4db7fff347c21069712d3ae56e523e",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "43378b8c35b5f055df1c42bec1f5482315800fe677096ad5f99bc0441df0dba2",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "be714afceda57e7f30f5bae1170bbd04c8a3311f25694c1c26782afaea010164",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "8394f00eff43eb6e6c01c8944135ac39e86277081323717f1a1f44d6ac646b4f",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "f1ef15580df8cf3cc427dbc7ecc67cc807c08b531e7ae7b2e3c51eb83217d099",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c9696230683a1d8221d7c913a6fef670fbcc085bd222b50fad416e2ae01f2c27",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "d825ca9eb9607bae619a3dc9448b8a0ade642d860335c92c0ff59969410f7711",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ba063276f756f2b087e5d9c3ec103f273fa2409250371dc78247a1c3f877e577",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "72cb3b22b1aeb15bc3efed05317360417d53789612f6c84240872ca886a547dc",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 13,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "a68eb2513745a9a4989ccbabadf3df12250c94d21453e7e6408e12acedf82ab0",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        32,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "db5b09a46a5e8b13f3189b6f13cd994a72bd33cff71464a027d44b56068262e9",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3bdc1bc50fecc116c383233bd2759018292354011ba505a28d12dba654f0ab4a",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "6329d3e8c7ebe60eedeea349390747e6440b11d43e22eeb1caa5f9dcfbeb6d25",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7a276452bf7ce74818f12c554f7943ee5d2f6af28a1f13196fe164117b59f343",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "1f0b1984ea1f674d204bb25d8f8ce6b6e93938a36e5e821f53f6726d762a5d10",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5604b487084afebdb56048629840478595b47f3c75e0f23f0ea0c909f6a70ee6",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "489bbbb0f8dbffa1108ea443f482eeb594116ca943257efaba66bb3f7767ce63",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5b409f058cc13fc8701ab38350d0600689951849be6f43f28f68b4c3dab1a2c2",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "dc99c1c7a0acab3c4741d25d3f4a2ceb0c483c880b9e92a1d020203b8131213a",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 14,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4679447c63cb9172672cd6be56cb34c610db68653e3eb301177e964b00500003",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "970ed252b8ce9e4ba44484f474c0bde0158424fce1b61432b6249aee64f47d97",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 14,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "71a8355b6593a774de4aa164f86233c709c138375aaf1a3b6145226f51b8bb1b",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        33,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "4948cae46fbe91a63ba0ba2239482c35ff3b05fe0595c5e53767db941e1364b9",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ac5a2181b0575fbbd5d42c1314469e48b0ebb0638b4a3a900f03a7d1d8c31573",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "d9bb17b153a2c56ab4231fdaffa78aa4ce54c2b18d8396743ea6671173ecf302",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "fc946e26668354a57cb6f5e023ec28a713d6647b6220d1624527d51dcac57b14",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "dd306cc3e5a8234f7f8432cdc90800113f1251d4997c9fd6cc7794e5f789c63c",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "65b033c43b30cd10983965c56ff2ad8bf5cf2942959ff57d1eb508169500bf21",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "f1b0c246ff2e1fa2984c2ec9258b70435e4a76fcfcdee4415eed56935d032323",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "1e69e000368d8025ce72fe29d67f75d4908032a8771d7f76835ae38c135226f6",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "364299dca6a94fd55a379aecae0924efa4c7cbb1994a6c6294e4dfb130489587",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 14,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "059a7a28a3942249f715e0703290ec31972619c4689b0b64017e3a167ccb86c1",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "d1f35d80f1a7be7b1d6b68d2316dc8acda629016311b4aa24ddb508a97f380a9",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 15,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ea9b1ff4a4a61703578fc9579a3b536147b601a89e0c141bb7d5dd2caffc40dc",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "ea45d9cb2653f4d39015730d0fb0af576472c4f10ad998a4d9d49695fd006dbd",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 15,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2801e5a479ebb971e35a2c90b70711910bb80c927c96a02821a8794e86e2b2e2",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        33,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "1afd68f912d3c609f8894cb8e7d3f98065c7d90ac3e6a4942d1fc59c7b010e37",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 10,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c29e6a234ee45bf28447c2e57f60afaac47d691f297a3bf28be7af23d4fd3230",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "271467bf72ef48b1276909a13859cc2a397aa88c24537312f12c98947d98f1d1",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 11,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e654e66fc8ac8ea559f6abec8b48dccce8989ddd0c21a0832d423a33303d5087",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "1792a5eb61c5599f3bbf547dd323ac3592d5229d85a45d5d3cb4ab2c9d349e12",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 12,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "35b76c6eaf2f0038ea88771c6bbf3d6d9a1a24fb6ca48c25417e6002b88239c4",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "ba068fb6c103ecafcc8ef5acf484e3e4a0946852620b7c1c9597084df62b835f",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 13,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "822101199ceff3078473ef208ce3025e7bcb5c984ea8b410f8e786b25792aa88",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "c777d498dd576294185fce360097c5c29c24cb7678153d24aaf733d197427e9a",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 14,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5591e964179543b11c10e74f8e7afc0aa91bd0898ac46d9612f351a6dc6646fa",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "a07cb95dc919093fed9e4e7c63dd2d66332a1f729908cd7a0e3ca2370919b2d6",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 15,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d377815923d6286f1628984168e6cff063805c65b8094fa92b975a8911f1b112",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "11e0572d7b2a8604afa50ca595859bc78c51c79ef3465aabff0127771c43eae2",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        50,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 16,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c13a67b75ee0a2b61279ee6b9d6382888fc8c9923cf9faad9d3187ab06de743b",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        64,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "31b1f6e05c5a6c4dbc4a0875064c7f4e99f6ea7a890f28439948ce088abc6c52",
+      "current_objectives": [
+        6,
+        1,
+        1,
+        2,
+        51,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 16,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "e977bf314c8ba92f9b1eba78533fc8f1b4718fffbb926ff35f69adc492f99ac6",
+      "legacy_objectives": [
+        6,
+        0,
+        0,
+        2,
+        33,
+        6
+      ]
+    },
+    {
+      "current_entry_sha256": "dfb05502ee2e5877b7ee2c17f5b2634ae442033bc1315890492793fb192ee77d",
+      "current_objectives": [
+        17,
+        5,
+        12,
+        8,
+        41,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 2,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "c0366875de3606698d1cbad06fc2a58dd639b91ba336d6ca436d176800738f95",
+      "legacy_objectives": [
+        17,
+        1,
+        2,
+        7,
+        45,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "00e3122648d44e1190ad3fe589efdf0dcdfb79192718626e7c4b0bee9041e39a",
+      "current_objectives": [
+        16,
+        6,
+        16,
+        10,
+        44,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "9ed31c67fb69c37f465281a64c46b105bc1177b460644ad4dc9d77e204bd12f3",
+      "legacy_objectives": [
+        16,
+        1,
+        1,
+        6,
+        41,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "efcd61308534c72facb7e53e960e21980da67a5645825d55bb59419d9f5df2bc",
+      "current_objectives": [
+        16,
+        6,
+        16,
+        10,
+        44,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 3,
+        "day2_fallback": "strict",
+        "organizer_capacity": 3,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "dcc62969c3e2a88a657aaaad571ed02353bb85cc18f8d7e43f1958a26d9feda9",
+      "legacy_objectives": [
+        16,
+        1,
+        1,
+        6,
+        41,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "4d6d32e4c4b40d4c570f334a385e3de68c5096d337ed1e9b5580fe1df06b72b4",
+      "current_objectives": [
+        13,
+        4,
+        10,
+        8,
+        46,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 2,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "205904ee68095200e30325eecf6578ebd9426b7b4416aa9803ad744a40f7f465",
+      "legacy_objectives": [
+        13,
+        1,
+        2,
+        5,
+        64,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "ab7a55336ed21dd286ffceb7b83489c9faed9e5b70e74d9e7e41dda8f1a52b17",
+      "current_objectives": [
+        13,
+        4,
+        10,
+        8,
+        46,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "caf91997531b2a2d1e6aa54f4eb00a70a046d773db4fb0e56a988e4cf7aac991",
+      "legacy_objectives": [
+        13,
+        1,
+        1,
+        5,
+        48,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "94242a11a6a13301b4fc7a0ad54b14fb61714941482bb04e30f6d9f0a4aa31bc",
+      "current_objectives": [
+        12,
+        4,
+        7,
+        7,
+        47,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "80679e6d7f88df61e425972e0041095ad7404c5c1e31aa065096f35c261b0baa",
+      "legacy_objectives": [
+        12,
+        0,
+        0,
+        5,
+        54,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "690a0c716ad91c30b8126f151d664359b15c7fe832d559f9c8c378fe747fb6ae",
+      "current_objectives": [
+        12,
+        4,
+        7,
+        7,
+        47,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 4,
+        "day2_fallback": "strict",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "481822b883eae1071edd0f41c5bd11ca554d2e0e805998037286d7684f0d8f6c",
+      "legacy_objectives": [
+        12,
+        0,
+        0,
+        5,
+        54,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "ffb547e4c5161029b89a94c708081cd7c0511ad3a3385c1cca72fa324337ecde",
+      "current_objectives": [
+        11,
+        4,
+        9,
+        6,
+        54,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 2,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4d4f0fd936b519a93313e1dcdb3c486a1234f0a5fe257998aeba21bfbff9262e",
+      "legacy_objectives": [
+        11,
+        1,
+        2,
+        4,
+        28,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "8ed8dc33da8245259a12577639b858f37b997532e8fbff43864610f7df52f38e",
+      "current_objectives": [
+        10,
+        1,
+        2,
+        5,
+        52,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_sum_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "2f7b8cc6677bb1f60e348533d58143b7a0d234887b0e7685b471f35bb3958a7f",
+      "legacy_objectives": [
+        10,
+        1,
+        1,
+        3,
+        56,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "89a0d99a08c1bce1e47cfd2582486d2301a8afcb7f83a6e60d259fcc704d4fc1",
+      "current_objectives": [
+        10,
+        1,
+        2,
+        5,
+        52,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f60c430673200aaa90b61f514da43ebb978180e5860f7913b27aec915f8e67d1",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        4,
+        63,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "86c9e2682c362fdc3aeeb4a39db5022644f3fe5faac9c9efef733a8f006c0c45",
+      "current_objectives": [
+        10,
+        1,
+        2,
+        5,
+        52,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "0568a7fb8ac583dd9fded3e83e29c31afd2007b6990ed9d5acabf4fd38449ac0",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        4,
+        64,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "0f6c0cf5e2bc27254cdbea22b18c4e03d6995ddf8e26e78a179b584ddaae2c41",
+      "current_objectives": [
+        10,
+        4,
+        7,
+        6,
+        56,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 5,
+        "day2_fallback": "strict",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "49e16825ad30baa51713b93caacfc7952a3ef3cca244711906bbc0ec24ebd015",
+      "legacy_objectives": [
+        10,
+        0,
+        0,
+        4,
+        64,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "df2411ab85a6ba3098bea14818515a6e69d1903679a43dd66a491bb5bf89a9e3",
+      "current_objectives": [
+        9,
+        2,
+        3,
+        3,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 3,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "d4ab6aafdad7945ca9b82244187e7adda2bed11248a012038f820632ae81f338",
+      "legacy_objectives": [
+        9,
+        1,
+        1,
+        3,
+        27,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "e65c3240e889639bcb8d498c6aa8b131d05d2529b660cceb8ee4bef3d89cf89b",
+      "current_objectives": [
+        9,
+        2,
+        3,
+        3,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "f7fb543bda1ea7da815ae9a79a7db3e8d3ddc6709e704d23962facdadd1f387b",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        3,
+        64,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "d04e4186421325c79f0ed5f466b2402c18635e7aff7fb733dff7dbedb3209ae5",
+      "current_objectives": [
+        9,
+        2,
+        3,
+        3,
+        51,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "ee016dea6ff6e2ba35063b31166d6f79cf336a3a0580acef6b519c05cf3ef070",
+      "legacy_objectives": [
+        9,
+        0,
+        0,
+        3,
+        55,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "f09a41db37d625e5536f606562a64756b7a6ce371b3a1714008dc59da95a613a",
+      "current_objectives": [
+        8,
+        2,
+        4,
+        4,
+        54,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4adbe0f140faf4dd2d31f342c1a66b73bd627a042353da9a745df1e643ca0cbe",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        64,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "3abe2413ca8013dc2144e8b8ecfaec2770aeacc850c3d324c1a39508f2b63732",
+      "current_objectives": [
+        8,
+        2,
+        4,
+        4,
+        54,
+        0
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 6,
+        "day2_fallback": "strict",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7e0ed54d3690d3cdd39302b4982d38cabc9d21b03463dc35c970c85bae12ef6b",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        64,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "8cb2045238e8fa3626e3aa18c7e5b307133c35a6dd2f0565471c23cb601a4416",
+      "current_objectives": [
+        8,
+        1,
+        3,
+        4,
+        58,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "5a04f1ace09be1ff343c9e2885c492810aa857c70a2ebcc962ebbeb2570b43c5",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "76c4677f2fefd67f84188cadef8b8d0516112965b83990330f4ddebf3fc3d8a1",
+      "current_objectives": [
+        8,
+        1,
+        3,
+        4,
+        58,
+        3
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "06d97e5d4148f5cc94008d4bec7e9e5f9aae5ec1468ad277d8904ae51e2355fe",
+      "legacy_objectives": [
+        8,
+        0,
+        0,
+        3,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "f6ad41bd5f7326948ea2161e8cc3779db4474ba7f040b8e097f957f5069cb18e",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        59,
+        1
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7769f535860907372a859ceb6d1dd7235eac0e0976345ead4aa3ca05729a4659",
+      "legacy_objectives": [
+        7,
+        1,
+        1,
+        2,
+        58,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "818aac1ee0d83e5baecea8c9374557cea5843e02fc3777e231eaa7dc2c7274b1",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        59,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "34380ae31e8da141e9e702added0c841aad3cada8b6f448cbb0041545abf655c",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        3,
+        64,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "d16e46c5cc11baa29f7fdb91d83e76ba3b18934b3fd38e7d9d0679bf453b4140",
+      "current_objectives": [
+        7,
+        2,
+        3,
+        3,
+        49,
+        1
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 7,
+        "day2_fallback": "strict",
+        "organizer_capacity": 7,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "3258ec29c5ba2b5f773fd7b1d26f6fb3d617378a65ba33c3d099a84ae03ffe4d",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        3,
+        64,
+        1
+      ]
+    },
+    {
+      "current_entry_sha256": "d44a10c4401e7eb6851f9260706cbe69e3b06a219deda5de08353e8baffc592a",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        52,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 4,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "783a13a44811757c15bf4794cf70d4521436aa0ad53d9d40c66edf31083d5730",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "1952f20f8feb9d7eacf6476b61c54171afbe72abe1ce7ac5eda94a9cbaa645e6",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        52,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "7446301bd246b324a05e6d6a151c45a1f32ac26d6f1a7500c998a2c62deb657c",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        61,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "5af15e185e5d3867a03af1c91987eac9237c89876e4f67754ce01bd0c39c7d2e",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        52,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "141069c15c2c8cc054ecb71c9473012acecfe62d0224b53bfecd571df1a99218",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        60,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "df9a18a95d74f374bb8a61cc7b447c2fe39c4486607cb6c7fa36f9305ffe844e",
+      "current_objectives": [
+        7,
+        1,
+        2,
+        3,
+        52,
+        2
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "69c1d0b1ef4d67a1c687d1288ba82a4798e7a1d4967b4b82302cea703fcd51e5",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        62,
+        3
+      ]
+    },
+    {
+      "current_entry_sha256": "85470396878381d3a2c1b3a515c2c3144e37b170e7df6fa0b953c1aa875f9477",
+      "current_objectives": [
+        6,
+        1,
+        2,
+        1,
+        53,
+        0
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "b762fdf5f080ce5902427d232e614149a81e8f3403e184f9b51583506634f91e",
+      "legacy_objectives": [
+        6,
+        1,
+        2,
+        1,
+        32,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "67233e5e76f0790bcae7334df3511826fe422abf86eee45f2984a473c83f511b",
+      "current_objectives": [
+        6,
+        1,
+        2,
+        1,
+        53,
+        0
+      ],
+      "first_differing_objective": "team_court_change_count",
+      "key": {
+        "court_count": 8,
+        "day2_fallback": "strict",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "4449d1114c48bfd087c0148b6121e937c6543736a2cf5a9a32f5811fa912ce5e",
+      "legacy_objectives": [
+        6,
+        1,
+        2,
+        1,
+        32,
+        0
+      ]
+    },
+    {
+      "current_entry_sha256": "569d68ea266a0e1a224a587ff26432d9580165479f87b8c0ec6334f91e1a1168",
+      "current_objectives": [
+        7,
+        1,
+        1,
+        3,
+        54,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 5,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "6f511f1b7a2121dba744c5bf36e137977d1246373ccab15bed83655138e9823f",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        62,
+        4
+      ]
+    },
+    {
+      "current_entry_sha256": "26ca3fbf3d74a036b8c7c4ec957d68cab2c187b2cb3e9e72616f6f1feaeddf6b",
+      "current_objectives": [
+        7,
+        0,
+        0,
+        3,
+        60,
+        4
+      ],
+      "first_differing_objective": "maximum_team_wait_sections",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 6,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "fa16c324b440e14927648590f77ddb5a48a871899d92a5a0718b61b93160cc98",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        62,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "d3ea74fad1ed1aa74a527e02f8d146b5a4a7fac52b5e7caefeee296df40b7e6f",
+      "current_objectives": [
+        7,
+        1,
+        3,
+        3,
+        54,
+        4
+      ],
+      "first_differing_objective": "non_primary_final_max_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 7,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "a0c2c91785a11dfbdcc470fa7d8c5072db4e3611a6ca898c0849ef9be55b8d16",
+      "legacy_objectives": [
+        7,
+        0,
+        0,
+        2,
+        64,
+        5
+      ]
+    },
+    {
+      "current_entry_sha256": "307427792ca8e015b051f1fef459a4a45af6db81b6f07990eb949b7449bd9355",
+      "current_objectives": [
+        6,
+        1,
+        2,
+        1,
+        53,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_sum_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 8,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "45f4850d9080a64b5d32f7ce31c15a72c337a041b20199ca5c2883f61c9c7f07",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        2,
+        61,
+        2
+      ]
+    },
+    {
+      "current_entry_sha256": "51af113ca4d5ebd6d86349855c5c68c6afddded15fef729dc54e0be8050e561d",
+      "current_objectives": [
+        6,
+        1,
+        2,
+        1,
+        53,
+        6
+      ],
+      "first_differing_objective": "non_primary_final_sum_gap",
+      "key": {
+        "court_count": 9,
+        "day2_fallback": "organizer",
+        "organizer_capacity": 9,
+        "pool_count": 4,
+        "pool_size": 8,
+        "ruleset_id": "placement-schedule-v1"
+      },
+      "legacy_entry_sha256": "9336840f5ca150e333328521541ce80fafbf17c1c7d2c1b41839f465788a8824",
+      "legacy_objectives": [
+        6,
+        1,
+        1,
+        2,
+        64,
+        1
+      ]
+    }
+  ],
+  "topologies": [
+    [
+      3,
+      8
+    ],
+    [
+      2,
+      16
+    ],
+    [
+      4,
+      8
+    ]
+  ]
+}

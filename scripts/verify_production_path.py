@@ -15,11 +15,25 @@ from typing import Any
 
 from football_scheduler.api_handler import MAX_HTTP_BODY_BYTES, lambda_handler
 from football_scheduler.fixtures import (
+    make_maximum_four_tournament_schedule_creation_request,
     make_maximum_schedule_creation_request,
     make_sixteen_team_schedule_creation_request,
+    make_twenty_four_team_schedule_creation_request,
 )
 
 _HASH_SEEDS = ("1", "987654321")
+_PROFILE_FACTORIES = {
+    "sixteen": make_sixteen_team_schedule_creation_request,
+    "twenty-four": make_twenty_four_team_schedule_creation_request,
+    "maximum": make_maximum_schedule_creation_request,
+    "maximum-four": make_maximum_four_tournament_schedule_creation_request,
+}
+_PROFILE_MATCH_COUNTS = {
+    "sixteen": 24,
+    "twenty-four": 36,
+    "maximum": 64,
+    "maximum-four": 48,
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,7 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--profile",
-        choices=("sixteen", "maximum"),
+        choices=tuple(_PROFILE_FACTORIES),
         default="maximum",
         help="検証構成。既定は32チームのmaximum",
     )
@@ -63,11 +77,7 @@ def _normalized_hash(result: dict[str, Any]) -> str:
 
 
 def _event(profile: str) -> dict[str, object]:
-    request = (
-        make_sixteen_team_schedule_creation_request()
-        if profile == "sixteen"
-        else make_maximum_schedule_creation_request()
-    )
+    request = _PROFILE_FACTORIES[profile]()
     body = json.dumps(
         request,
         ensure_ascii=False,
@@ -110,7 +120,7 @@ def _worker(profile: str, maximum_seconds: float) -> int:
         isinstance(item, dict) and item.get("code") == "PLACEMENT_TEMPLATE_FALLBACK_USED"
         for item in diagnostics or ()
     )
-    expected_match_count = 24 if profile == "sixteen" else 64
+    expected_match_count = _PROFILE_MATCH_COUNTS[profile]
     errors: list[str] = []
     if result.get("status") not in {"OPTIMAL", "FEASIBLE"}:
         errors.append("STATUS")
@@ -193,7 +203,7 @@ def main() -> int:
             seed = _HASH_SEEDS[attempt % len(_HASH_SEEDS)]
             payload = _run_worker(args.profile, seed, args.maximum_seconds)
             payloads.append(payload)
-            expected_match_count = 24 if args.profile == "sixteen" else 64
+            expected_match_count = _PROFILE_MATCH_COUNTS[args.profile]
             print(
                 f"{attempt + 1}回目(hash seed={seed}): {payload['status']}、"
                 f"{payload['elapsed_seconds']:.3f}秒、{payload['response_bytes']:,}バイト、"

@@ -4,8 +4,11 @@ import pytest
 
 from football_scheduler.models import Day2Fallback
 from football_scheduler.placement_template_contract import (
+    LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     PLACEMENT_OBJECTIVES,
     CanonicalMatchPosition,
+    PlacementOptimizationTarget,
+    PlacementOptimizationTargetManifest,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateObjective,
@@ -14,6 +17,7 @@ from football_scheduler.placement_template_contract import (
     PlacementTemplateStatus,
     expected_placement_template_keys,
     placement_entry_digest,
+    placement_optimization_target_manifest_digest,
 )
 
 
@@ -91,6 +95,56 @@ def test_optional_optimizer_provenance_is_omitted_when_unused() -> None:
     dumped = entry.model_dump(mode="json")
 
     assert "optimization_version" not in dumped["provenance"]
+
+
+def test_v2_optimizer_provenance_is_accepted() -> None:
+    entry = _entry()
+    provenance = entry.provenance.model_copy(
+        update={"optimization_version": LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION}
+    )
+
+    restored = PlacementTemplateEntry.model_validate(
+        entry.model_copy(update={"provenance": provenance, "sha256": ""}).model_dump(mode="json")
+    )
+
+    assert restored.provenance.optimization_version == LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+
+
+def test_target_manifest_requires_legacy_improvement_and_round_trips_digest() -> None:
+    target = PlacementOptimizationTarget(
+        key=PlacementTemplateKey(
+            pool_count=3,
+            pool_size=8,
+            court_count=2,
+            organizer_capacity=2,
+            day2_fallback="organizer",
+        ),
+        current_entry_sha256="a" * 64,
+        legacy_entry_sha256="b" * 64,
+        current_objectives=(8, 2, 3, 5, 1, 1),
+        legacy_objectives=(8, 1, 3, 5, 1, 1),
+        first_differing_objective="non_primary_final_max_gap",
+    )
+    manifest = PlacementOptimizationTargetManifest(
+        current_fixture_sha256="c" * 64,
+        legacy_fixture_sha256="d" * 64,
+        topologies=((3, 8), (2, 16), (4, 8)),
+        targets=(target,),
+    )
+    completed = manifest.model_copy(
+        update={"sha256": placement_optimization_target_manifest_digest(manifest)}
+    )
+
+    restored = PlacementOptimizationTargetManifest.model_validate(completed.model_dump(mode="json"))
+
+    assert restored.sha256 == placement_optimization_target_manifest_digest(restored)
+
+    with pytest.raises(ValueError, match="currentより良いlegacy"):
+        PlacementOptimizationTarget.model_validate(
+            target.model_copy(update={"legacy_objectives": target.current_objectives}).model_dump(
+                mode="json"
+            )
+        )
 
 
 def test_entry_rejects_non_prefix_objective_proofs() -> None:
