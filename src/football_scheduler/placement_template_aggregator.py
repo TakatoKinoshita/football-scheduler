@@ -598,6 +598,50 @@ def render_issue73_quality_report(
             checkpoint.termination_reason or "unspecified",
         ] += checkpoint.wall_time_seconds
 
+    groups = _topology_groups(LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES)
+    current_better = sum(
+        comparison_counts[topology, fallback, "current", LexicographicResult.BETTER.value]
+        for topology, fallback in groups
+    )
+    current_equal = sum(
+        comparison_counts[topology, fallback, "current", LexicographicResult.EQUAL.value]
+        for topology, fallback in groups
+    )
+    current_worse = sum(
+        comparison_counts[topology, fallback, "current", LexicographicResult.WORSE.value]
+        for topology, fallback in groups
+    )
+    legacy_better = sum(
+        comparison_counts[topology, fallback, "legacy", LexicographicResult.BETTER.value]
+        for topology, fallback in groups
+    )
+    legacy_equal = sum(
+        comparison_counts[topology, fallback, "legacy", LexicographicResult.EQUAL.value]
+        for topology, fallback in groups
+    )
+    legacy_worse = sum(
+        comparison_counts[topology, fallback, "legacy", LexicographicResult.WORSE.value]
+        for topology, fallback in groups
+    )
+    selected_current = sum(
+        source_counts[topology, fallback, BaselineSource.CURRENT.value]
+        for topology, fallback in groups
+    )
+    selected_optimizer = sum(
+        source_counts[topology, fallback, BaselineSource.OPTIMIZER.value]
+        for topology, fallback in groups
+    )
+    selected_legacy = sum(
+        source_counts[topology, fallback, BaselineSource.LEGACY.value]
+        for topology, fallback in groups
+    )
+    legacy_available = legacy_better + legacy_equal + legacy_worse
+    used_sections_proven = sum(
+        proof_counts[topology, fallback, "used_sections", "after"] for topology, fallback in groups
+    )
+    legacy_wall_seconds = sum(status_wall.values())
+    optimizer_wall_seconds = sum(checkpoint_wall.values())
+
     lines = [
         "# Issue #73 placement template quality report",
         "",
@@ -608,6 +652,30 @@ def render_issue73_quality_report(
         f"- Target manifest SHA-256: `{target_manifest.sha256}`",
         f"- Catalog SHA-256: `{manifest.catalog_sha256}`",
         "- Objective order: " + ", ".join(f"`{item}`" for item in PLACEMENT_OBJECTIVES),
+        "",
+        "## 結果概要",
+        "",
+        f"- 24・32チーム用の全{len(final_entries)} entryを`available`として維持し、"
+        f"使用セクション数の最小性を全{used_sections_proven}件で証明済みのまま維持した。",
+        f"- current catalogとの比較は改善{current_better}件、同等{current_equal}件、"
+        f"悪化{current_worse}件だった。",
+        f"- legacy 30秒solverで現行規則上有効だった{legacy_available}件との比較は"
+        f"改善{legacy_better}件、同等{legacy_equal}件、悪化{legacy_worse}件だった。",
+        f"- 最終配置はcurrent {selected_current}件、optimizer-v2 {selected_optimizer}件、"
+        f"legacy {selected_legacy}件を採用した。同値時はcurrentを優先した。",
+        "- 8・16チーム用の2 shardはraw SHA-256と内部digestのguardにより変更していない。",
+        "",
+        "## 実行条件と所要時間",
+        "",
+        "- legacyはcommit `2ccf91da34717ae86a21513a43289a2e2b758617`、Python 3.14、"
+        "OR-Tools 9.15.6755、`random_seed=20260803`、`PYTHONHASHSEED=0`、"
+        "1 worker、1 key 30秒で全816件を実行した。",
+        f"- legacyのsolver wall time合計は{legacy_wall_seconds:.3f}秒だった。"
+        "3 topologyを並列実行したため、これは経過時間ではなく各keyのsolver時間の合計である。",
+        f"- optimizer-v2のstage wall time合計は{optimizer_wall_seconds:.3f}秒だった。"
+        "3 workerで並列実行したため、これも経過時間ではない。",
+        "- すべての候補はcanonical slotへ変換後、現行の審判復元、6目的の再集計、"
+        "固定配置監査、独立validatorを通過したものだけを比較対象にした。",
         "",
         "## Catalog shard digests",
         "",
@@ -628,7 +696,6 @@ def render_issue73_quality_report(
             "| --- | --- | --- | ---: |",
         )
     )
-    groups = _topology_groups(LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES)
     for topology, fallback in groups:
         for objective in PLACEMENT_OBJECTIVES:
             count = target_counts[topology, fallback, objective]

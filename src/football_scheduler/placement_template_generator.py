@@ -79,21 +79,21 @@ LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES: tuple[Topology, ...] = (
 )
 _ISSUE73_WORKER_TARGET_MANIFEST: PlacementOptimizationTargetManifest | None = None
 
-# Issue #71 must not rewrite the 24/32-team shards.  Both the bytes committed by
-# Issue #69 and their parsed canonical digest are pinned, so whitespace-only or
-# semantic rewrites are caught before an optimization run starts.
+# An Issue #71 rerun must not rewrite the 24/32-team shards.  Pin the bytes and
+# parsed canonical digests finalized by Issue #73, so a future small-topology
+# campaign preserves the latest large-topology catalog.
 UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
     (3, 8): (
-        "f05dc54dcc148e6a3dab6c75867dad84e8be6706329aae2d5ffa2c0ed8b67d38",
-        "5450d7e20501c6f14d6a36b4de2267ef68c7178b46f3e018d9733bfafb27fe2b",
+        "a8c425447529b7044fc35f9655d3e678c786ab26320536d5ad5e0dcda726a7f6",
+        "ffc05d6de33aee8a336aa26e181c0d1fad5c1e101a82b80d13ce682c5fd2dcfd",
     ),
     (2, 16): (
-        "4e44e1485c054a4de93cb902c13b439a86a4c6ef6b707ab5eba540cf3c1ab083",
-        "8942027d9f81366b2dd7ef2d278e62c32d4846086000cabe71d0d8d7d9666580",
+        "2336584da1bbf68eea8145b9f0654734e3a90a8ed8d560d0d24e36b48a33ecf1",
+        "7efcaefb7d4cad6c9ae8c5b695a1cb9b990c480134c676e116ac9ec17e82d02a",
     ),
     (4, 8): (
-        "9b4ebce9d4ab53110c10d59f5e8f59aed474d0ca6a32c29d5cd72f6db59c348a",
-        "8ba3869afbe4e8f789da9aa97a758bfb51dd5edd0a8617da99fc26af79025b70",
+        "8682c1e8e093799ead83c4c6fa25da3922e0292f4baef948f76d2e10338fa117",
+        "cf83b99ecf85d76d7ec3caddfa6b5c4e8283d101163a8f4ed95a8e77c1ade362",
     ),
 }
 

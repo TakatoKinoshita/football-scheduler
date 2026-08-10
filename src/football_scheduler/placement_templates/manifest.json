@@ -1,5 +1,5 @@
 {
-  "catalog_sha256": "16c5203722da93b179146866c208769577c7b568081269fed2e21c5bcccbbc1f",
+  "catalog_sha256": "4964fad9b7bcc7e8fa1c45a69026bc94ab6c4d52f5218a0280fc093d5b25ce6f",
   "format_version": 1,
   "generator_version": "placement-template-generator-v8",
   "ortools_version": "9.15.6755",
@@ -25,21 +25,21 @@
       "file": "placement-p3-s8.json",
       "pool_count": 3,
       "pool_size": 8,
-      "sha256": "5450d7e20501c6f14d6a36b4de2267ef68c7178b46f3e018d9733bfafb27fe2b"
+      "sha256": "ffc05d6de33aee8a336aa26e181c0d1fad5c1e101a82b80d13ce682c5fd2dcfd"
     },
     {
       "entry_count": 272,
       "file": "placement-p2-s16.json",
       "pool_count": 2,
       "pool_size": 16,
-      "sha256": "8942027d9f81366b2dd7ef2d278e62c32d4846086000cabe71d0d8d7d9666580"
+      "sha256": "7efcaefb7d4cad6c9ae8c5b695a1cb9b990c480134c676e116ac9ec17e82d02a"
     },
     {
       "entry_count": 272,
       "file": "placement-p4-s8.json",
       "pool_count": 4,
       "pool_size": 8,
-      "sha256": "8ba3869afbe4e8f789da9aa97a758bfb51dd5edd0a8617da99fc26af79025b70"
+      "sha256": "cf83b99ecf85d76d7ec3caddfa6b5c4e8283d101163a8f4ed95a8e77c1ade362"
     }
   ],
   "total_entry_count": 1360
