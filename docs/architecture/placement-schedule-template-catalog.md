@@ -101,11 +101,11 @@ aggregatorは全候補を現行規則で再監査し、currentと同値ならcur
 
 ```console
 uv run python scripts/aggregate_placement_templates.py \
-  --current-baseline artifacts/current.json.gz \
-  --legacy-baseline artifacts/legacy.json.gz \
+  --current-baseline tests/fixtures/placement-template-ab/current-pre-optimizer.json.gz \
+  --legacy-baseline tests/fixtures/placement-template-ab/legacy-2ccf91d.json.gz \
   --optimizer-directory artifacts/optimized-catalog \
   --catalog-directory src/football_scheduler/placement_templates \
-  --report artifacts/issue-71-quality-report.md
+  --report docs/architecture/issue-71-placement-quality-report.md
 ```
 
 generatorは理論下限から固定horizonを増やし、目的変数を持たない実行可能性モデルで探索する。

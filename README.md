@@ -208,6 +208,7 @@ uv run mypy
 uv run pytest
 uv run python scripts/generate_placement_templates.py --check
 uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
+uv run python scripts/verify_production_path.py --profile sixteen --repeat 2 --maximum-seconds 30
 uv run python scripts/verify_production_path.py --repeat 2 --maximum-seconds 30
 cd web
 npm run lint
@@ -217,9 +218,10 @@ npm run build:functions
 npm run test:e2e
 ```
 
-32チームの本番経路検証は異なる`PYTHONHASHSEED`の別プロセスで2回実行する。API adapter、
-2トーナメント64試合、独立・統合制約検証、30秒上限、1 MB応答上限、同じ入力の再現性を
-まとめて確認する。
+16・32チームの本番経路検証は異なる`PYTHONHASHSEED`の別プロセスで2回実行する。API adapter、
+2トーナメント24・64試合、独立・統合制約検証、30秒上限、1 MB応答上限、同じ入力の再現性を
+まとめて確認する。8・16チーム用テンプレートの下位目的再最適化結果は、
+[Issue #71品質レポート](docs/architecture/issue-71-placement-quality-report.md)に記録する。
 
 ## Lambdaコンテナのローカル検証
 

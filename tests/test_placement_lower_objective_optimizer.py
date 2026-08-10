@@ -1,24 +1,32 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from football_scheduler import day2_schedule
 from football_scheduler import placement_lower_objective_optimizer as optimizer
-from football_scheduler.day2_schedule import (
-    Day2Schedule,
-    Day2ScheduleRequest,
-    generate_day2_schedule,
-)
+from football_scheduler.day2_schedule import Day2Schedule, Day2ScheduleRequest
 from football_scheduler.models import Day2Fallback, SolverStatus
+from football_scheduler.placement_template_ab import read_deterministic_gzip
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
     PlacementTemplateKey,
 )
-from football_scheduler.placement_template_generator import StabilizedPlacementTemplateSolver
-from football_scheduler.placement_template_runtime import load_placement_template_entry
+from football_scheduler.placement_template_generator import (
+    StabilizedPlacementTemplateSolver,
+    _hydrate_and_validate_entry,
+)
+
+CURRENT_BASELINE = read_deterministic_gzip(
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "placement-template-ab"
+    / "current-pre-optimizer.json.gz"
+)
+CURRENT_BASELINE_BY_ID = {record.key.catalog_id: record for record in CURRENT_BASELINE.records}
 
 
 def _template_schedule(
@@ -35,16 +43,9 @@ def _template_schedule(
         organizer_capacity=organizer_capacity,
         day2_fallback=fallback,
     )
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=0.1)
-    base = solver._base_request(key)
-    entry = load_placement_template_entry(key)
-    assert entry.used_sections is not None
-    request = base.model_copy(
-        update={
-            "day": base.day.model_copy(update={"max_sections": entry.used_sections}),
-        }
-    )
-    schedule = generate_day2_schedule(request)
+    entry = CURRENT_BASELINE_BY_ID[key.catalog_id].candidate
+    assert entry is not None
+    request, schedule = _hydrate_and_validate_entry(entry)
     assert schedule.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
     return request, schedule
 

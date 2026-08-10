@@ -170,8 +170,7 @@ def make_sixteen_team_schedule_creation_request() -> dict[str, Any]:
         "request_kind": "schedule_creation",
         "generation_scope": "all",
         "teams": [
-            {"id": f"team-{index + 1:02d}", "name": f"チーム{index + 1}"}
-            for index in range(16)
+            {"id": f"team-{index + 1:02d}", "name": f"チーム{index + 1}"} for index in range(16)
         ],
         "courts": [
             {"id": f"court-{letter.lower()}", "name": f"{letter}コート"}

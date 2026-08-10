@@ -12,6 +12,7 @@ from shutil import copy2
 import pytest
 
 from football_scheduler.models import Day2Fallback, SolverStatus
+from football_scheduler.placement_template_ab import read_deterministic_gzip
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
@@ -49,6 +50,12 @@ from football_scheduler.placement_template_generator import (
 
 CATALOG_ROOT = (
     Path(__file__).resolve().parents[1] / "src" / "football_scheduler" / "placement_templates"
+)
+CURRENT_BASELINE = read_deterministic_gzip(
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "placement-template-ab"
+    / "current-pre-optimizer.json.gz"
 )
 
 
@@ -593,12 +600,13 @@ def test_single_aggregator_manifest_and_checks_use_parsed_json_digest(tmp_path: 
 
 
 def test_absolute_bound_reaudit_promotes_only_a_true_prefix() -> None:
-    shard = load_shard(CATALOG_ROOT / "placement-p2-s8.json")
     entry = next(
-        item
-        for item in shard.entries
-        if tuple(value.value for value in item.objectives)[1:3] == (0, 0)
-        and not item.objectives[1].optimality_proven
+        record.candidate
+        for record in CURRENT_BASELINE.records
+        if record.candidate is not None
+        and record.key.pool_size == 8
+        and tuple(value.value for value in record.candidate.objectives)[1:3] == (0, 0)
+        and not record.candidate.objectives[1].optimality_proven
     )
 
     reaudited = reaudit_absolute_lower_bound_proofs(entry)
@@ -615,7 +623,11 @@ def test_absolute_bound_reaudit_promotes_only_a_true_prefix() -> None:
 
 
 def test_lower_objective_optimization_checkpoints_and_resumes(tmp_path: Path) -> None:
-    source = load_shard(CATALOG_ROOT / "placement-p2-s4.json").entries[4]
+    source = next(
+        record.candidate
+        for record in CURRENT_BASELINE.records
+        if record.candidate is not None and record.key.pool_size == 4
+    )
     optimizer = _KeepIncumbentOptimizer()
 
     optimized = optimize_template_entry_lower_objectives(
@@ -627,7 +639,7 @@ def test_lower_objective_optimization_checkpoints_and_resumes(tmp_path: Path) ->
         source,
         output_directory=tmp_path,
         resume=True,
-        optimizer=lambda *_args, **_kwargs: pytest.fail("resume must not call optimizer"),  # type: ignore[arg-type]
+        optimizer=lambda *_args, **_kwargs: pytest.fail("resume must not call optimizer"),
     )
 
     checkpoint_directory = optimization_checkpoint_directory(tmp_path, source.key)
