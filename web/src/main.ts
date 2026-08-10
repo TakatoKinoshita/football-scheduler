@@ -61,6 +61,12 @@ import {
 } from "./same-rank-league";
 import { AutosaveController, TournamentStorage } from "./storage";
 import {
+  evaluateTournamentResultDraft,
+  TournamentResultDraftController,
+  tournamentPlanFingerprint,
+  type TournamentResultDraft,
+} from "./tournament-result-drafts";
+import {
   buildTournamentBracketModel,
   TournamentBracketError,
   type TournamentBracketScheduleDetails,
@@ -672,15 +678,7 @@ let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
 let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let tournamentResultsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
-const tournamentResultDrafts = new Map<
-  string,
-  {
-    regularHome: string;
-    regularAway: string;
-    penaltyHome: string;
-    penaltyAway: string;
-  }
->();
+const tournamentResultDrafts = new TournamentResultDraftController();
 
 const nameInput = requiredElement<HTMLInputElement>("#tournament-name");
 const teamsInput = requiredElement<HTMLTextAreaElement>("#teams");
@@ -828,6 +826,45 @@ function tournamentResults(): JsonObject[] {
   return asObjectArray(documentState.tournament.result?.tournament_results);
 }
 
+function activateTournamentResultDraftPlan(plan: JsonObject): string {
+  const fingerprint = tournamentPlanFingerprint(plan);
+  if (tournamentResultDrafts.planFingerprint !== fingerprint) {
+    tournamentResultDrafts.activate(fingerprint);
+    void storage.clearTournamentResultDrafts();
+  }
+  return fingerprint;
+}
+
+function persistTournamentResultDrafts(): void {
+  const state = tournamentResultDrafts.snapshot();
+  const operation = state === undefined
+    ? storage.clearTournamentResultDrafts()
+    : storage.saveTournamentResultDrafts(state);
+  void operation.catch(() => {
+    tournamentResultsStatus.textContent =
+      "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
+  });
+}
+
+function clearTournamentResultDrafts(): void {
+  tournamentResultDrafts.reset();
+  void storage.clearTournamentResultDrafts().catch(() => {
+    tournamentResultsStatus.textContent =
+      "入力途中の得点を消去できませんでした。画面を再読み込みしてください。";
+  });
+}
+
+async function restoreTournamentResultDrafts(): Promise<void> {
+  const plan = asObject(documentState.tournament.result?.tournament_plan);
+  if (plan === undefined) {
+    tournamentResultDrafts.reset();
+    return;
+  }
+  const fingerprint = tournamentPlanFingerprint(plan);
+  const restored = await storage.loadTournamentResultDrafts(fingerprint);
+  tournamentResultDrafts.activate(fingerprint, restored ?? {});
+}
+
 function sameRankResults(): JsonObject[] {
   return asObjectArray(documentState.tournament.result?.same_rank_league_results);
 }
@@ -849,7 +886,7 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
     sameRankParticipantResolution(existingSameRankPlan) === "resolved";
   const nextResult: JsonObject = { ...result, league_results: results };
   if (standings === undefined) {
-    tournamentResultDrafts.clear();
+    clearTournamentResultDrafts();
     delete nextResult.league_standings;
     delete nextResult.tournament_results;
     delete nextResult.final_standings;
@@ -1210,6 +1247,7 @@ function refreshTournamentResultsEnabled(): void {
     legacyCompatibility ||
     plan === undefined ||
     !complete ||
+    tournamentResultDrafts.hasPendingDrafts ||
     !navigator.onLine ||
     tournamentResultsTurnstileToken.length === 0;
 }
@@ -2466,10 +2504,9 @@ function tournamentScoreInput(
   disabled: boolean,
 ): HTMLInputElement {
   const input = window.document.createElement("input");
-  input.type = "number";
-  input.min = "0";
-  input.step = "1";
+  input.type = "text";
   input.inputMode = "numeric";
+  input.pattern = "[0-9]*";
   input.className = "score-input";
   input.setAttribute("aria-label", label);
   input.value = value;
@@ -2570,12 +2607,44 @@ function renderFinalStandings(
   content.append(section);
 }
 
+function renderResultPreservingScoreFocus(): void {
+  window.setTimeout(() => {
+    const active = window.document.activeElement;
+    const row = active instanceof HTMLInputElement
+      ? active.closest<HTMLTableRowElement>("tr[data-match-id]")
+      : null;
+    const matchId = row?.dataset.matchId;
+    const scoreField = active instanceof HTMLInputElement
+      ? active.dataset.scoreField
+      : undefined;
+    const selectionStart = active instanceof HTMLInputElement ? active.selectionStart : null;
+    const selectionEnd = active instanceof HTMLInputElement ? active.selectionEnd : null;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    renderResult();
+    if (matchId === undefined || scoreField === undefined) return;
+    const replacementRow = [...window.document.querySelectorAll<HTMLTableRowElement>(
+      "#tournament-results-input tr[data-match-id]",
+    )].find((candidate) => candidate.dataset.matchId === matchId);
+    const replacement = replacementRow?.querySelector<HTMLInputElement>(
+      `input[data-score-field="${scoreField}"]`,
+    );
+    if (replacement === undefined || replacement === null) return;
+    replacement.focus({ preventScroll: true });
+    if (selectionStart !== null && selectionEnd !== null) {
+      replacement.setSelectionRange(selectionStart, selectionEnd);
+    }
+    window.scrollTo(scrollX, scrollY);
+  }, 0);
+}
+
 function renderTournamentResultsInput(
   content: HTMLElement,
   schedule: JsonObject,
   plan: JsonObject,
   teamNames: Map<string, string>,
 ): void {
+  activateTournamentResultDraftPlan(plan);
   const progress = resolveTournamentProgress(plan, tournamentResults());
   const presentation = buildWebSchedulePresentation("day2", schedule);
   const scheduleOrder = new Map(
@@ -2634,12 +2703,14 @@ function renderTournamentResultsInput(
         (match.result === undefined ? "" : String(match.result.regular_score_home)),
       !ready,
     );
+    regularHome.dataset.scoreField = "regularHome";
     const regularAway = tournamentScoreInput(
       `${homeName} 対 ${awayName}・${awayName}の通常得点`,
       draft?.regularAway ??
         (match.result === undefined ? "" : String(match.result.regular_score_away)),
       !ready,
     );
+    regularAway.dataset.scoreField = "regularAway";
     const regularCell = window.document.createElement("td");
     regularCell.append(regularHome, window.document.createTextNode(" - "), regularAway);
     row.append(regularCell);
@@ -2652,6 +2723,7 @@ function renderTournamentResultsInput(
           : String(match.result.penalty_score_home)),
       !ready,
     );
+    penaltyHome.dataset.scoreField = "penaltyHome";
     const penaltyAway = tournamentScoreInput(
       `${homeName} 対 ${awayName}・${awayName}のPK得点`,
       draft?.penaltyAway ??
@@ -2660,109 +2732,137 @@ function renderTournamentResultsInput(
           : String(match.result.penalty_score_away)),
       !ready,
     );
+    penaltyAway.dataset.scoreField = "penaltyAway";
     const penaltyFields = window.document.createElement("span");
     penaltyFields.className = "penalty-score-fields";
     penaltyFields.append(penaltyHome, window.document.createTextNode(" - "), penaltyAway);
     const penaltyCell = window.document.createElement("td");
     penaltyCell.append(penaltyFields);
     row.append(penaltyCell);
-    const saved = appendTextElement(
-      row,
-      "td",
-      !ready ? "前提試合待ち" : match.result === undefined ? "未入力" : "保存済み",
-      "muted",
+    const savedDraft: TournamentResultDraft | undefined = match.result === undefined
+      ? undefined
+      : {
+          regularHome: String(match.result.regular_score_home),
+          regularAway: String(match.result.regular_score_away),
+          penaltyHome: match.result.penalty_score_home === undefined
+            ? ""
+            : String(match.result.penalty_score_home),
+          penaltyAway: match.result.penalty_score_away === undefined
+            ? ""
+            : String(match.result.penalty_score_away),
+        };
+    const stateCell = window.document.createElement("td");
+    stateCell.className = "tournament-result-state-cell";
+    const stateLabel = appendTextElement(stateCell, "span", "", "tournament-result-state-label");
+    const errorArea = appendTextElement(
+      stateCell,
+      "span",
+      "",
+      "tournament-result-error",
     );
+    errorArea.id = `tournament-result-error-${match.matchId}`;
+    errorArea.setAttribute("aria-live", "polite");
+    const cancelDraft = window.document.createElement("button");
+    cancelDraft.type = "button";
+    cancelDraft.className = "text-button tournament-result-cancel";
+    cancelDraft.textContent = "変更を取り消す";
+    cancelDraft.hidden = match.result === undefined;
+    stateCell.append(cancelDraft);
+    row.append(stateCell);
+    for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
+      input.setAttribute("aria-describedby", errorArea.id);
+    }
 
     const updatePenaltyVisibility = (): void => {
       const home = scoreValue(regularHome);
       const away = scoreValue(regularAway);
       const tied = typeof home === "number" && typeof away === "number" && home === away;
       penaltyFields.hidden = !tied;
-      if (!tied) {
+      if (typeof home === "number" && typeof away === "number" && !tied) {
         penaltyHome.value = "";
         penaltyAway.value = "";
       }
     };
-    updatePenaltyVisibility();
-    const updateDraft = (): void => {
-      tournamentResultDrafts.set(match.matchId, {
-        regularHome: regularHome.value,
-        regularAway: regularAway.value,
-        penaltyHome: penaltyHome.value,
-        penaltyAway: penaltyAway.value,
-      });
-      updatePenaltyVisibility();
+    const draftFromInputs = (): TournamentResultDraft => ({
+      regularHome: regularHome.value,
+      regularAway: regularAway.value,
+      penaltyHome: penaltyHome.value,
+      penaltyAway: penaltyAway.value,
+    });
+    const renderDraftState = (currentDraft = tournamentResultDrafts.get(match.matchId)): void => {
+      for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
+        input.removeAttribute("aria-invalid");
+      }
+      errorArea.textContent = "";
+      cancelDraft.disabled = currentDraft === undefined;
+      if (!ready) {
+        stateLabel.textContent = "前提試合待ち";
+        return;
+      }
+      if (currentDraft === undefined) {
+        stateLabel.textContent = match.result === undefined ? "未入力" : "保存済み";
+        return;
+      }
+      stateLabel.textContent = "入力中";
+      const evaluation = evaluateTournamentResultDraft(currentDraft);
+      if (evaluation.status !== "invalid") return;
+      errorArea.textContent = evaluation.message;
+      if (evaluation.message.startsWith("通常得点")) {
+        regularHome.toggleAttribute("aria-invalid", scoreValue(regularHome) === undefined);
+        regularAway.toggleAttribute("aria-invalid", scoreValue(regularAway) === undefined);
+      } else {
+        const tiedPenalty = evaluation.message.startsWith("PK戦");
+        penaltyHome.toggleAttribute(
+          "aria-invalid",
+          tiedPenalty || scoreValue(penaltyHome) === undefined,
+        );
+        penaltyAway.toggleAttribute(
+          "aria-invalid",
+          tiedPenalty || scoreValue(penaltyAway) === undefined,
+        );
+      }
     };
+    const recordDraft = (): TournamentResultDraft => {
+      updatePenaltyVisibility();
+      const currentDraft = draftFromInputs();
+      const baseline = savedDraft ?? {
+        regularHome: "",
+        regularAway: "",
+        penaltyHome: "",
+        penaltyAway: "",
+      };
+      const changed = Object.keys(baseline).some(
+        (key) => currentDraft[key as keyof TournamentResultDraft] !==
+          baseline[key as keyof TournamentResultDraft],
+      );
+      if (changed) tournamentResultDrafts.set(match.matchId, currentDraft);
+      else tournamentResultDrafts.delete(match.matchId);
+      persistTournamentResultDrafts();
+      renderDraftState(changed ? currentDraft : undefined);
+      refreshTournamentResultsEnabled();
+      return currentDraft;
+    };
+    updatePenaltyVisibility();
+    renderDraftState(draft);
     for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
-      input.addEventListener("input", updateDraft);
+      input.addEventListener("input", recordDraft);
     }
 
-    const removeSavedResult = (message: string): void => {
-      if (match.result === undefined) {
-        saved.textContent = message;
-        saved.className = "field-error";
-        return;
-      }
-      const changed = applyTournamentResultChange(
-        plan,
-        tournamentResults(),
-        match.matchId,
-      );
-      for (const descendant of tournamentMatchDescendants(plan, match.matchId)) {
-        tournamentResultDrafts.delete(descendant);
-      }
-      saveTournamentResults(changed.results);
-      tournamentResultsStatus.textContent = changed.removedDescendantCount > 0
-        ? `${message} 後続${String(changed.removedDescendantCount)}試合の結果も取り消しました。`
-        : message;
-      renderResult();
-    };
-
-    const save = (): void => {
+    const commitDraft = (): void => {
       if (!ready) return;
-      updateDraft();
-      const home = scoreValue(regularHome);
-      const away = scoreValue(regularAway);
-      regularHome.toggleAttribute("aria-invalid", home === undefined);
-      regularAway.toggleAttribute("aria-invalid", away === undefined);
-      if (home === undefined || away === undefined) {
-        removeSavedResult("通常得点は0以上の整数で入力してください。");
-        return;
-      }
-      if (home === null || away === null) {
-        removeSavedResult("通常得点を入力してください。");
-        return;
-      }
-      const tied = home === away;
-      const penaltyHomeValue = scoreValue(penaltyHome);
-      const penaltyAwayValue = scoreValue(penaltyAway);
-      penaltyHome.toggleAttribute("aria-invalid", tied && penaltyHomeValue === undefined);
-      penaltyAway.toggleAttribute("aria-invalid", tied && penaltyAwayValue === undefined);
-      if (
-        tied &&
-        (penaltyHomeValue === undefined || penaltyAwayValue === undefined)
-      ) {
-        removeSavedResult("PK得点は0以上の整数で入力してください。");
-        return;
-      }
-      if (tied && (penaltyHomeValue === null || penaltyAwayValue === null)) {
-        removeSavedResult("通常得点が同点のため、PK得点を入力してください。");
-        return;
-      }
-      if (tied && penaltyHomeValue === penaltyAwayValue) {
-        removeSavedResult("PK戦は勝敗が決まるまで入力してください。");
-        return;
-      }
+      const currentDraft = recordDraft();
+      const evaluation = evaluateTournamentResultDraft(currentDraft);
+      if (evaluation.status !== "ready") return;
       const next: JsonObject = {
         match_id: match.matchId,
         home_team_id: match.homeTeamId!,
         away_team_id: match.awayTeamId!,
-        regular_score_home: home,
-        regular_score_away: away,
-        ...(tied
+        regular_score_home: evaluation.regularHome,
+        regular_score_away: evaluation.regularAway,
+        ...(evaluation.penaltyRequired
           ? {
-              penalty_score_home: penaltyHomeValue,
-              penalty_score_away: penaltyAwayValue,
+              penalty_score_home: evaluation.penaltyHome,
+              penalty_score_away: evaluation.penaltyAway,
             }
           : {}),
       };
@@ -2774,19 +2874,32 @@ function renderTournamentResultsInput(
       );
       tournamentResultDrafts.delete(match.matchId);
       if (changed.winnerChanged) {
-        for (const descendant of tournamentMatchDescendants(plan, match.matchId)) {
-          tournamentResultDrafts.delete(descendant);
-        }
+        tournamentResultDrafts.deleteMany(tournamentMatchDescendants(plan, match.matchId));
       }
+      persistTournamentResultDrafts();
       saveTournamentResults(changed.results);
       tournamentResultsStatus.textContent = changed.removedDescendantCount > 0
         ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
         : "2日目の試合結果をこの端末へ保存しました。";
-      renderResult();
+      renderResultPreservingScoreFocus();
     };
     for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
-      input.addEventListener("change", save);
+      input.addEventListener("change", commitDraft);
     }
+
+    cancelDraft.addEventListener("click", () => {
+      if (match.result === undefined) return;
+      tournamentResultDrafts.delete(match.matchId);
+      persistTournamentResultDrafts();
+      tournamentResultsStatus.textContent =
+        "入力途中の変更を取り消し、保存済みの結果へ戻しました。";
+      renderResult();
+      const restoredRow = [...window.document.querySelectorAll<HTMLTableRowElement>(
+        "#tournament-results-input tr[data-match-id]",
+      )].find((candidate) => candidate.dataset.matchId === match.matchId);
+      restoredRow?.querySelector<HTMLInputElement>('input[data-score-field="regularHome"]')
+        ?.focus({ preventScroll: true });
+    });
     body.append(row);
   }
   table.append(body);
@@ -2865,6 +2978,12 @@ function requestTournamentStandings(): void {
   }
   const plan = asObject(result?.tournament_plan);
   if (result === undefined || plan === undefined) return;
+  if (tournamentResultDrafts.hasPendingDrafts) {
+    tournamentResultsStatus.textContent =
+      "入力途中の得点があります。保存するか「変更を取り消す」で元に戻してください。";
+    refreshTournamentResultsEnabled();
+    return;
+  }
   if (tournamentResultsTurnstileToken.length === 0) {
     tournamentResultsStatus.textContent = "最終順位確定の安全確認を完了してください。";
     return;
@@ -2941,20 +3060,20 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
     const row = [...resultsSection.querySelectorAll<HTMLTableRowElement>("tr[data-match-id]")]
       .find((candidate) => candidate.dataset.matchId === matchId);
     const input = row?.querySelectorAll<HTMLInputElement>("input.score-input").item(inputIndex);
-    const statusCell = row?.lastElementChild;
+    const errorArea = row?.querySelector<HTMLElement>(".tournament-result-error");
+    const stateLabel = row?.querySelector<HTMLElement>(".tournament-result-state-label");
     if (
       input === undefined ||
       input === null ||
-      !(statusCell instanceof HTMLTableCellElement)
+      errorArea === undefined ||
+      errorArea === null
     ) continue;
-    const errorId = `tournament-result-api-error-${matchId}`;
-    statusCell.id = errorId;
-    statusCell.className = "field-error";
-    statusCell.textContent = typeof issue.message === "string"
+    errorArea.textContent = typeof issue.message === "string"
       ? issue.message
       : "得点は0以上の整数で入力してください。";
+    if (stateLabel !== undefined && stateLabel !== null) stateLabel.textContent = "要確認";
     input.setAttribute("aria-invalid", "true");
-    input.setAttribute("aria-describedby", errorId);
+    input.setAttribute("aria-describedby", errorArea.id);
     firstInvalidInput ??= input;
   }
   firstInvalidInput?.focus({ preventScroll: true });
@@ -3379,7 +3498,7 @@ function updateDraft(invalidateResult = false): void {
       },
     };
   }
-  if (invalidateResult) tournamentResultDrafts.clear();
+  if (invalidateResult) clearTournamentResultDrafts();
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   updateReview();
@@ -3634,7 +3753,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       }
       autosave.cancel();
       documentState = mode.document;
-      tournamentResultDrafts.clear();
+      clearTournamentResultDrafts();
       legacyCompatibility = mode.legacyCompatibility;
       organizerCapacityTouched = inferOrganizerCapacityTouched();
       currentStep = restoredWizardStep(documentState);
@@ -3667,7 +3786,7 @@ requiredElement<HTMLButtonElement>("#convert-legacy-copy").addEventListener("cli
   ) return;
   autosave.cancel();
   documentState = convertLegacyToEditableDocument(documentState);
-  tournamentResultDrafts.clear();
+  clearTournamentResultDrafts();
   legacyCompatibility = false;
   organizerCapacityTouched = inferOrganizerCapacityTouched();
   currentStep = 1;
@@ -3692,7 +3811,7 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
     }
     const mode = normalizeDocument(previous);
     documentState = mode.document;
-    tournamentResultDrafts.clear();
+    clearTournamentResultDrafts();
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
@@ -3712,7 +3831,7 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
   autosave.cancel();
   void storage.deleteCurrent().then(() => {
     documentState = createTournamentDocument();
-    tournamentResultDrafts.clear();
+    clearTournamentResultDrafts();
     legacyCompatibility = false;
     organizerCapacityTouched = false;
     currentStep = 1;
@@ -3912,7 +4031,7 @@ generateButton.addEventListener("click", () => {
       autosave.cancel();
       return storage.confirm(validatedDocument).then(() => {
         documentState = validatedDocument;
-        tournamentResultDrafts.clear();
+        clearTournamentResultDrafts();
         generationStatus.textContent =
           "1日目と2日目の日程を生成し、独立検証に合格した結果をこの端末へ保存しました。";
         currentStep = 3;
@@ -4275,12 +4394,19 @@ setupPwaUpdates(registerSW, {
 
 void storage
   .loadLatest()
-  .then((saved) => {
+  .then(async (saved) => {
     const mode = normalizeDocument(saved ?? createTournamentDocument());
     documentState = mode.document;
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
+    try {
+      await restoreTournamentResultDrafts();
+    } catch {
+      tournamentResultDrafts.reset();
+      backupStatus.textContent =
+        "入力途中の2日目得点は復元できませんでした。正式に保存済みの結果は利用できます。";
+    }
     render();
     if (mode.migrated) {
       void storage.saveDraft(documentState);
