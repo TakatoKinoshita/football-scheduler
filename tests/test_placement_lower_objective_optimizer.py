@@ -141,7 +141,9 @@ def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
     assert values[4] > 0
     assert values[5] == 0
     section_calls: list[str] = []
+    section_proof_attempts: list[bool] = []
     full_exact_calls: list[str] = []
+    full_exact_proof_attempts: list[bool] = []
 
     def stalled_section(
         request: Day2ScheduleRequest,
@@ -150,6 +152,7 @@ def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
         **kwargs: object,
     ) -> optimizer._StageOutcome:
         section_calls.append(str(kwargs["objective"]))
+        section_proof_attempts.append(bool(kwargs.get("attempt_global_proof", True)))
         return _stalled_outcome(request, path_model, incumbent, **kwargs)
 
     def stalled_full_exact(
@@ -159,6 +162,7 @@ def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
         **kwargs: object,
     ) -> optimizer._StageOutcome:
         full_exact_calls.append(str(kwargs["objective"]))
+        full_exact_proof_attempts.append(bool(kwargs["attempt_global_proof"]))
         return _stalled_outcome(request, path_model, incumbent, **kwargs)
 
     monkeypatch.setattr(optimizer, "_optimize_section_objective", stalled_section)
@@ -167,7 +171,9 @@ def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
     result = optimizer.optimize_lower_objectives(request, schedule, max_time_per_stage=0.01)
 
     assert section_calls == ["non_primary_final_max_gap"]
+    assert section_proof_attempts == [True]
     assert full_exact_calls == ["team_court_change_count"]
+    assert full_exact_proof_attempts == [False]
     assert result.proven_objectives == ("used_sections",)
     assert result.objectives[3].proof_method == "unproven"
     assert result.objectives[5].proof_method == "unproven"
@@ -344,6 +350,94 @@ def test_fixed_section_candidate_is_retained_without_becoming_global_proof(
     assert outcome.proof_method == "unproven"
     assert outcome.best_bound is None
     assert outcome.model_fingerprint == "1" * 64
+
+
+def test_unproven_court_stage_runs_only_fixed_section_candidate_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, incumbent = _template_schedule(
+        pool_size=4,
+        court_count=3,
+        organizer_capacity=2,
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    before = optimizer.placement_objective_vector(request, incumbent)
+
+    def unexpected_full_exact(*_args: object, **_kwargs: object) -> optimizer._ExactOutcome:
+        pytest.fail("前段未証明のコート目的でfull exactを呼んではならない")
+
+    monkeypatch.setattr(optimizer, "_run_full_exact_stage", unexpected_full_exact)
+    outcome = optimizer._optimize_full_exact_objective(
+        request,
+        path_model,
+        incumbent,
+        fixed_values=optimizer._prior_fixed_values("team_court_change_count", before),
+        objective="team_court_change_count",
+        incumbent_value=before[4],
+        max_time_seconds=4,
+        attempt_global_proof=False,
+    )
+
+    after = optimizer.placement_objective_vector(request, outcome.schedule)
+    assert after < before
+    assert after[4] == 4
+    assert outcome.status is SolverStatus.FEASIBLE
+    assert outcome.optimality_proven is False
+    assert outcome.proof_method == "unproven"
+
+
+def test_unproven_wait_stage_uses_only_quarter_budget_for_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, incumbent = _template_schedule(
+        pool_size=4,
+        court_count=3,
+        organizer_capacity=2,
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    values = optimizer.placement_objective_vector(request, incumbent)
+    assert values[3] > 1
+    budgets: list[float] = []
+
+    def candidate_unknown(
+        *_args: object,
+        **kwargs: object,
+    ) -> optimizer._ExactOutcome:
+        budget = kwargs["max_time_seconds"]
+        assert isinstance(budget, int | float)
+        budgets.append(float(budget))
+        return optimizer._ExactOutcome(
+            status=SolverStatus.UNKNOWN,
+            optimality_proven=False,
+            wall_time_seconds=0,
+            model_fingerprint="2" * 64,
+        )
+
+    def unexpected_relaxation(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("前段未証明の待ち時間候補でsection緩和を呼んではならない")
+
+    monkeypatch.setattr(optimizer, "_run_full_exact_stage", candidate_unknown)
+    monkeypatch.setattr(optimizer, "_build_section_relaxation", unexpected_relaxation)
+    outcome = optimizer._optimize_section_objective(
+        request,
+        path_model,
+        incumbent,
+        fixed_values={
+            "used_sections": values[0],
+            "non_primary_final_max_gap": values[1],
+            "non_primary_final_sum_gap": values[2],
+        },
+        objective="maximum_team_wait_sections",
+        incumbent_value=values[3],
+        max_time_seconds=840,
+        attempt_global_proof=False,
+    )
+
+    assert budgets == [210]
+    assert outcome.schedule == incumbent
+    assert outcome.status is SolverStatus.UNKNOWN
+    assert outcome.optimality_proven is False
+    assert outcome.proof_method == "unproven"
 
 
 def test_result_contract_rejects_non_prefix_proof() -> None:

@@ -245,6 +245,7 @@ def optimize_lower_objectives(
                 objective=name,
                 incumbent_value=incumbent_value,
                 max_time_seconds=max_time_per_stage,
+                attempt_global_proof=proof_open,
             )
         else:
             outcome = _optimize_full_exact_objective(
@@ -255,6 +256,7 @@ def optimize_lower_objectives(
                 objective=name,
                 incumbent_value=incumbent_value,
                 max_time_seconds=max_time_per_stage,
+                attempt_global_proof=proof_open,
             )
         current = _select_non_worse(request, path_model, current, outcome.schedule)
         current_values = _objective_vector_from_slots(request, path_model, current.slots)
@@ -296,7 +298,30 @@ def _optimize_section_objective(
     objective: str,
     incumbent_value: int,
     max_time_seconds: float,
+    attempt_global_proof: bool = True,
 ) -> _StageOutcome:
+    if not attempt_global_proof:
+        candidate_budget = max(min(max_time_seconds * 0.25, max_time_seconds), 0.001)
+        candidate = _run_full_exact_stage(
+            request,
+            path_model,
+            fixed_values=fixed_values,
+            objective=objective,
+            incumbent_value=incumbent_value,
+            max_time_seconds=candidate_budget,
+            hint_schedule=incumbent,
+        )
+        if candidate.status is SolverStatus.INFEASIBLE:
+            raise LowerObjectiveOptimizationError(
+                "検証済み候補をsection目的の候補専用モデルで再現できません"
+            )
+        selected = (
+            _select_non_worse(request, path_model, incumbent, candidate.schedule)
+            if candidate.schedule is not None
+            else incumbent
+        )
+        return _candidate_only_unproven_outcome(selected, candidate)
+
     started = perf_counter()
     relaxation_budget = max(max_time_seconds * 0.4, 0.001)
     relaxation_model, relaxation_objective = _build_section_relaxation(
@@ -411,6 +436,7 @@ def _optimize_full_exact_objective(
     objective: str,
     incumbent_value: int,
     max_time_seconds: float,
+    attempt_global_proof: bool = True,
 ) -> _StageOutcome:
     started = perf_counter()
     fixed_budget = max(min(max_time_seconds * 0.25, max_time_seconds), 0.001)
@@ -425,6 +451,12 @@ def _optimize_full_exact_objective(
     )
     fixed_candidate = fixed.schedule or incumbent
     selected = _select_non_worse(request, path_model, incumbent, fixed_candidate)
+    if not attempt_global_proof:
+        return _fixed_section_unproven_outcome(
+            selected,
+            fixed,
+            fixed.wall_time_seconds,
+        )
     selected_value = _objective_vector_from_slots(request, path_model, selected.slots)[
         PLACEMENT_OBJECTIVES.index(objective)
     ]
@@ -556,6 +588,23 @@ def _fixed_section_unproven_outcome(
         best_bound=(None if fixed.schedule is not None else fixed.best_bound),
         wall_time_seconds=wall_time_seconds,
         model_fingerprint=fixed.model_fingerprint,
+    )
+
+
+def _candidate_only_unproven_outcome(
+    schedule: Day2Schedule,
+    candidate: _ExactOutcome,
+) -> _StageOutcome:
+    """前段未証明時は候補だけを保持し、条件付きOPTIMALをproofへ使わない。"""
+
+    return _StageOutcome(
+        schedule=schedule,
+        status=(SolverStatus.FEASIBLE if candidate.schedule is not None else candidate.status),
+        optimality_proven=False,
+        proof_method="unproven",
+        best_bound=candidate.best_bound,
+        wall_time_seconds=candidate.wall_time_seconds,
+        model_fingerprint=candidate.model_fingerprint,
     )
 
 
