@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -10,6 +11,10 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from football_scheduler import application
+
+_ISSUE_75_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "scripts/fixtures/tournament-results-8.json"
+)
 
 
 def _handle_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -579,6 +584,54 @@ def test_tournament_results_request_returns_overall_final_standings() -> None:
         "placement-2",
         "placement-2",
     ]
+
+
+def test_issue_75_fixture_returns_all_eight_final_standings() -> None:
+    request = json.loads(_ISSUE_75_FIXTURE.read_text(encoding="utf-8"))
+
+    outcome = _handle_request(request)
+
+    assert outcome["status"] == "COMPLETE"
+    assert [row["rank"] for row in outcome["standings"]] == list(range(1, 9))
+    assert len({row["team_id"] for row in outcome["standings"]}) == 8
+
+
+def test_tournament_score_schema_error_points_to_editable_score() -> None:
+    request = json.loads(_ISSUE_75_FIXTURE.read_text(encoding="utf-8"))
+    request["results"][0]["regular_score_home"] = -1
+
+    outcome = _handle_request(request)
+
+    diagnostic = outcome["diagnostics"][0]
+    assert diagnostic["code"] == "INPUT_SCHEMA_INVALID"
+    assert diagnostic["details"]["scope"] == "tournament_scores"
+    assert diagnostic["details"]["errors"] == [
+        {
+            "field": "results.0.regular_score_home",
+            "message": "得点は0以上の整数で入力してください。",
+            "type": "greater_than_equal",
+            "match_id": "PT-1-RANK-1-4-M1",
+            "score_field": "regular_score_home",
+        }
+    ]
+    assert "項目別の説明" not in diagnostic["message"]
+
+
+def test_tournament_contract_or_plan_schema_error_is_internal_data_problem() -> None:
+    request = json.loads(_ISSUE_75_FIXTURE.read_text(encoding="utf-8"))
+    request["final_stage"] = {"format": "placement_tournament", "tournament_count": 2}
+
+    outcome = _handle_request(request)
+
+    diagnostic = outcome["diagnostics"][0]
+    assert diagnostic == {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": (
+            "保存された2日目の計画と結果の整合性を確認できませんでした。"
+            "入力した結果は保持されています。ページを再読み込みして、もう一度お試しください。"
+        ),
+        "details": {"scope": "tournament_data"},
+    }
 
 
 def test_tournament_plan_request_returns_provisional_table_without_standings() -> None:

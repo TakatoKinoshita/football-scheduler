@@ -155,6 +155,17 @@ def test_public_pages_smoke_test_has_bounded_propagation_retry() -> None:
     assert 'grep "大会日程スケジューラー"' not in smoke_step
 
 
+def test_apply_smoke_confirms_eight_team_tournament_results() -> None:
+    workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
+    lambda_smoke = workflow.split("      - name: Smoke-test new Lambda alias\n", maxsplit=1)[
+        1
+    ].split("\n      - name: Update Pages Function secrets", maxsplit=1)[0]
+
+    assert "--tournament-results" in lambda_smoke
+    assert "lambda-tournament-results-event.json" in lambda_smoke
+    assert "lambda-tournament-results-response.json" in lambda_smoke
+
+
 def test_production_workflow_separates_plan_from_apply() -> None:
     workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
 

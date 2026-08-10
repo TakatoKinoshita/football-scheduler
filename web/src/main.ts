@@ -83,6 +83,7 @@ import {
   tournamentMatchDescendants,
   type TournamentMatchProgress,
 } from "./tournament-results";
+import { buildTournamentResultsRequest } from "./tournament-results-request";
 import {
   SCHEMA_VERSION,
   cloneDocument,
@@ -2886,13 +2887,7 @@ function requestTournamentStandings(): void {
   tournamentResultsStatusOwner = "calculation";
   tournamentResultsStatus.textContent = "2日目の全試合を検証し、総合最終順位を計算しています…";
   void calculateTournamentStandings(
-    {
-      schema_version: SCHEMA_VERSION,
-      request_kind: "tournament_results",
-      final_stage: documentState.tournament.input.final_stage,
-      tournament_plan: plan,
-      results: tournamentResults(),
-    },
+    buildTournamentResultsRequest(plan, tournamentResults()),
     tournamentResultsTurnstileToken,
   )
     .then(async (standings) => {
@@ -2902,6 +2897,9 @@ function requestTournamentStandings(): void {
       renderResult();
     })
     .catch((error: unknown) => {
+      if (error instanceof ScheduleApiError) {
+        showTournamentScoreApiIssues(error);
+      }
       tournamentResultsStatus.textContent =
         error instanceof ScheduleApiError
           ? error.message
@@ -2921,6 +2919,45 @@ function requestTournamentStandings(): void {
         }
       }
     });
+}
+
+function showTournamentScoreApiIssues(error: ScheduleApiError): void {
+  if (error.code !== "INPUT_SCHEMA_INVALID" || error.details?.scope !== "tournament_scores") {
+    return;
+  }
+  const inputIndexByField = new Map([
+    ["regular_score_home", 0],
+    ["regular_score_away", 1],
+    ["penalty_score_home", 2],
+    ["penalty_score_away", 3],
+  ]);
+  let firstInvalidInput: HTMLInputElement | undefined;
+  const resultsSection = window.document.querySelector<HTMLElement>("#tournament-results-input");
+  if (resultsSection === null) return;
+  for (const issue of asObjectArray(error.details.errors)) {
+    const matchId = typeof issue.match_id === "string" ? issue.match_id : undefined;
+    const inputIndex = inputIndexByField.get(String(issue.score_field));
+    if (matchId === undefined || inputIndex === undefined) continue;
+    const row = [...resultsSection.querySelectorAll<HTMLTableRowElement>("tr[data-match-id]")]
+      .find((candidate) => candidate.dataset.matchId === matchId);
+    const input = row?.querySelectorAll<HTMLInputElement>("input.score-input").item(inputIndex);
+    const statusCell = row?.lastElementChild;
+    if (
+      input === undefined ||
+      input === null ||
+      !(statusCell instanceof HTMLTableCellElement)
+    ) continue;
+    const errorId = `tournament-result-api-error-${matchId}`;
+    statusCell.id = errorId;
+    statusCell.className = "field-error";
+    statusCell.textContent = typeof issue.message === "string"
+      ? issue.message
+      : "得点は0以上の整数で入力してください。";
+    input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", errorId);
+    firstInvalidInput ??= input;
+  }
+  firstInvalidInput?.focus({ preventScroll: true });
 }
 
 function requestSameRankStandings(plan: JsonObject): void {

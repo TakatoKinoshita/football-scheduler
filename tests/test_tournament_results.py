@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,7 +18,12 @@ from football_scheduler.tournament import (
 )
 from football_scheduler.tournament_results import (
     TournamentResultsError,
+    TournamentResultsRequest,
     calculate_tournament_standings,
+)
+
+_ISSUE_75_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "scripts/fixtures/tournament-results-8.json"
 )
 
 
@@ -134,6 +140,25 @@ def test_results_cover_all_pools_and_overall_ranks() -> None:
         (f"placement-{(rank - 1) // 8 + 1}", (rank - 1) % 8 + 1, rank) for rank in range(1, 25)
     ]
     assert len(outcome.match_results) == 36
+
+
+def test_issue_75_eight_team_request_matches_python_contract_and_all_ranks() -> None:
+    request = TournamentResultsRequest.model_validate_json(
+        _ISSUE_75_FIXTURE.read_text(encoding="utf-8")
+    )
+
+    outcome = calculate_tournament_standings(request)
+
+    assert request.model_fields_set == {
+        "schema_version",
+        "request_kind",
+        "tournament_plan",
+        "results",
+    }
+    assert len(request.results) == 8
+    assert outcome.status == "COMPLETE"
+    assert [standing.rank for standing in outcome.standings] == list(range(1, 9))
+    assert len({standing.team_id for standing in outcome.standings}) == 8
 
 
 def test_penalty_shootout_is_kept_separate() -> None:
