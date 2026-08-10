@@ -413,7 +413,7 @@ def aggregate_issue73_catalog(
     optimizer_by_id = dict(optimizer_entries or {})
     if set(optimizer_by_id) - set(target_by_id):
         raise PlacementTemplateAggregationError("非targetのoptimizer-v2候補が含まれています")
-    if optimizer_by_id and set(optimizer_by_id) != set(target_by_id):
+    if target_by_id and set(optimizer_by_id) != set(target_by_id):
         raise PlacementTemplateAggregationError("optimizer-v2候補の疎target coverageが不正です")
     _validate_issue73_checkpoint_coverage(
         optimizer_checkpoints,

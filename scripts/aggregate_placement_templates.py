@@ -84,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
             target_manifest = PlacementOptimizationTargetManifest.model_validate_json(
                 args.target_manifest.read_text(encoding="utf-8")
             )
+            if target_manifest.targets and args.optimizer_directory is None:
+                raise PlacementTemplateAggregationError(
+                    "Issue #73のtarget集約には--optimizer-directoryが必要です"
+                )
             optimizer_entries = None
             checkpoints: tuple[PlacementOptimizationStageCheckpoint, ...] = ()
             if args.optimizer_directory is not None:

@@ -77,6 +77,7 @@ LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES: tuple[Topology, ...] = (
     (2, 16),
     (4, 8),
 )
+_ISSUE73_WORKER_TARGET_MANIFEST: PlacementOptimizationTargetManifest | None = None
 
 # Issue #71 must not rewrite the 24/32-team shards.  Both the bytes committed by
 # Issue #69 and their parsed canonical digest are pinned, so whitespace-only or
@@ -1198,13 +1199,21 @@ def optimize_issue73_target_entry(
             target_manifest_sha256=target_manifest.sha256,
         )
     candidate_path = issue73_optimizer_candidate_file(output_directory, target.key)
-    if len(completed) == len(PLACEMENT_OBJECTIVES) and candidate_path.exists():
-        resumed = load_entry(candidate_path)
-        if resumed.sha256 != completed[-1].candidate.sha256:
-            raise PlacementTemplateIntegrityError(
-                "v2最終候補と最後のcheckpoint candidateが一致しません"
-            )
-        return resumed
+    if len(completed) == len(PLACEMENT_OBJECTIVES):
+        checkpoint_candidate = completed[-1].candidate
+        if candidate_path.exists():
+            resumed = load_entry(candidate_path)
+            if resumed.sha256 != checkpoint_candidate.sha256:
+                raise PlacementTemplateIntegrityError(
+                    "v2最終候補と最後のcheckpoint candidateが一致しません"
+                )
+            return resumed
+        _hydrate_and_validate_entry(checkpoint_candidate, validator=validator)
+        write_entry_checkpoint(checkpoint_candidate, candidate_path.parent)
+        restored_path = candidate_path.parent / checkpoint_file_name(checkpoint_candidate.key)
+        if restored_path != candidate_path:
+            raise PlacementTemplateIntegrityError("v2 optimizer候補の復元先が一致しません")
+        return checkpoint_candidate
 
     emitted = list(completed)
 
@@ -1278,7 +1287,6 @@ def optimize_issue73_targets(
         raise PlacementTemplateIntegrityError(
             "Issue #73 optimizer入力の疎target coverageが不正です"
         )
-    guard_issue73_untouched_shards(output_directory)
     if workers == 1:
         active_optimizer = optimizer or _default_large_objective_optimizer()
         results = {
@@ -1301,7 +1309,6 @@ def optimize_issue73_targets(
                 current_entries[target.key.catalog_id].model_dump(mode="json"),
                 legacy_entries[target.key.catalog_id].model_dump(mode="json"),
                 target.model_dump(mode="json"),
-                target_manifest.model_dump(mode="json"),
                 str(output_directory),
                 resume,
                 max_time_per_stage,
@@ -1309,7 +1316,11 @@ def optimize_issue73_targets(
             for target in target_manifest.targets
         )
         results = {}
-        with ProcessPoolExecutor(max_workers=workers) as executor:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_initialize_issue73_worker,
+            initargs=(target_manifest.model_dump(mode="json"),),
+        ) as executor:
             futures = {
                 executor.submit(_optimize_issue73_entry_worker, payload): payload[2]
                 for payload in payloads
@@ -1321,7 +1332,6 @@ def optimize_issue73_targets(
         raise PlacementTemplateIntegrityError(
             "Issue #73 optimizer出力の疎target coverageが不正です"
         )
-    guard_issue73_untouched_shards(output_directory)
     return results
 
 
@@ -1474,7 +1484,6 @@ def _optimize_issue73_entry_worker(
         dict[str, Any],
         dict[str, Any],
         dict[str, Any],
-        dict[str, Any],
         str,
         bool,
         float,
@@ -1484,22 +1493,32 @@ def _optimize_issue73_entry_worker(
         current_data,
         legacy_data,
         target_data,
-        manifest_data,
         output_directory,
         resume,
         max_time_per_stage,
     ) = payload
+    if _ISSUE73_WORKER_TARGET_MANIFEST is None:
+        raise PlacementTemplateIntegrityError("Issue #73 worker manifestが初期化されていません")
     result = optimize_issue73_target_entry(
         current_entry=PlacementTemplateEntry.model_validate(current_data),
         legacy_incumbent=PlacementTemplateEntry.model_validate(legacy_data),
         target=PlacementOptimizationTarget.model_validate(target_data),
-        target_manifest=PlacementOptimizationTargetManifest.model_validate(manifest_data),
+        target_manifest=_ISSUE73_WORKER_TARGET_MANIFEST,
         output_directory=Path(output_directory),
         optimizer=_default_large_objective_optimizer(),
         resume=resume,
         max_time_per_stage=max_time_per_stage,
     )
     return result.model_dump(mode="json")
+
+
+def _initialize_issue73_worker(manifest_data: dict[str, Any]) -> None:
+    """target manifestをworkerごとに1回だけ復元し、targetごとの複製を避ける。"""
+
+    global _ISSUE73_WORKER_TARGET_MANIFEST
+    _ISSUE73_WORKER_TARGET_MANIFEST = PlacementOptimizationTargetManifest.model_validate(
+        manifest_data
+    )
 
 
 def _load_resumable_optimization_candidate(

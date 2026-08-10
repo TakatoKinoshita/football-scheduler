@@ -54,6 +54,7 @@ LEGACY_PYTHON_PREFIX = "3.14."
 LEGACY_ORTOOLS_VERSION = "9.15.6755"
 BASELINE_FORMAT_VERSION: Literal[1] = 1
 BASELINE_RANDOM_SEED = 20260803
+LEGACY_RUN_CONTRACT_FILE = ".legacy-run-contract.json"
 # Issue #71の呼び出し側とfixtureの互換性のため旧名は維持する。
 TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((2, 4), (2, 8))
 LARGE_TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((3, 8), (2, 16), (4, 8))
@@ -169,6 +170,32 @@ class PlacementBaselineFixture(ContractModel):
         return self
 
 
+class LegacyRunContract(ContractModel):
+    """checkpoint directoryを固定legacy実行条件へ束縛するsidecar。"""
+
+    format_version: Literal[1] = 1
+    commit_sha: str = LEGACY_SOLVER_COMMIT
+    python_version_prefix: str = LEGACY_PYTHON_PREFIX
+    ortools_version: str = LEGACY_ORTOOLS_VERSION
+    random_seed: Literal[20260803] = 20260803
+    max_time_seconds: Annotated[float, Field(gt=0, le=840)]
+    num_search_workers: Literal[1] = 1
+    pythonhashseed: Literal["0"] = "0"
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        if (
+            self.commit_sha != LEGACY_SOLVER_COMMIT
+            or self.python_version_prefix != LEGACY_PYTHON_PREFIX
+            or self.ortools_version != LEGACY_ORTOOLS_VERSION
+        ):
+            raise ValueError("legacy run contractの固定環境が一致しません")
+        if self.sha256 and self.sha256 != legacy_run_contract_digest(self):
+            raise ValueError("legacy run contractのSHA-256が一致しません")
+        return self
+
+
 class PlacementABSummary(ContractModel):
     compared: Annotated[int, Field(ge=0)]
     better: Annotated[int, Field(ge=0)]
@@ -188,6 +215,47 @@ def baseline_fixture_digest(fixture: PlacementBaselineFixture) -> str:
 def with_fixture_digest(fixture: PlacementBaselineFixture) -> PlacementBaselineFixture:
     updated = fixture.model_copy(update={"sha256": baseline_fixture_digest(fixture)})
     return PlacementBaselineFixture.model_validate(updated.model_dump(mode="json"))
+
+
+def legacy_run_contract_digest(contract: LegacyRunContract) -> str:
+    return sha256_hex(contract.model_dump(mode="json", exclude={"sha256"}))
+
+
+def _expected_legacy_run_contract(max_time_seconds: float) -> LegacyRunContract:
+    contract = LegacyRunContract(max_time_seconds=max_time_seconds)
+    completed = contract.model_copy(update={"sha256": legacy_run_contract_digest(contract)})
+    return LegacyRunContract.model_validate(completed.model_dump(mode="json"))
+
+
+def _bind_legacy_run_contract(
+    checkpoint_directory: Path,
+    *,
+    max_time_seconds: float,
+    resume: bool,
+) -> LegacyRunContract:
+    """resume前にcheckpoint directoryの実行条件を検査し、初回はatomic保存する。"""
+
+    expected = _expected_legacy_run_contract(max_time_seconds)
+    path = checkpoint_directory / LEGACY_RUN_CONTRACT_FILE
+    if path.exists():
+        try:
+            actual = LegacyRunContract.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PlacementABError(f"legacy run contractを読み込めません: {path}") from exc
+        if actual != expected:
+            raise PlacementABError("legacy checkpointの実行条件が現在のrunと一致しません")
+        return actual
+    existing = tuple(item for item in checkpoint_directory.glob("*.json") if item != path)
+    if resume and existing:
+        raise PlacementABError("実行条件に束縛されていないlegacy checkpointは再利用できません")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(expected.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return expected
 
 
 def write_deterministic_gzip(path: Path, fixture: PlacementBaselineFixture) -> None:
@@ -689,6 +757,11 @@ def run_legacy_records(
         raise ValueError("max_time_secondsは0より大きく840以下にしてください")
     ordered = tuple(sorted(entries, key=lambda item: item.key.catalog_id))
     checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    _bind_legacy_run_contract(
+        checkpoint_directory,
+        max_time_seconds=max_time_seconds,
+        resume=resume,
+    )
     records: dict[str, PlacementBaselineRecord] = {}
     pending: list[PlacementTemplateEntry] = []
     for entry in ordered:

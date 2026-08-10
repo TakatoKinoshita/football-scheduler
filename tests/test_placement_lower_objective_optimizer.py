@@ -395,12 +395,14 @@ def test_max_gap_exact_completion_does_not_force_sum_gap(
     values = optimizer.placement_objective_vector(request, incumbent)
     assert values[1] != values[2]
     captured_sum_equalities: list[tuple[int, ...]] = []
+    relaxation_models: list[cp_model.CpModel] = []
 
     def fixed_relaxation(
         *_args: object, **_kwargs: object
     ) -> tuple[cp_model.CpModel, cp_model.IntVar]:
         model = cp_model.CpModel()
         objective = model.new_int_var(values[1], values[1], "fixed_relaxed_max_gap")
+        relaxation_models.append(model)
         return model, objective
 
     def tiny_exact_model(
@@ -456,6 +458,9 @@ def test_max_gap_exact_completion_does_not_force_sum_gap(
     assert captured_sum_equalities == []
     assert outcome.optimality_proven is True
     assert outcome.proof_method == "section_relaxation_exact_completion"
+    assert outcome.model_fingerprint == optimizer._combined_model_fingerprint(
+        optimizer._model_fingerprint(relaxation_models[0]), "4" * 64
+    )
     assert optimizer.placement_objective_vector(request, outcome.schedule)[1:3] == values[1:3]
 
 

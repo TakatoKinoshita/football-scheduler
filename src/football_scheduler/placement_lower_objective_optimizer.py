@@ -465,7 +465,10 @@ def _optimize_section_objective(
                     proof_method="section_relaxation_exact_completion",
                     best_bound=float(relaxed_optimum),
                     wall_time_seconds=relaxation_wall + completed.wall_time_seconds,
-                    model_fingerprint=completed.model_fingerprint,
+                    model_fingerprint=_combined_model_fingerprint(
+                        relaxation_fingerprint,
+                        completed.model_fingerprint,
+                    ),
                     termination_reason="section_relaxation_exact_completion",
                 )
 
@@ -1304,6 +1307,12 @@ def _model_fingerprint(model: cp_model.CpModel) -> str:
     # OR-Tools 9.15のpybind protoはSerializeToStringを公開しない。変数・制約を
     # 常に安定順で追加しているため、正規化されたtext protoをfingerprintに使う。
     return sha256(str(model.proto).encode("utf-8")).hexdigest()
+
+
+def _combined_model_fingerprint(*fingerprints: str) -> str:
+    """複数modelを根拠にする証明を順序付き単一fingerprintへ固定する。"""
+
+    return sha256("\n".join(fingerprints).encode("utf-8")).hexdigest()
 
 
 def _proof_fingerprint(

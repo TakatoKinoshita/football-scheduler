@@ -335,6 +335,8 @@ def test_generator_adapter_writes_all_stages_and_resumes(
         output_directory=tmp_path,
         optimizer=adapter,
     )
+    candidate_path = generator.issue73_optimizer_candidate_file(tmp_path, current.key)
+    candidate_path.unlink()
     resumed = generator.optimize_issue73_target_entry(
         current_entry=current,
         legacy_incumbent=legacy,
@@ -351,7 +353,90 @@ def test_generator_adapter_writes_all_stages_and_resumes(
     assert calls == 1
     assert generated == optimizer
     assert resumed == optimizer
+    assert candidate_path.exists()
     assert len(tuple(checkpoint_directory.glob("*.json"))) == len(PLACEMENT_OBJECTIVES)
+
+
+def test_optimizer_v2_accepts_empty_isolated_output_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = _entry(
+        (8, 2, 4, 3, 2, 1),
+        court_index=0,
+        proofs=(True, False, False, False, False, False),
+    )
+    legacy = _entry(
+        (8, 1, 3, 4, 3, 2),
+        court_index=0,
+        proofs=(True, False, False, False, False, False),
+    )
+    candidate = _entry(
+        (8, 1, 3, 4, 3, 2),
+        court_index=1,
+        proofs=(True, False, False, False, False, False),
+        optimized=True,
+    )
+    manifest = _target_manifest(current, legacy)
+    monkeypatch.setattr(
+        generator,
+        "_hydrate_and_validate_entry",
+        lambda *_args, **_kwargs: (object(), object()),
+    )
+
+    def adapter(
+        request: generator.LargeObjectiveOptimizationRequest,
+        emit: generator.LargeObjectiveCheckpointSink,
+    ) -> PlacementTemplateEntry:
+        for index in range(len(PLACEMENT_OBJECTIVES)):
+            emit(_checkpoint(current, legacy, candidate, manifest, index))
+        return candidate
+
+    output = tmp_path / "isolated-output"
+    result = generator.optimize_issue73_targets(
+        manifest,
+        {current.key.catalog_id: current},
+        {legacy.key.catalog_id: legacy},
+        output,
+        optimizer=adapter,
+    )
+
+    assert result == {current.key.catalog_id: candidate}
+    assert not (output / "placement-p2-s4.json").exists()
+
+
+def test_issue73_catalog_rejects_target_without_optimizer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = _entry(
+        (8, 2, 4, 3, 2, 1),
+        court_index=0,
+        proofs=(True, False, False, False, False, False),
+    )
+    legacy = _entry(
+        (8, 1, 3, 4, 3, 2),
+        court_index=0,
+        proofs=(True, False, False, False, False, False),
+    )
+    current_fixture = _fixture(BaselineSource.CURRENT, _record(current), sha="1" * 64)
+    legacy_fixture = _fixture(
+        BaselineSource.LEGACY,
+        _record(legacy, input_sha=current.sha256),
+        sha="2" * 64,
+    )
+    manifest = _target_manifest(current, legacy)
+    monkeypatch.setattr(aggregator, "_validate_issue73_fixture_contract", lambda *_args: None)
+    monkeypatch.setattr(aggregator, "_validate_issue73_target_manifest", lambda *_args: None)
+    monkeypatch.setattr(aggregator, "guard_issue73_untouched_shards", lambda *_args: None)
+
+    with pytest.raises(aggregator.PlacementTemplateAggregationError, match="coverage"):
+        aggregator.aggregate_issue73_catalog(
+            current_fixture=current_fixture,
+            legacy_fixture=legacy_fixture,
+            target_manifest=manifest,
+            catalog_directory=tmp_path,
+        )
 
 
 def test_default_adapter_converts_native_progress_to_v2_checkpoints(

@@ -7,6 +7,7 @@ import pytest
 
 from football_scheduler import day2_schedule
 from football_scheduler.placement_template_ab import (
+    LEGACY_RUN_CONTRACT_FILE,
     LEGACY_SOLVER_COMMIT,
     BaselineRecordStatus,
     BaselineSource,
@@ -16,6 +17,7 @@ from football_scheduler.placement_template_ab import (
     PlacementBaselineEnvironment,
     PlacementBaselineFixture,
     PrimaryProofConflict,
+    _bind_legacy_run_contract,
     baseline_candidate_for,
     canonicalize_and_reaudit,
     classify_legacy_response,
@@ -316,3 +318,24 @@ for line in sys.stdin:
     ) as worker:
         assert worker.metadata is not None
         assert worker.metadata.commit_sha == LEGACY_SOLVER_COMMIT
+
+
+def test_legacy_checkpoint_resume_is_bound_to_fixed_run_contract(tmp_path: Path) -> None:
+    contract = _bind_legacy_run_contract(
+        tmp_path,
+        max_time_seconds=30.0,
+        resume=False,
+    )
+
+    assert contract.max_time_seconds == 30.0
+    assert (tmp_path / LEGACY_RUN_CONTRACT_FILE).exists()
+    assert _bind_legacy_run_contract(tmp_path, max_time_seconds=30.0, resume=True) == contract
+    with pytest.raises(PlacementABError, match="実行条件"):
+        _bind_legacy_run_contract(tmp_path, max_time_seconds=60.0, resume=True)
+
+
+def test_unbound_legacy_checkpoint_cannot_be_resumed(tmp_path: Path) -> None:
+    (tmp_path / "legacy-key.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(PlacementABError, match="束縛されていない"):
+        _bind_legacy_run_contract(tmp_path, max_time_seconds=30.0, resume=True)
