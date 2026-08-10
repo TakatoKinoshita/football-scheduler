@@ -74,6 +74,8 @@ uv run python scripts/generate_placement_templates.py --merge
 uv run python scripts/generate_placement_templates.py --check
 ```
 
+### 4.1 8・16チームの下位目的再最適化
+
 8・16チームの下位目的を再最適化する場合は、証明済みの最小horizonを変更せず、対象shardを
 個別に処理する。24・32チームの3shardはraw file SHA-256と内部canonical digestの両方を
 処理前後に検査し、1 byteでも変更されていれば停止する。
@@ -107,6 +109,67 @@ uv run python scripts/aggregate_placement_templates.py \
   --catalog-directory src/football_scheduler/placement_templates \
   --report docs/architecture/issue-71-placement-quality-report.md
 ```
+
+### 4.2 24・32チームのlegacy floor更新
+
+Issue #73では`3x8`、`2x16`、`4x8`の計816キーだけを対象にする。legacy solverはcommit
+`2ccf91da34717ae86a21513a43289a2e2b758617`、Python 3.14、OR-Tools 9.15.6755、
+`random_seed=20260803`、`PYTHONHASHSEED=0`、CP-SAT 1 worker、1キー30秒に固定する。legacyの
+自己申告値は使用せず、候補を現行コードでcanonical化し、審判復元、6目的再計算、固定配置監査、
+hydrate、独立validatorへ通す。timeout、`INFEASIBLE`、invalid、errorは品質floorに含めない。
+legacyがcurrentの証明済み目的prefixを破った場合は、catalog証明との矛盾として処理を停止する。
+
+currentとlegacyはトポロジーごとに独立したpartial fixtureへ書き出す。`3x8`、`2x16`、`4x8`を
+それぞれ1プロセスで並列実行できるが、各CP-SATのworker数は1のままにする。全partialでsource、
+固定環境、digest、重複のない272キーcoverageを検査してから、決定的な816キーのgzip fixtureへ
+単一プロセスで統合する。
+
+```console
+uv run python scripts/generate_placement_ab_baseline.py merge \
+  --topology 3x8 --topology 2x16 --topology 4x8 \
+  --partial artifacts/issue-73/current-3x8.json.gz \
+  --partial artifacts/issue-73/current-2x16.json.gz \
+  --partial artifacts/issue-73/current-4x8.json.gz \
+  --output artifacts/issue-73/current-pre-issue73-24-32.json.gz
+uv run python scripts/generate_placement_ab_baseline.py merge \
+  --topology 3x8 --topology 2x16 --topology 4x8 \
+  --partial artifacts/issue-73/legacy-3x8.json.gz \
+  --partial artifacts/issue-73/legacy-2x16.json.gz \
+  --partial artifacts/issue-73/legacy-4x8.json.gz \
+  --output artifacts/issue-73/legacy-24-32-2ccf91d.json.gz
+```
+
+統合後はcurrent／legacy fixture SHA、各entry SHA、6目的値を固定したtarget manifestを作る。
+現行規則で有効かつ`legacy < current`のキーだけをcatalog ID順に収録し、非targetではoptimizerを
+呼ばず、配置とprovenanceを変更しない。targetでは検証済みlegacyを最初のincumbentとして
+`placement-lower-objective-optimizer-v2`を実行する。1目的段階の既定上限は60秒とし、840秒は
+明示的な手動resumeの上限にだけ使用する。`UNKNOWN`やtimeoutでもlegacy incumbentを失わない。
+
+v2は証明済み最小使用セクション数を固定し、非最高順位帯決勝の最大gap、最大gapを固定した
+合計gap、最大待ち時間、コート移動、コート使用偏りの順に独立して最適化する。最大gap探索時は
+合計gapを固定しない。section緩和だけでは証明せず、審判を含むexact completionに成功した場合だけ
+その段階を証明する。証明フラグは`true...true,false...false`の連続prefixを維持する。
+
+v2 checkpointは目的段階の終了ごとにatomic保存し、current entry SHA、legacy incumbent SHA、
+target manifest SHA、固定済み目的prefix、候補、solver status、best bound、wall time、model
+fingerprint、終了理由を保持する。`--resume`ではすべてのSHAと連続prefixを検査し、最後に完了した
+段階の次から再開する。不一致、欠落、非連続なcheckpointは再利用しない。
+
+最終統合は単一aggregatorだけが行い、再監査済みcurrent、legacy、optimizer-v2候補から辞書式最良を
+選ぶ。同値時の安定順はcurrent、optimizer-v2、legacyとする。更新可能なのは`placement-p3-s8.json`、
+`placement-p2-s16.json`、`placement-p4-s8.json`、`manifest.json`だけである。`placement-p2-s4.json`と
+`placement-p2-s8.json`は処理前後のraw file SHA-256と内部canonical digestの両方をguardし、
+1 byteでも変化した場合は停止する。統合後は次のコマンドで5shard・全1,360キーのdigest、coverage、
+hydrate、審判再構築、固定配置監査、独立validatorを確認する。
+
+```console
+uv run python scripts/generate_placement_templates.py --check
+```
+
+current／legacy比較、legacy status、target数、採用元、目的別証明数、段階別のstatus・bound・実行時間、
+全shardとmanifestのdigestなどの実測値は、集約時に
+`docs/architecture/issue-73-placement-quality-report.md`へ記録する。実測前の件数や改善量はこの運用文書へ
+推測で記載しない。
 
 generatorは理論下限から固定horizonを増やし、目的変数を持たない実行可能性モデルで探索する。
 より短いhorizonの実行不能証明後、最初の実行可能配置を採用するため、使用
