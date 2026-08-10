@@ -1,0 +1,761 @@
+{
+  "schema_version": "0.2.0",
+  "request_kind": "tournament_results",
+  "tournament_plan": {
+    "schema_version": "0.2.0",
+    "format": "placement_tournament",
+    "status": "COMPLETE",
+    "participant_resolution": "resolved",
+    "tournament_count": 2,
+    "random_seed": 20260803,
+    "pools": [
+      {
+        "pool_id": "placement-1",
+        "pool_index": 1,
+        "display_name": "第1順位決定トーナメント",
+        "participant_count": 4,
+        "pool_rank_range": [
+          1,
+          4
+        ],
+        "overall_rank_range": [
+          1,
+          4
+        ],
+        "seeds": [
+          {
+            "seed_no": 1,
+            "team_id": "team-05",
+            "block_id": "B",
+            "block_rank": 1,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 1
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-05"
+            }
+          },
+          {
+            "seed_no": 2,
+            "team_id": "team-04",
+            "block_id": "A",
+            "block_rank": 1,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 1
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-04"
+            }
+          },
+          {
+            "seed_no": 3,
+            "team_id": "team-01",
+            "block_id": "C",
+            "block_rank": 1,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 1
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-01"
+            }
+          },
+          {
+            "seed_no": 4,
+            "team_id": "team-06",
+            "block_id": "D",
+            "block_rank": 1,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 1
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-06"
+            }
+          }
+        ],
+        "matches": [
+          {
+            "id": "PT-1-RANK-1-4-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-1",
+            "round": "1〜4位 順位決定",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 1
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 1
+            },
+            "rank_range": [
+              1,
+              4
+            ]
+          },
+          {
+            "id": "PT-1-RANK-1-4-M2",
+            "phase": "placement_tournament",
+            "pool_id": "placement-1",
+            "round": "1〜4位 順位決定",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 1
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 1
+            },
+            "rank_range": [
+              1,
+              4
+            ]
+          },
+          {
+            "id": "PT-1-RANK-1-2-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-1",
+            "round": "優勝決定戦",
+            "round_no": 2,
+            "home": {
+              "type": "winner_of",
+              "match_id": "PT-1-RANK-1-4-M1"
+            },
+            "away": {
+              "type": "winner_of",
+              "match_id": "PT-1-RANK-1-4-M2"
+            },
+            "rank_range": [
+              1,
+              2
+            ]
+          },
+          {
+            "id": "PT-1-RANK-3-4-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-1",
+            "round": "3位決定戦",
+            "round_no": 2,
+            "home": {
+              "type": "loser_of",
+              "match_id": "PT-1-RANK-1-4-M1"
+            },
+            "away": {
+              "type": "loser_of",
+              "match_id": "PT-1-RANK-1-4-M2"
+            },
+            "rank_range": [
+              3,
+              4
+            ]
+          }
+        ],
+        "placements": [
+          {
+            "rank": 1,
+            "pool_rank": 1,
+            "entry": {
+              "type": "winner_of",
+              "match_id": "PT-1-RANK-1-2-M1"
+            }
+          },
+          {
+            "rank": 2,
+            "pool_rank": 2,
+            "entry": {
+              "type": "loser_of",
+              "match_id": "PT-1-RANK-1-2-M1"
+            }
+          },
+          {
+            "rank": 3,
+            "pool_rank": 3,
+            "entry": {
+              "type": "winner_of",
+              "match_id": "PT-1-RANK-3-4-M1"
+            }
+          },
+          {
+            "rank": 4,
+            "pool_rank": 4,
+            "entry": {
+              "type": "loser_of",
+              "match_id": "PT-1-RANK-3-4-M1"
+            }
+          }
+        ],
+        "evaluation": {
+          "first_match_same_block_count": 0,
+          "possible_same_block_match_count": 0,
+          "earliest_possible_same_block_round": null
+        },
+        "logical_layout": {
+          "layout_version": "1",
+          "symmetry": "mirrored",
+          "opening_entry_order": [
+            {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 1
+            },
+            {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 1
+            },
+            {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 1
+            },
+            {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 1
+            }
+          ],
+          "match_positions": [
+            {
+              "match_id": "PT-1-RANK-1-4-M1",
+              "rank_range": [
+                1,
+                4
+              ],
+              "order": 1
+            },
+            {
+              "match_id": "PT-1-RANK-1-4-M2",
+              "rank_range": [
+                1,
+                4
+              ],
+              "order": 2
+            },
+            {
+              "match_id": "PT-1-RANK-1-2-M1",
+              "rank_range": [
+                1,
+                2
+              ],
+              "order": 1
+            },
+            {
+              "match_id": "PT-1-RANK-3-4-M1",
+              "rank_range": [
+                3,
+                4
+              ],
+              "order": 1
+            }
+          ],
+          "branch_alignments": [
+            {
+              "rank_range": [
+                1,
+                4
+              ],
+              "status": "mirrored",
+              "winner_source_order": [
+                "PT-1-RANK-1-4-M1",
+                "PT-1-RANK-1-4-M2"
+              ],
+              "loser_source_order": [
+                "PT-1-RANK-1-4-M1",
+                "PT-1-RANK-1-4-M2"
+              ],
+              "loser_to_winner_permutation": [
+                1,
+                2
+              ],
+              "diagnostic_code": null
+            }
+          ]
+        }
+      },
+      {
+        "pool_id": "placement-2",
+        "pool_index": 2,
+        "display_name": "第2順位決定トーナメント",
+        "participant_count": 4,
+        "pool_rank_range": [
+          1,
+          4
+        ],
+        "overall_rank_range": [
+          5,
+          8
+        ],
+        "seeds": [
+          {
+            "seed_no": 1,
+            "team_id": "team-03",
+            "block_id": "C",
+            "block_rank": 2,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 2
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-03"
+            }
+          },
+          {
+            "seed_no": 2,
+            "team_id": "team-07",
+            "block_id": "A",
+            "block_rank": 2,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 2
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-07"
+            }
+          },
+          {
+            "seed_no": 3,
+            "team_id": "team-02",
+            "block_id": "B",
+            "block_rank": 2,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 2
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-02"
+            }
+          },
+          {
+            "seed_no": 4,
+            "team_id": "team-08",
+            "block_id": "D",
+            "block_rank": 2,
+            "entry": {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 2
+            },
+            "team": {
+              "type": "concrete_team",
+              "team_id": "team-08"
+            }
+          }
+        ],
+        "matches": [
+          {
+            "id": "PT-2-RANK-5-8-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-2",
+            "round": "5〜8位 順位決定",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 2
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 2
+            },
+            "rank_range": [
+              5,
+              8
+            ]
+          },
+          {
+            "id": "PT-2-RANK-5-8-M2",
+            "phase": "placement_tournament",
+            "pool_id": "placement-2",
+            "round": "5〜8位 順位決定",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 2
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 2
+            },
+            "rank_range": [
+              5,
+              8
+            ]
+          },
+          {
+            "id": "PT-2-RANK-5-6-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-2",
+            "round": "5位決定戦",
+            "round_no": 2,
+            "home": {
+              "type": "winner_of",
+              "match_id": "PT-2-RANK-5-8-M1"
+            },
+            "away": {
+              "type": "winner_of",
+              "match_id": "PT-2-RANK-5-8-M2"
+            },
+            "rank_range": [
+              5,
+              6
+            ]
+          },
+          {
+            "id": "PT-2-RANK-7-8-M1",
+            "phase": "placement_tournament",
+            "pool_id": "placement-2",
+            "round": "7位決定戦",
+            "round_no": 2,
+            "home": {
+              "type": "loser_of",
+              "match_id": "PT-2-RANK-5-8-M1"
+            },
+            "away": {
+              "type": "loser_of",
+              "match_id": "PT-2-RANK-5-8-M2"
+            },
+            "rank_range": [
+              7,
+              8
+            ]
+          }
+        ],
+        "placements": [
+          {
+            "rank": 5,
+            "pool_rank": 1,
+            "entry": {
+              "type": "winner_of",
+              "match_id": "PT-2-RANK-5-6-M1"
+            }
+          },
+          {
+            "rank": 6,
+            "pool_rank": 2,
+            "entry": {
+              "type": "loser_of",
+              "match_id": "PT-2-RANK-5-6-M1"
+            }
+          },
+          {
+            "rank": 7,
+            "pool_rank": 3,
+            "entry": {
+              "type": "winner_of",
+              "match_id": "PT-2-RANK-7-8-M1"
+            }
+          },
+          {
+            "rank": 8,
+            "pool_rank": 4,
+            "entry": {
+              "type": "loser_of",
+              "match_id": "PT-2-RANK-7-8-M1"
+            }
+          }
+        ],
+        "evaluation": {
+          "first_match_same_block_count": 0,
+          "possible_same_block_match_count": 0,
+          "earliest_possible_same_block_round": null
+        },
+        "logical_layout": {
+          "layout_version": "1",
+          "symmetry": "mirrored",
+          "opening_entry_order": [
+            {
+              "type": "league_rank",
+              "block_id": "C",
+              "rank": 2
+            },
+            {
+              "type": "league_rank",
+              "block_id": "D",
+              "rank": 2
+            },
+            {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 2
+            },
+            {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 2
+            }
+          ],
+          "match_positions": [
+            {
+              "match_id": "PT-2-RANK-5-8-M1",
+              "rank_range": [
+                5,
+                8
+              ],
+              "order": 1
+            },
+            {
+              "match_id": "PT-2-RANK-5-8-M2",
+              "rank_range": [
+                5,
+                8
+              ],
+              "order": 2
+            },
+            {
+              "match_id": "PT-2-RANK-5-6-M1",
+              "rank_range": [
+                5,
+                6
+              ],
+              "order": 1
+            },
+            {
+              "match_id": "PT-2-RANK-7-8-M1",
+              "rank_range": [
+                7,
+                8
+              ],
+              "order": 1
+            }
+          ],
+          "branch_alignments": [
+            {
+              "rank_range": [
+                5,
+                8
+              ],
+              "status": "mirrored",
+              "winner_source_order": [
+                "PT-2-RANK-5-8-M1",
+                "PT-2-RANK-5-8-M2"
+              ],
+              "loser_source_order": [
+                "PT-2-RANK-5-8-M1",
+                "PT-2-RANK-5-8-M2"
+              ],
+              "loser_to_winner_permutation": [
+                1,
+                2
+              ],
+              "diagnostic_code": null
+            }
+          ]
+        }
+      }
+    ],
+    "seed_draws": [
+      {
+        "pool_id": "placement-1",
+        "block_rank": 1,
+        "candidates": [
+          "team-01",
+          "team-04",
+          "team-05",
+          "team-06"
+        ],
+        "decided_order": [
+          "team-05",
+          "team-04",
+          "team-01",
+          "team-06"
+        ],
+        "candidate_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          }
+        ],
+        "decided_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 1
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 1
+          }
+        ],
+        "random_seed": 20260803
+      },
+      {
+        "pool_id": "placement-2",
+        "block_rank": 2,
+        "candidates": [
+          "team-02",
+          "team-03",
+          "team-07",
+          "team-08"
+        ],
+        "decided_order": [
+          "team-03",
+          "team-07",
+          "team-02",
+          "team-08"
+        ],
+        "candidate_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 2
+          }
+        ],
+        "decided_rank_refs": [
+          {
+            "type": "league_rank",
+            "block_id": "C",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "A",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "B",
+            "rank": 2
+          },
+          {
+            "type": "league_rank",
+            "block_id": "D",
+            "rank": 2
+          }
+        ],
+        "random_seed": 20260803
+      }
+    ],
+    "warnings": []
+  },
+  "results": [
+    {
+      "match_id": "PT-1-RANK-1-4-M1",
+      "home_team_id": "team-05",
+      "away_team_id": "team-06",
+      "regular_score_home": 0,
+      "regular_score_away": 0,
+      "penalty_score_home": 0,
+      "penalty_score_away": 1
+    },
+    {
+      "match_id": "PT-1-RANK-1-4-M2",
+      "home_team_id": "team-04",
+      "away_team_id": "team-01",
+      "regular_score_home": 1,
+      "regular_score_away": 1,
+      "penalty_score_home": 0,
+      "penalty_score_away": 1
+    },
+    {
+      "match_id": "PT-1-RANK-1-2-M1",
+      "home_team_id": "team-06",
+      "away_team_id": "team-01",
+      "regular_score_home": 2,
+      "regular_score_away": 1
+    },
+    {
+      "match_id": "PT-1-RANK-3-4-M1",
+      "home_team_id": "team-05",
+      "away_team_id": "team-04",
+      "regular_score_home": 1,
+      "regular_score_away": 0
+    },
+    {
+      "match_id": "PT-2-RANK-5-8-M1",
+      "home_team_id": "team-03",
+      "away_team_id": "team-08",
+      "regular_score_home": 1,
+      "regular_score_away": 0
+    },
+    {
+      "match_id": "PT-2-RANK-5-8-M2",
+      "home_team_id": "team-07",
+      "away_team_id": "team-02",
+      "regular_score_home": 0,
+      "regular_score_away": 2
+    },
+    {
+      "match_id": "PT-2-RANK-5-6-M1",
+      "home_team_id": "team-03",
+      "away_team_id": "team-02",
+      "regular_score_home": 1,
+      "regular_score_away": 1,
+      "penalty_score_home": 1,
+      "penalty_score_away": 2
+    },
+    {
+      "match_id": "PT-2-RANK-7-8-M1",
+      "home_team_id": "team-08",
+      "away_team_id": "team-07",
+      "regular_score_home": 2,
+      "regular_score_away": 0
+    }
+  ]
+}

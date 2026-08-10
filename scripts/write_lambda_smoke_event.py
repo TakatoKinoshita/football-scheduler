@@ -17,6 +17,8 @@ from football_scheduler.fixtures import (
     make_twenty_four_team_schedule_creation_request,
 )
 
+_TOURNAMENT_RESULTS_FIXTURE = Path(__file__).resolve().parent / "fixtures/tournament-results-8.json"
+
 
 def build_smoke_event() -> dict[str, object]:
     """本番API adapterと同じaction照合を通る直接invoke eventを返す。"""
@@ -32,6 +34,26 @@ def build_smoke_event() -> dict[str, object]:
             "content-type": "application/json",
             "content-length": str(len(request_body.encode("utf-8"))),
             "x-turnstile-action": "generate_schedule",
+        },
+        "body": request_body,
+        "isBase64Encoded": False,
+    }
+
+
+def build_tournament_results_event() -> dict[str, object]:
+    """8チームの全試合結果から最終順位を確定するeventを返す。"""
+
+    request_body = json.dumps(
+        json.loads(_TOURNAMENT_RESULTS_FIXTURE.read_text(encoding="utf-8")),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return {
+        "httpMethod": "POST",
+        "headers": {
+            "content-type": "application/json",
+            "content-length": str(len(request_body.encode("utf-8"))),
+            "x-turnstile-action": "calculate_tournament_results",
         },
         "body": request_body,
         "isBase64Encoded": False,
@@ -80,13 +102,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="本番Lambda用の小規模smoke eventを作成します。")
     parser.add_argument("output", type=Path)
     profile = parser.add_mutually_exclusive_group()
+    profile.add_argument("--tournament-results", action="store_true")
     profile.add_argument("--sixteen-day2", action="store_true")
     profile.add_argument("--twenty-four-day2", action="store_true")
     profile.add_argument("--maximum-day2", action="store_true")
     profile.add_argument("--maximum-four-day2", action="store_true")
     args = parser.parse_args()
     event = (
-        build_sixteen_day2_event()
+        build_tournament_results_event()
+        if args.tournament_results
+        else build_sixteen_day2_event()
         if args.sixteen_day2
         else build_twenty_four_day2_event()
         if args.twenty_four_day2

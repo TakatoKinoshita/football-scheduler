@@ -175,11 +175,7 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     except FinalStageConfigurationError as exc:
         return _error_response(exc.code, exc.message, exc.details)
     except ValidationError as exc:
-        return _error_response(
-            "INPUT_SCHEMA_INVALID",
-            "大会設定の一部を読み取れませんでした。項目別の説明に沿って修正してください。",
-            {"errors": _pydantic_errors(exc)},
-        )
+        return _validation_error_response(exc, payload)
     except (TypeError, ValueError) as exc:
         return _error_response(
             "INPUT_SCHEMA_INVALID",
@@ -722,7 +718,7 @@ def _run_day2_creation_stage(
     except ValidationError as exc:
         response = _error_response(
             "INPUT_SCHEMA_INVALID",
-            "大会設定の一部を読み取れませんでした。項目別の説明に沿って修正してください。",
+            "大会設定の一部を読み取れませんでした。入力内容を確認してください。",
             {"errors": _pydantic_errors(exc)},
         )
     except (TypeError, ValueError) as exc:
@@ -1278,6 +1274,70 @@ def _pydantic_errors(exc: ValidationError) -> list[dict[str, Any]]:
             }
         )
     return errors
+
+
+_TOURNAMENT_SCORE_FIELDS = frozenset(
+    {
+        "regular_score_home",
+        "regular_score_away",
+        "penalty_score_home",
+        "penalty_score_away",
+    }
+)
+
+
+def _validation_error_response(exc: ValidationError, payload: Mapping[str, Any]) -> dict[str, Any]:
+    errors = _pydantic_errors(exc)
+    if payload.get("request_kind") != "tournament_results":
+        return _error_response(
+            "INPUT_SCHEMA_INVALID",
+            "大会設定の一部を読み取れませんでした。入力内容を確認してください。",
+            {"errors": errors},
+        )
+
+    score_errors: list[dict[str, Any]] = []
+    raw_results = payload.get("results")
+    for raw_error, error in zip(
+        exc.errors(include_url=False, include_context=False), errors, strict=True
+    ):
+        location = raw_error.get("loc", ())
+        if (
+            len(location) != 3
+            or location[0] != "results"
+            or not isinstance(location[1], int)
+            or location[2] not in _TOURNAMENT_SCORE_FIELDS
+        ):
+            break
+        result_index = location[1]
+        result = (
+            raw_results[result_index]
+            if isinstance(raw_results, Sequence)
+            and not isinstance(raw_results, (str, bytes, bytearray))
+            and 0 <= result_index < len(raw_results)
+            else None
+        )
+        match_id = result.get("match_id") if isinstance(result, Mapping) else None
+        score_errors.append(
+            {
+                **error,
+                "match_id": str(match_id) if isinstance(match_id, str) else None,
+                "score_field": str(location[2]),
+                "message": "得点は0以上の整数で入力してください。",
+            }
+        )
+    else:
+        if score_errors:
+            return _error_response(
+                "INPUT_SCHEMA_INVALID",
+                "得点欄に0以上の整数を入力してください。入力済みのほかの結果は保持されています。",
+                {"scope": "tournament_scores", "errors": score_errors},
+            )
+
+    return _error_response(
+        "INPUT_SCHEMA_INVALID",
+        "保存された2日目の計画と結果の整合性を確認できませんでした。入力した結果は保持されています。ページを再読み込みして、もう一度お試しください。",
+        {"scope": "tournament_data"},
+    )
 
 
 def _safe_exception_reason(exc: Exception) -> str:

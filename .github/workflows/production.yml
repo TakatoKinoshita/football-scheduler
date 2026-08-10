@@ -387,6 +387,18 @@ jobs:
           uv run python scripts/check_lambda_smoke_response.py \
             /tmp/lambda-smoke-response.json --release-id "$RELEASE_ID"
           uv run python scripts/write_lambda_smoke_event.py \
+            /tmp/lambda-tournament-results-event.json --tournament-results
+          aws lambda invoke \
+            --function-name "${{ steps.stack.outputs.function }}" \
+            --qualifier live \
+            --payload fileb:///tmp/lambda-tournament-results-event.json \
+            --cli-binary-format raw-in-base64-out \
+            --no-cli-pager /tmp/lambda-tournament-results-response.json
+          uv run python scripts/check_lambda_smoke_response.py \
+            /tmp/lambda-tournament-results-response.json \
+            --release-id "$RELEASE_ID" \
+            --tournament-results
+          uv run python scripts/write_lambda_smoke_event.py \
             /tmp/lambda-sixteen-day2-event.json --sixteen-day2
           aws lambda invoke \
             --function-name "${{ steps.stack.outputs.function }}" \
