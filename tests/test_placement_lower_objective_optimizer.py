@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from ortools.sat.python import cp_model
 from pydantic import ValidationError
 
 from football_scheduler import day2_schedule
@@ -19,6 +22,7 @@ from football_scheduler.placement_template_generator import (
     StabilizedPlacementTemplateSolver,
     _hydrate_and_validate_entry,
 )
+from football_scheduler.placement_template_runtime import load_placement_template_catalog
 
 CURRENT_BASELINE = read_deterministic_gzip(
     Path(__file__).resolve().parent
@@ -31,20 +35,24 @@ CURRENT_BASELINE_BY_ID = {record.key.catalog_id: record for record in CURRENT_BA
 
 def _template_schedule(
     *,
+    pool_count: int = 2,
     pool_size: int,
     court_count: int,
     organizer_capacity: int,
     fallback: Day2Fallback = Day2Fallback.ORGANIZER,
 ) -> tuple[Day2ScheduleRequest, Day2Schedule]:
     key = PlacementTemplateKey(
-        pool_count=2,
+        pool_count=pool_count,
         pool_size=pool_size,
         court_count=court_count,
         organizer_capacity=organizer_capacity,
         day2_fallback=fallback,
     )
-    entry = CURRENT_BASELINE_BY_ID[key.catalog_id].candidate
-    assert entry is not None
+    if (pool_count, pool_size) in {(2, 4), (2, 8)}:
+        entry = CURRENT_BASELINE_BY_ID[key.catalog_id].candidate
+        assert entry is not None
+    else:
+        entry = load_placement_template_catalog().entry_for(key)
     request, schedule = _hydrate_and_validate_entry(entry)
     assert schedule.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
     return request, schedule
@@ -126,6 +134,143 @@ def test_unknown_preserves_incumbent_and_does_not_create_proof(
     assert result.proven_objectives == ("used_sections",)
     assert result.objectives[1].status is SolverStatus.UNKNOWN
     assert all(not stage.optimality_proven for stage in result.objectives[1:])
+
+
+@pytest.mark.parametrize(("pool_count", "pool_size"), [(3, 8), (2, 16), (4, 8)])
+def test_large_topologies_use_v2_and_keep_max_and_sum_as_separate_stages(
+    monkeypatch: pytest.MonkeyPatch,
+    pool_count: int,
+    pool_size: int,
+) -> None:
+    request, schedule = _template_schedule(
+        pool_count=pool_count,
+        pool_size=pool_size,
+        court_count=2,
+        organizer_capacity=2,
+    )
+    before = optimizer.placement_objective_vector(request, schedule)
+    calls: list[tuple[str, Mapping[str, int], bool]] = []
+    progress_lengths: list[int] = []
+
+    def stalled_section(
+        request: Day2ScheduleRequest,
+        path_model: object,
+        incumbent: Day2Schedule,
+        **kwargs: object,
+    ) -> optimizer._StageOutcome:
+        fixed_values = kwargs["fixed_values"]
+        assert isinstance(fixed_values, Mapping)
+        calls.append(
+            (
+                str(kwargs["objective"]),
+                dict(fixed_values),
+                bool(kwargs.get("attempt_global_proof", True)),
+            )
+        )
+        return _stalled_outcome(request, path_model, incumbent, **kwargs)
+
+    monkeypatch.setattr(optimizer, "_optimize_section_objective", stalled_section)
+    monkeypatch.setattr(optimizer, "_optimize_full_exact_objective", _stalled_outcome)
+
+    result = optimizer.optimize_lower_objectives(
+        request,
+        schedule,
+        max_time_per_stage=0.01,
+        stage_callback=lambda progress: progress_lengths.append(len(progress.objectives)),
+    )
+
+    assert result.optimizer_version == optimizer.LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    assert optimizer.placement_objective_vector(request, result.schedule) == before
+    assert calls[0] == (
+        "non_primary_final_max_gap",
+        {"used_sections": before[0]},
+        True,
+    )
+    if pool_count == 2:
+        assert "non_primary_final_sum_gap" not in {call[0] for call in calls}
+    else:
+        assert calls[1] == (
+            "non_primary_final_sum_gap",
+            {
+                "used_sections": before[0],
+                "non_primary_final_max_gap": before[1],
+            },
+            False,
+        )
+    assert progress_lengths == [1, 2, 3, 4, 5, 6]
+    assert result.proven_objectives == ("used_sections",)
+
+
+def test_legacy_incumbent_is_retained_when_all_new_stages_are_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, incumbent = _template_schedule(
+        pool_size=4,
+        court_count=3,
+        organizer_capacity=2,
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    before = optimizer.placement_objective_vector(request, incumbent)
+    fixed = optimizer._run_fixed_section_court_stage(
+        request,
+        path_model,
+        incumbent,
+        fixed_values=optimizer._prior_fixed_values("team_court_change_count", before),
+        objective="team_court_change_count",
+        incumbent_value=before[4],
+        max_time_seconds=4,
+    )
+    assert fixed.schedule is not None
+    legacy = fixed.schedule
+    legacy_values = optimizer.placement_objective_vector(request, legacy)
+    assert legacy_values < before
+    monkeypatch.setattr(optimizer, "_optimize_section_objective", _stalled_outcome)
+    monkeypatch.setattr(optimizer, "_optimize_full_exact_objective", _stalled_outcome)
+
+    result = optimizer.optimize_lower_objectives(
+        request,
+        incumbent,
+        legacy_incumbent=legacy,
+        max_time_per_stage=0.01,
+    )
+
+    assert optimizer.placement_objective_vector(request, result.schedule) == legacy_values
+    assert optimizer.placement_objective_vector(request, result.schedule) < before
+
+
+def test_stage_progress_can_resume_from_next_unfinished_objective(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, schedule = _template_schedule(
+        pool_count=3,
+        pool_size=8,
+        court_count=2,
+        organizer_capacity=2,
+    )
+    monkeypatch.setattr(optimizer, "_optimize_section_objective", _stalled_outcome)
+    monkeypatch.setattr(optimizer, "_optimize_full_exact_objective", _stalled_outcome)
+    first_progress: list[optimizer.LowerObjectiveOptimizationProgress] = []
+    optimizer.optimize_lower_objectives(
+        request,
+        schedule,
+        max_time_per_stage=0.01,
+        stage_callback=first_progress.append,
+    )
+    resume = first_progress[2]
+    assert tuple(stage.objective for stage in resume.objectives) == PLACEMENT_OBJECTIVES[:3]
+    resumed_progress: list[optimizer.LowerObjectiveOptimizationProgress] = []
+
+    result = optimizer.optimize_lower_objectives(
+        request,
+        schedule,
+        resume_from=resume,
+        max_time_per_stage=0.01,
+        stage_callback=resumed_progress.append,
+    )
+
+    assert [len(progress.objectives) for progress in resumed_progress] == [4, 5, 6]
+    assert result.objectives[:3] == resume.objectives
+    assert result.wall_time_seconds == resume.wall_time_seconds
 
 
 def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
@@ -235,6 +380,83 @@ def test_section_relaxation_alone_never_creates_proof(
     assert outcome.schedule == incumbent
     assert outcome.optimality_proven is False
     assert outcome.proof_method == "unproven"
+
+
+def test_max_gap_exact_completion_does_not_force_sum_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, incumbent = _template_schedule(
+        pool_count=3,
+        pool_size=8,
+        court_count=5,
+        organizer_capacity=2,
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    values = optimizer.placement_objective_vector(request, incumbent)
+    assert values[1] != values[2]
+    captured_sum_equalities: list[tuple[int, ...]] = []
+
+    def fixed_relaxation(
+        *_args: object, **_kwargs: object
+    ) -> tuple[cp_model.CpModel, cp_model.IntVar]:
+        model = cp_model.CpModel()
+        objective = model.new_int_var(values[1], values[1], "fixed_relaxed_max_gap")
+        return model, objective
+
+    def tiny_exact_model(
+        *_args: object, **_kwargs: object
+    ) -> tuple[cp_model.CpModel, day2_schedule._ModelVariables]:
+        model = cp_model.CpModel()
+        variables = SimpleNamespace(
+            used_sections=model.new_int_var(values[0], values[0], "used_sections"),
+            non_primary_final_max_gap=model.new_int_var(0, values[0], "max_gap"),
+            non_primary_final_sum_gap=model.new_int_var(0, values[0] * 2, "sum_gap"),
+            maximum_wait=model.new_int_var(0, values[0], "maximum_wait"),
+            court_change_count=model.new_int_var(0, 100, "court_change_count"),
+            court_usage_difference=model.new_int_var(0, 100, "court_usage_difference"),
+        )
+        return model, cast(day2_schedule._ModelVariables, variables)
+
+    def inspect_completion(
+        _request: Day2ScheduleRequest,
+        _path_model: day2_schedule._PathModel,
+        model: cp_model.CpModel,
+        variables: day2_schedule._ModelVariables,
+        _max_time_seconds: float,
+        *,
+        objective: cp_model.IntVar | None,
+    ) -> optimizer._ExactOutcome:
+        assert objective is None
+        sum_index = variables.non_primary_final_sum_gap.index
+        for constraint in model.proto.constraints:
+            if tuple(constraint.linear.vars) == (sum_index,):
+                captured_sum_equalities.append(tuple(constraint.linear.domain))
+        return optimizer._ExactOutcome(
+            schedule=incumbent,
+            status=SolverStatus.OPTIMAL,
+            optimality_proven=False,
+            wall_time_seconds=0,
+            model_fingerprint="4" * 64,
+        )
+
+    monkeypatch.setattr(optimizer, "_build_section_relaxation", fixed_relaxation)
+    monkeypatch.setattr(optimizer, "_build_exact_model", tiny_exact_model)
+    monkeypatch.setattr(optimizer, "_solve_exact_model", inspect_completion)
+
+    outcome = optimizer._optimize_section_objective(
+        request,
+        path_model,
+        incumbent,
+        fixed_values={"used_sections": values[0]},
+        objective="non_primary_final_max_gap",
+        incumbent_value=values[1],
+        max_time_seconds=1,
+    )
+
+    assert captured_sum_equalities == []
+    assert outcome.optimality_proven is True
+    assert outcome.proof_method == "section_relaxation_exact_completion"
+    assert optimizer.placement_objective_vector(request, outcome.schedule)[1:3] == values[1:3]
 
 
 def test_section_lower_bound_is_proven_only_after_exact_completion() -> None:
@@ -491,7 +713,14 @@ def test_optimizer_rejects_out_of_scope_topology() -> None:
     )
     solver = StabilizedPlacementTemplateSolver(max_time_seconds=0.1)
     request = solver._base_request(key)
-    check: Callable[[Day2ScheduleRequest], None] = optimizer._validate_supported_topology
+    request = request.model_copy(
+        update={
+            "tournament_plan": request.tournament_plan.model_copy(
+                update={"pools": request.tournament_plan.pools[:1]}
+            )
+        }
+    )
+    check: Callable[[Day2ScheduleRequest], object] = optimizer._validate_supported_topology
 
-    with pytest.raises(ValueError, match="2x4または2x8"):
+    with pytest.raises(ValueError, match="5トポロジー"):
         check(request)

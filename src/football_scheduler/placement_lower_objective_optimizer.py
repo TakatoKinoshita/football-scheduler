@@ -1,4 +1,4 @@
-"""8・16チーム用テンプレートの下位目的をオフラインで再最適化する。
+"""順位決定トーナメントテンプレートの下位目的をオフラインで再最適化する。
 
 このモジュールはランタイム経路では使用しない。証明済みの最小 horizon と、
 独立に再検証できる incumbent を受け取り、辞書式目的を悪化させずに改善する。
@@ -8,7 +8,7 @@ section 緩和の下界は、同じ値を厳密モデルで達成できた場合
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from hashlib import sha256
 from time import perf_counter
 from typing import Annotated, Literal, Self
@@ -20,12 +20,19 @@ from football_scheduler import day2_schedule
 from football_scheduler.day2_schedule import Day2Schedule, Day2ScheduleRequest
 from football_scheduler.models import (
     ContractModel,
+    Day2Fallback,
     Diagnostic,
     ObjectiveStageMetric,
+    RefereeKind,
     Slot,
     SolverStatus,
 )
-from football_scheduler.placement_template_contract import PLACEMENT_OBJECTIVES
+from football_scheduler.placement_template_contract import (
+    LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+    PLACEMENT_OBJECTIVES,
+    PlacementOptimizationVersion,
+)
+from football_scheduler.validator import validate_day2_schedule
 
 LOWER_OBJECTIVE_OPTIMIZER_VERSION: Literal["placement-lower-objective-optimizer-v1"] = (
     "placement-lower-objective-optimizer-v1"
@@ -51,6 +58,7 @@ class LowerObjectiveStageResult(ContractModel):
     best_bound: float | None = None
     wall_time_seconds: Annotated[float, Field(ge=0)] = 0
     model_fingerprint: str
+    termination_reason: str | None = None
 
     @model_validator(mode="after")
     def validate_proof(self) -> Self:
@@ -66,9 +74,7 @@ class LowerObjectiveStageResult(ContractModel):
 class LowerObjectiveOptimizationResult(ContractModel):
     """最良の検証済み候補と、連続prefixの証明結果。"""
 
-    optimizer_version: Literal["placement-lower-objective-optimizer-v1"] = (
-        LOWER_OBJECTIVE_OPTIMIZER_VERSION
-    )
+    optimizer_version: PlacementOptimizationVersion = LOWER_OBJECTIVE_OPTIMIZER_VERSION
     schedule: Day2Schedule
     objectives: tuple[LowerObjectiveStageResult, ...]
     proven_objectives: tuple[str, ...]
@@ -93,6 +99,41 @@ class LowerObjectiveOptimizationResult(ContractModel):
         return self
 
 
+class LowerObjectiveOptimizationProgress(ContractModel):
+    """外部orchestratorが目的段階ごとに永続化できる再開境界。"""
+
+    optimizer_version: PlacementOptimizationVersion
+    schedule: Day2Schedule
+    objectives: tuple[LowerObjectiveStageResult, ...]
+    proven_objectives: tuple[str, ...]
+    wall_time_seconds: Annotated[float, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def validate_objective_prefix(self) -> Self:
+        names = tuple(stage.objective for stage in self.objectives)
+        if not names or names != PLACEMENT_OBJECTIVES[: len(names)]:
+            raise ValueError("再開地点の目的はused_sectionsから始まる連続prefixにしてください")
+        if len(names) > len(PLACEMENT_OBJECTIVES):
+            raise ValueError("再開地点の目的数がテンプレート契約を超えています")
+        seen_unproven = False
+        proven: list[str] = []
+        for stage in self.objectives:
+            if seen_unproven and stage.optimality_proven:
+                raise ValueError("再開地点の証明フラグは連続prefixにしてください")
+            if stage.optimality_proven:
+                proven.append(stage.objective)
+            else:
+                seen_unproven = True
+        if tuple(proven) != self.proven_objectives:
+            raise ValueError("再開地点のproven_objectivesが目的別証明と一致しません")
+        if not self.objectives[0].optimality_proven:
+            raise ValueError("再開には使用セクション数の最小性証明が必要です")
+        return self
+
+
+LowerObjectiveStageCallback = Callable[[LowerObjectiveOptimizationProgress], None]
+
+
 class LowerObjectiveOptimizationError(RuntimeError):
     """入力候補が再最適化の安全な前提を満たさない。"""
 
@@ -115,6 +156,7 @@ class _StageOutcome(ContractModel):
     best_bound: float | None = None
     wall_time_seconds: Annotated[float, Field(ge=0)]
     model_fingerprint: str
+    termination_reason: str | None = None
 
 
 def placement_objective_vector(
@@ -131,6 +173,9 @@ def optimize_lower_objectives(
     request: Day2ScheduleRequest,
     incumbent: Day2Schedule,
     *,
+    legacy_incumbent: Day2Schedule | None = None,
+    resume_from: LowerObjectiveOptimizationProgress | None = None,
+    stage_callback: LowerObjectiveStageCallback | None = None,
     max_time_per_stage: float = 840.0,
 ) -> LowerObjectiveOptimizationResult:
     """固定最小horizonで下位目的を安全に改善し、証明prefixを返す。
@@ -141,73 +186,74 @@ def optimize_lower_objectives(
 
     if not 0 < max_time_per_stage <= 840:
         raise ValueError("1目的の探索時間は0秒より大きく840秒以下にしてください")
-    _validate_supported_topology(request)
+    optimizer_version = _validate_supported_topology(request)
     path_model = day2_schedule._build_path_model(request.tournament_plan)
-    current = _normalize_incumbent(request, path_model, incumbent)
-    current_values = _objective_vector_from_slots(request, path_model, current.slots)
-    horizon = current_values[0]
-    if current_values[1] != current_values[2]:
-        raise LowerObjectiveOptimizationError("2トーナメントの決勝gap最大値と合計値が一致しません")
-    existing_proofs = _existing_proof_prefix(current)
+    baseline = _normalize_incumbent(request, path_model, incumbent)
+    baseline_values = _objective_vector_from_slots(request, path_model, baseline.slots)
+    horizon = baseline_values[0]
+    existing_proofs = _existing_proof_prefix(baseline)
     if not existing_proofs or existing_proofs[0] != "used_sections":
         raise LowerObjectiveOptimizationError("使用セクション数の最小性証明が必要です")
 
-    stages: list[LowerObjectiveStageResult] = [
-        LowerObjectiveStageResult(
-            objective="used_sections",
-            value=horizon,
-            status=SolverStatus.OPTIMAL,
-            optimality_proven=True,
-            proof_method="existing",
-            best_bound=float(horizon),
-            model_fingerprint=_proof_fingerprint("used_sections", horizon, "existing"),
-        )
-    ]
-    proof_open = True
-    total_wall = 0.0
+    current = baseline
+    if legacy_incumbent is not None:
+        legacy = _normalize_incumbent(request, path_model, legacy_incumbent)
+        legacy_values = _objective_vector_from_slots(request, path_model, legacy.slots)
+        if legacy_values[0] < horizon:
+            raise LowerObjectiveOptimizationError(
+                "legacy候補が証明済み最小セクション数を下回りました"
+            )
+        current = _select_non_worse(request, path_model, current, legacy)
 
-    # 2トーナメントでは非最高順位帯の決勝が1つだけなのでmaxとsumは同じ値。
-    gap_value = current_values[1]
-    gap_existing = {
-        "non_primary_final_max_gap",
-        "non_primary_final_sum_gap",
-    }.issubset(existing_proofs)
-    if proof_open and gap_existing:
-        gap_outcome = _existing_outcome(current, gap_value, "non_primary_final_max_gap")
-    elif proof_open and gap_value == 0:
-        gap_outcome = _analytic_outcome(current, gap_value, "non_primary_final_max_gap")
+    current_values = _objective_vector_from_slots(request, path_model, current.slots)
+    existing_proofs = _matching_existing_proof_prefix(
+        existing_proofs,
+        baseline_values,
+        current_values,
+    )
+    if resume_from is None:
+        stages: list[LowerObjectiveStageResult] = [
+            LowerObjectiveStageResult(
+                objective="used_sections",
+                value=horizon,
+                status=SolverStatus.OPTIMAL,
+                optimality_proven=True,
+                proof_method="existing",
+                best_bound=float(horizon),
+                model_fingerprint=_proof_fingerprint(
+                    "used_sections", horizon, "existing", optimizer_version
+                ),
+                termination_reason="existing_proof",
+            )
+        ]
+        total_wall = 0.0
+        _emit_stage_progress(
+            stage_callback,
+            optimizer_version,
+            current,
+            stages,
+            total_wall,
+        )
     else:
-        gap_outcome = _optimize_section_objective(
+        current, stages, total_wall = _restore_progress(
             request,
             path_model,
+            optimizer_version,
             current,
-            fixed_values={"used_sections": horizon},
-            objective="non_primary_final_max_gap",
-            incumbent_value=gap_value,
-            max_time_seconds=max_time_per_stage,
+            resume_from,
         )
-    current = _select_non_worse(request, path_model, current, gap_outcome.schedule)
-    current_values = _objective_vector_from_slots(request, path_model, current.slots)
-    total_wall += gap_outcome.wall_time_seconds
-    gap_proven = proof_open and gap_outcome.optimality_proven
-    for name in ("non_primary_final_max_gap", "non_primary_final_sum_gap"):
-        stages.append(
-            LowerObjectiveStageResult(
-                objective=name,
-                value=current_values[1],
-                status=gap_outcome.status,
-                optimality_proven=gap_proven,
-                proof_method=(gap_outcome.proof_method if gap_proven else "unproven"),
-                best_bound=gap_outcome.best_bound,
-                wall_time_seconds=(
-                    gap_outcome.wall_time_seconds if name.endswith("max_gap") else 0
-                ),
-                model_fingerprint=gap_outcome.model_fingerprint,
-            )
+        current_values = _objective_vector_from_slots(request, path_model, current.slots)
+        existing_proofs = _matching_existing_proof_prefix(
+            existing_proofs,
+            baseline_values,
+            current_values,
         )
-    proof_open = gap_proven
+
+    proof_open = all(stage.optimality_proven for stage in stages)
 
     lower_bounds = {
+        "non_primary_final_max_gap": 0,
+        "non_primary_final_sum_gap": 0,
         "maximum_team_wait_sections": 1 if path_model.dependencies else 0,
         "team_court_change_count": 0,
         "court_usage_difference": _court_usage_lower_bound(
@@ -215,33 +261,55 @@ def optimize_lower_objectives(
         ),
     }
     objective_indexes = {
+        "non_primary_final_max_gap": 1,
+        "non_primary_final_sum_gap": 2,
         "maximum_team_wait_sections": 3,
         "team_court_change_count": 4,
         "court_usage_difference": 5,
     }
-    for name in (
+    section_objectives = {
+        "non_primary_final_max_gap",
+        "non_primary_final_sum_gap",
         "maximum_team_wait_sections",
-        "team_court_change_count",
-        "court_usage_difference",
-    ):
+    }
+    for name in PLACEMENT_OBJECTIVES[len(stages) :]:
         current_values = _objective_vector_from_slots(request, path_model, current.slots)
         incumbent_value = current_values[objective_indexes[name]]
         if proof_open and name in existing_proofs:
-            outcome = _existing_outcome(current, incumbent_value, name)
+            outcome = _existing_outcome(
+                current, incumbent_value, name, optimizer_version=optimizer_version
+            )
+        # 2トーナメントは非最高順位帯の決勝が1つだけなので、maxとsumが恒等的に等しい。
+        # v1の探索回数を維持しつつ、sumも独立したcheckpoint境界として通知する。
+        elif name == "non_primary_final_sum_gap" and len(request.tournament_plan.pools) == 2:
+            if proof_open:
+                outcome = _analytic_outcome(
+                    current, incumbent_value, name, optimizer_version=optimizer_version
+                )
+            else:
+                previous = stages[-1]
+                outcome = _StageOutcome(
+                    schedule=current,
+                    status=previous.status,
+                    optimality_proven=False,
+                    proof_method="unproven",
+                    best_bound=previous.best_bound,
+                    wall_time_seconds=0,
+                    model_fingerprint=previous.model_fingerprint,
+                    termination_reason="two_pool_gap_identity_after_unproven_max",
+                )
         # 前段が未証明でも、絶対下限へ到達済みなら候補改善は不可能である。
         # 探索は省略するが、連続prefix契約により後段のproofはfalseのままにする。
         elif incumbent_value == lower_bounds[name]:
-            outcome = _analytic_outcome(current, incumbent_value, name)
-        elif name == "maximum_team_wait_sections":
+            outcome = _analytic_outcome(
+                current, incumbent_value, name, optimizer_version=optimizer_version
+            )
+        elif name in section_objectives:
             outcome = _optimize_section_objective(
                 request,
                 path_model,
                 current,
-                fixed_values={
-                    "used_sections": horizon,
-                    "non_primary_final_max_gap": current_values[1],
-                    "non_primary_final_sum_gap": current_values[2],
-                },
+                fixed_values=_prior_fixed_values(name, current_values),
                 objective=name,
                 incumbent_value=incumbent_value,
                 max_time_seconds=max_time_per_stage,
@@ -272,9 +340,20 @@ def optimize_lower_objectives(
                 best_bound=outcome.best_bound,
                 wall_time_seconds=outcome.wall_time_seconds,
                 model_fingerprint=outcome.model_fingerprint,
+                termination_reason=(
+                    outcome.termination_reason
+                    or _solver_termination_reason(outcome.status, outcome.optimality_proven)
+                ),
             )
         )
         proof_open = proven
+        _emit_stage_progress(
+            stage_callback,
+            optimizer_version,
+            current,
+            stages,
+            total_wall,
+        )
 
     final_values = _objective_vector_from_slots(request, path_model, current.slots)
     if final_values != tuple(stage.value for stage in stages):
@@ -282,6 +361,7 @@ def optimize_lower_objectives(
     current = _apply_proof_metrics(current, tuple(stages), total_wall)
     proven_names = tuple(stage.objective for stage in stages if stage.optimality_proven)
     return LowerObjectiveOptimizationResult(
+        optimizer_version=optimizer_version,
         schedule=current,
         objectives=tuple(stages),
         proven_objectives=proven_names,
@@ -353,10 +433,6 @@ def _optimize_section_objective(
             )
             completion_var = _objective_variable(completion_variables, objective)
             completion_model.add(completion_var == relaxed_optimum)
-            if objective == "non_primary_final_max_gap":
-                completion_model.add(
-                    completion_variables.non_primary_final_sum_gap == relaxed_optimum
-                )
             completed = _solve_exact_model(
                 request,
                 path_model,
@@ -373,22 +449,24 @@ def _optimize_section_objective(
                     {
                         **fixed_values,
                         objective: relaxed_optimum,
-                        **(
-                            {"non_primary_final_sum_gap": relaxed_optimum}
-                            if objective == "non_primary_final_max_gap"
-                            else {}
-                        ),
                     },
                     context="section緩和の厳密復元",
                 )
+                selected = _select_non_worse(
+                    request,
+                    path_model,
+                    incumbent,
+                    completed.schedule,
+                )
                 return _StageOutcome(
-                    schedule=completed.schedule,
+                    schedule=selected,
                     status=SolverStatus.OPTIMAL,
                     optimality_proven=True,
                     proof_method="section_relaxation_exact_completion",
                     best_bound=float(relaxed_optimum),
                     wall_time_seconds=relaxation_wall + completed.wall_time_seconds,
                     model_fingerprint=completed.model_fingerprint,
+                    termination_reason="section_relaxation_exact_completion",
                 )
 
     elapsed = perf_counter() - started
@@ -406,6 +484,7 @@ def _optimize_section_objective(
             ),
             wall_time_seconds=relaxation_wall,
             model_fingerprint=relaxation_fingerprint,
+            termination_reason="stage_time_limit",
         )
     exact = _run_full_exact_stage(
         request,
@@ -414,8 +493,13 @@ def _optimize_section_objective(
         objective=objective,
         incumbent_value=incumbent_value,
         max_time_seconds=remaining,
+        hint_schedule=incumbent,
     )
-    selected = exact.schedule or incumbent
+    selected = (
+        _select_non_worse(request, path_model, incumbent, exact.schedule)
+        if exact.schedule is not None
+        else incumbent
+    )
     return _StageOutcome(
         schedule=selected,
         status=exact.status,
@@ -424,6 +508,7 @@ def _optimize_section_objective(
         best_bound=exact.best_bound,
         wall_time_seconds=relaxation_wall + exact.wall_time_seconds,
         model_fingerprint=exact.model_fingerprint,
+        termination_reason=_solver_termination_reason(exact.status, exact.optimality_proven),
     )
 
 
@@ -886,15 +971,28 @@ def _normalize_incumbent(
         slot.model_copy(update={"referee_assignment": None}) if slot.match_id is not None else slot
         for slot in incumbent.slots
     )
-    normalized = day2_schedule._finalize_fixed_horizon_candidate(
-        request,
-        path_model,
-        horizon,
-        stripped,
-        0.0,
+    assignments, invalid_reasons = day2_schedule._assign_referees(request, path_model, stripped)
+    normalized_slots = tuple(
+        slot.model_copy(update={"referee_assignment": assignments.get(slot.match_id)})
+        if slot.match_id is not None
+        else slot
+        for slot in stripped
     )
-    if normalized is None:
+    organizer_by_section = Counter(
+        slot.section_no
+        for slot in normalized_slots
+        if slot.match_id is not None
+        and slot.referee_assignment is not None
+        and slot.referee_assignment.kind is RefereeKind.ORGANIZER
+    )
+    if (invalid_reasons and request.referees.day2_fallback is Day2Fallback.STRICT) or any(
+        count > request.referees.organizer_capacity for count in organizer_by_section.values()
+    ):
         raise LowerObjectiveOptimizationError("incumbentを現行の審判規則で再検証できません")
+    normalized = incumbent.model_copy(update={"slots": normalized_slots})
+    report = validate_day2_schedule(_validation_document(request, path_model, normalized))
+    if report.get("valid") is not True:
+        raise LowerObjectiveOptimizationError("incumbentが独立制約検証を通過しません")
     audited = placement_objective_vector(request, normalized)
     if audited != placement_objective_vector(request, incumbent):
         raise LowerObjectiveOptimizationError("incumbentの再検証で目的値が変化しました")
@@ -902,6 +1000,29 @@ def _normalize_incumbent(
     if tuple(stage_by_name.get(name) for name in PLACEMENT_OBJECTIVES) != audited:
         raise LowerObjectiveOptimizationError("incumbentの目的値が実配置の再監査値と一致しません")
     return normalized.model_copy(update={"metrics": incumbent.metrics})
+
+
+def _validation_document(
+    request: Day2ScheduleRequest,
+    path_model: day2_schedule._PathModel,
+    schedule: Day2Schedule,
+) -> dict[str, object]:
+    """独立validatorへ渡す、ランタイムAPIと同じ意味の最小文書を作る。"""
+
+    return {
+        "config": {
+            "teams": [team.model_dump(mode="json") for team in request.teams],
+            "courts": [court.model_dump(mode="json") for court in request.courts],
+            "days": {"day2": request.day.model_dump(mode="json")},
+            "referees": request.referees.model_dump(mode="json"),
+        },
+        "league_plan": request.league_plan.model_dump(mode="json"),
+        "day1_schedule": request.day1_schedule.model_dump(mode="json"),
+        "tournament_plan": request.tournament_plan.model_dump(mode="json"),
+        "participant_resolution": request.tournament_plan.participant_resolution.value,
+        "matches": [match.model_dump(mode="json") for match in path_model.matches],
+        "schedule": schedule.model_dump(mode="json"),
+    }
 
 
 def _objective_vector_from_slots(
@@ -954,6 +1075,69 @@ def _existing_proof_prefix(schedule: Day2Schedule) -> tuple[str, ...]:
     return tuple(proven)
 
 
+def _matching_existing_proof_prefix(
+    proven_objectives: tuple[str, ...],
+    source_values: tuple[int, ...],
+    candidate_values: tuple[int, ...],
+) -> tuple[str, ...]:
+    """配置に依存しない既存証明を、値が一致する連続prefixだけ引き継ぐ。"""
+
+    matched: list[str] = []
+    for index, name in enumerate(proven_objectives):
+        if source_values[index] != candidate_values[index]:
+            break
+        matched.append(name)
+    return tuple(matched)
+
+
+def _restore_progress(
+    request: Day2ScheduleRequest,
+    path_model: day2_schedule._PathModel,
+    optimizer_version: PlacementOptimizationVersion,
+    incumbent: Day2Schedule,
+    progress: LowerObjectiveOptimizationProgress,
+) -> tuple[Day2Schedule, list[LowerObjectiveStageResult], float]:
+    """再監査済みのstage prefixから、次の目的を解ける状態へ復元する。"""
+
+    if progress.optimizer_version != optimizer_version:
+        raise LowerObjectiveOptimizationError(
+            "再開地点のoptimizer versionが対象トポロジーと不一致です"
+        )
+    resumed = _normalize_incumbent(request, path_model, progress.schedule)
+    incumbent_values = _objective_vector_from_slots(request, path_model, incumbent.slots)
+    resumed_values = _objective_vector_from_slots(request, path_model, resumed.slots)
+    if resumed_values[0] != incumbent_values[0]:
+        raise LowerObjectiveOptimizationError("再開候補の使用セクション数がincumbentと一致しません")
+    if resumed_values > incumbent_values:
+        raise LowerObjectiveOptimizationError("再開候補が検証済みincumbentより悪化しています")
+    for index, stage in enumerate(progress.objectives):
+        if stage.value != resumed_values[index]:
+            raise LowerObjectiveOptimizationError(
+                f"再開地点の目的値が実配置の再監査値と一致しません: {stage.objective}"
+            )
+    return resumed, list(progress.objectives), progress.wall_time_seconds
+
+
+def _emit_stage_progress(
+    callback: LowerObjectiveStageCallback | None,
+    optimizer_version: PlacementOptimizationVersion,
+    schedule: Day2Schedule,
+    stages: list[LowerObjectiveStageResult],
+    wall_time_seconds: float,
+) -> None:
+    if callback is None:
+        return
+    callback(
+        LowerObjectiveOptimizationProgress(
+            optimizer_version=optimizer_version,
+            schedule=schedule,
+            objectives=tuple(stages),
+            proven_objectives=tuple(stage.objective for stage in stages if stage.optimality_proven),
+            wall_time_seconds=wall_time_seconds,
+        )
+    )
+
+
 def _prior_fixed_values(objective: str, values: tuple[int, ...]) -> dict[str, int]:
     index = PLACEMENT_OBJECTIVES.index(objective)
     return dict(zip(PLACEMENT_OBJECTIVES[:index], values[:index], strict=True))
@@ -992,6 +1176,8 @@ def _existing_outcome(
     schedule: Day2Schedule,
     value: int,
     objective: str,
+    *,
+    optimizer_version: PlacementOptimizationVersion = LOWER_OBJECTIVE_OPTIMIZER_VERSION,
 ) -> _StageOutcome:
     return _StageOutcome(
         schedule=schedule,
@@ -1000,7 +1186,8 @@ def _existing_outcome(
         proof_method="existing",
         best_bound=float(value),
         wall_time_seconds=0,
-        model_fingerprint=_proof_fingerprint(objective, value, "existing"),
+        model_fingerprint=_proof_fingerprint(objective, value, "existing", optimizer_version),
+        termination_reason="existing_proof",
     )
 
 
@@ -1008,6 +1195,8 @@ def _analytic_outcome(
     schedule: Day2Schedule,
     value: int,
     objective: str,
+    *,
+    optimizer_version: PlacementOptimizationVersion = LOWER_OBJECTIVE_OPTIMIZER_VERSION,
 ) -> _StageOutcome:
     return _StageOutcome(
         schedule=schedule,
@@ -1016,12 +1205,29 @@ def _analytic_outcome(
         proof_method="analytic_lower_bound",
         best_bound=float(value),
         wall_time_seconds=0,
-        model_fingerprint=_proof_fingerprint(objective, value, "analytic_lower_bound"),
+        model_fingerprint=_proof_fingerprint(
+            objective,
+            value,
+            "analytic_lower_bound",
+            optimizer_version,
+        ),
+        termination_reason="analytic_lower_bound",
     )
 
 
 def _court_usage_lower_bound(match_count: int, court_count: int) -> int:
     return 0 if match_count % court_count == 0 else 1
+
+
+def _solver_termination_reason(status: SolverStatus, optimality_proven: bool) -> str:
+    if optimality_proven:
+        return "optimality_proven"
+    return {
+        SolverStatus.FEASIBLE: "feasible_candidate_without_proof",
+        SolverStatus.INFEASIBLE: "infeasible",
+        SolverStatus.UNKNOWN: "solver_unknown_or_time_limit",
+        SolverStatus.OPTIMAL: "conditional_optimum_without_global_proof",
+    }[status]
 
 
 def _apply_proof_metrics(
@@ -1077,16 +1283,21 @@ def _apply_proof_metrics(
     )
 
 
-def _validate_supported_topology(request: Day2ScheduleRequest) -> None:
+def _validate_supported_topology(
+    request: Day2ScheduleRequest,
+) -> PlacementOptimizationVersion:
     pools = request.tournament_plan.pools
     topology = (
         len(pools),
         pools[0].participant_count if pools else 0,
     )
-    if topology not in {(2, 4), (2, 8)} or any(
+    if topology not in {(2, 4), (2, 8), (3, 8), (2, 16), (4, 8)} or any(
         pool.participant_count != topology[1] for pool in pools
     ):
-        raise ValueError("下位目的の再最適化は2x4または2x8だけを対象にします")
+        raise ValueError("下位目的の再最適化はcatalog収録済みの5トポロジーだけを対象にします")
+    if topology in {(2, 4), (2, 8)}:
+        return LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    return LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION
 
 
 def _model_fingerprint(model: cp_model.CpModel) -> str:
@@ -1095,15 +1306,23 @@ def _model_fingerprint(model: cp_model.CpModel) -> str:
     return sha256(str(model.proto).encode("utf-8")).hexdigest()
 
 
-def _proof_fingerprint(objective: str, value: int, proof_method: str) -> str:
-    payload = f"{LOWER_OBJECTIVE_OPTIMIZER_VERSION}:{objective}:{value}:{proof_method}"
+def _proof_fingerprint(
+    objective: str,
+    value: int,
+    proof_method: str,
+    optimizer_version: PlacementOptimizationVersion = LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+) -> str:
+    payload = f"{optimizer_version}:{objective}:{value}:{proof_method}"
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
 __all__ = [
+    "LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION",
     "LOWER_OBJECTIVE_OPTIMIZER_VERSION",
     "LowerObjectiveOptimizationError",
+    "LowerObjectiveOptimizationProgress",
     "LowerObjectiveOptimizationResult",
+    "LowerObjectiveStageCallback",
     "LowerObjectiveStageResult",
     "optimize_lower_objectives",
     "placement_objective_vector",
