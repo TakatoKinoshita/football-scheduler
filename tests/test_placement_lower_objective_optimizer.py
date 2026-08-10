@@ -127,6 +127,53 @@ def test_unknown_preserves_incumbent_and_does_not_create_proof(
     assert all(not stage.optimality_proven for stage in result.objectives[1:])
 
 
+def test_unproven_prefix_skips_solver_for_later_absolute_lower_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, schedule = _template_schedule(
+        pool_size=4,
+        court_count=2,
+        organizer_capacity=2,
+    )
+    values = optimizer.placement_objective_vector(request, schedule)
+    assert values[1] > 0
+    assert values[3] == 1
+    assert values[4] > 0
+    assert values[5] == 0
+    section_calls: list[str] = []
+    full_exact_calls: list[str] = []
+
+    def stalled_section(
+        request: Day2ScheduleRequest,
+        path_model: object,
+        incumbent: Day2Schedule,
+        **kwargs: object,
+    ) -> optimizer._StageOutcome:
+        section_calls.append(str(kwargs["objective"]))
+        return _stalled_outcome(request, path_model, incumbent, **kwargs)
+
+    def stalled_full_exact(
+        request: Day2ScheduleRequest,
+        path_model: object,
+        incumbent: Day2Schedule,
+        **kwargs: object,
+    ) -> optimizer._StageOutcome:
+        full_exact_calls.append(str(kwargs["objective"]))
+        return _stalled_outcome(request, path_model, incumbent, **kwargs)
+
+    monkeypatch.setattr(optimizer, "_optimize_section_objective", stalled_section)
+    monkeypatch.setattr(optimizer, "_optimize_full_exact_objective", stalled_full_exact)
+
+    result = optimizer.optimize_lower_objectives(request, schedule, max_time_per_stage=0.01)
+
+    assert section_calls == ["non_primary_final_max_gap"]
+    assert full_exact_calls == ["team_court_change_count"]
+    assert result.proven_objectives == ("used_sections",)
+    assert result.objectives[3].proof_method == "unproven"
+    assert result.objectives[5].proof_method == "unproven"
+    assert all(not stage.optimality_proven for stage in result.objectives[1:])
+
+
 def test_optimizer_rejects_incumbent_with_self_reported_metric_mismatch() -> None:
     request, schedule = _template_schedule(
         pool_size=4,
@@ -200,7 +247,7 @@ def test_section_lower_bound_is_proven_only_after_exact_completion() -> None:
         fixed_values={"used_sections": values[0]},
         objective="non_primary_final_max_gap",
         incumbent_value=values[1],
-        max_time_seconds=1,
+        max_time_seconds=5,
     )
 
     assert outcome.status is SolverStatus.OPTIMAL

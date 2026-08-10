@@ -228,7 +228,9 @@ def optimize_lower_objectives(
         incumbent_value = current_values[objective_indexes[name]]
         if proof_open and name in existing_proofs:
             outcome = _existing_outcome(current, incumbent_value, name)
-        elif proof_open and incumbent_value == lower_bounds[name]:
+        # 前段が未証明でも、絶対下限へ到達済みなら候補改善は不可能である。
+        # 探索は省略するが、連続prefix契約により後段のproofはfalseのままにする。
+        elif incumbent_value == lower_bounds[name]:
             outcome = _analytic_outcome(current, incumbent_value, name)
         elif name == "maximum_team_wait_sections":
             outcome = _optimize_section_objective(
