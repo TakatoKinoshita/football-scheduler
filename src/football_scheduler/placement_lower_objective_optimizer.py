@@ -101,6 +101,7 @@ class _ExactOutcome(ContractModel):
     schedule: Day2Schedule | None = None
     status: SolverStatus
     optimality_proven: bool
+    objective_value: Annotated[int, Field(ge=0)] | None = None
     best_bound: float | None = None
     wall_time_seconds: Annotated[float, Field(ge=0)]
     model_fingerprint: str
@@ -145,6 +146,8 @@ def optimize_lower_objectives(
     current = _normalize_incumbent(request, path_model, incumbent)
     current_values = _objective_vector_from_slots(request, path_model, current.slots)
     horizon = current_values[0]
+    if current_values[1] != current_values[2]:
+        raise LowerObjectiveOptimizationError("2トーナメントの決勝gap最大値と合計値が一致しません")
     existing_proofs = _existing_proof_prefix(current)
     if not existing_proofs or existing_proofs[0] != "used_sections":
         raise LowerObjectiveOptimizationError("使用セクション数の最小性証明が必要です")
@@ -269,6 +272,9 @@ def optimize_lower_objectives(
         )
         proof_open = proven
 
+    final_values = _objective_vector_from_slots(request, path_model, current.slots)
+    if final_values != tuple(stage.value for stage in stages):
+        raise LowerObjectiveOptimizationError("返却候補と目的別監査値が一致しません")
     current = _apply_proof_metrics(current, tuple(stages), total_wall)
     proven_names = tuple(stage.objective for stage in stages if stage.optimality_proven)
     return LowerObjectiveOptimizationResult(
@@ -333,6 +339,21 @@ def _optimize_section_objective(
                 objective=None,
             )
             if completed.schedule is not None:
+                _assert_audited_objectives(
+                    request,
+                    path_model,
+                    completed.schedule,
+                    {
+                        **fixed_values,
+                        objective: relaxed_optimum,
+                        **(
+                            {"non_primary_final_sum_gap": relaxed_optimum}
+                            if objective == "non_primary_final_max_gap"
+                            else {}
+                        ),
+                    },
+                    context="section緩和の厳密復元",
+                )
                 return _StageOutcome(
                     schedule=completed.schedule,
                     status=SolverStatus.OPTIMAL,
@@ -427,7 +448,7 @@ def _run_full_exact_stage(
     objective_var = _objective_variable(variables, objective)
     model.add(objective_var <= incumbent_value)
     model.minimize(objective_var)
-    return _solve_exact_model(
+    outcome = _solve_exact_model(
         request,
         path_model,
         model,
@@ -435,6 +456,19 @@ def _run_full_exact_stage(
         max_time_seconds,
         objective=objective_var,
     )
+    if outcome.schedule is not None:
+        expected = {**fixed_values}
+        if outcome.objective_value is None:
+            raise LowerObjectiveOptimizationError("厳密探索の目的値がありません")
+        expected[objective] = outcome.objective_value
+        _assert_audited_objectives(
+            request,
+            path_model,
+            outcome.schedule,
+            expected,
+            context="full exact探索",
+        )
+    return outcome
 
 
 def _build_exact_model(
@@ -506,6 +540,7 @@ def _solve_exact_model(
                 schedule=candidate,
                 status=status,
                 optimality_proven=objective is not None and status is SolverStatus.OPTIMAL,
+                objective_value=(solver.value(objective) if objective is not None else None),
                 best_bound=best_bound,
                 wall_time_seconds=total_solver_wall,
                 model_fingerprint=fingerprint,
@@ -718,6 +753,24 @@ def _existing_proof_prefix(schedule: Day2Schedule) -> tuple[str, ...]:
 def _prior_fixed_values(objective: str, values: tuple[int, ...]) -> dict[str, int]:
     index = PLACEMENT_OBJECTIVES.index(objective)
     return dict(zip(PLACEMENT_OBJECTIVES[:index], values[:index], strict=True))
+
+
+def _assert_audited_objectives(
+    request: Day2ScheduleRequest,
+    path_model: day2_schedule._PathModel,
+    schedule: Day2Schedule,
+    expected: Mapping[str, int],
+    *,
+    context: str,
+) -> None:
+    audited = _objective_vector_from_slots(request, path_model, schedule.slots)
+    for name, value in expected.items():
+        actual = audited[PLACEMENT_OBJECTIVES.index(name)]
+        if actual != value:
+            raise LowerObjectiveOptimizationError(
+                f"{context}の目的値が独立再監査と一致しません: "
+                f"{name} (model={value}, audited={actual})"
+            )
 
 
 def _select_non_worse(
