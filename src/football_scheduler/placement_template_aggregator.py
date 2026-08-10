@@ -553,11 +553,15 @@ def render_issue73_quality_report(
         topology, fallback = _group(final)
         current = current_by_id[final.key.catalog_id]
         assert current.candidate is not None and current.objective_values is not None
-        for objective, before, after in zip(
+        for objective, before_objective, after_objective in zip(
             PLACEMENT_OBJECTIVES, current.candidate.objectives, final.objectives, strict=True
         ):
-            proof_counts[topology, fallback, objective, "before"] += int(before.optimality_proven)
-            proof_counts[topology, fallback, objective, "after"] += int(after.optimality_proven)
+            proof_counts[topology, fallback, objective, "before"] += int(
+                before_objective.optimality_proven
+            )
+            proof_counts[topology, fallback, objective, "after"] += int(
+                after_objective.optimality_proven
+            )
         current_result = compare_objective_vectors(_entry_vector(final), current.objective_values)
         comparison_counts[topology, fallback, "current", current_result.value] += 1
         legacy = legacy_by_id[final.key.catalog_id]
@@ -573,15 +577,20 @@ def render_issue73_quality_report(
 
     for checkpoint in optimizer_checkpoints:
         topology, fallback = _group(checkpoint.candidate)
-        identity = (
+        checkpoint_counts[
             topology,
             fallback,
             checkpoint.objective,
             checkpoint.status.value,
             checkpoint.proof_method,
-        )
-        checkpoint_counts[identity] += 1
-        checkpoint_wall[identity] += checkpoint.wall_time_seconds
+        ] += 1
+        checkpoint_wall[
+            topology,
+            fallback,
+            checkpoint.objective,
+            checkpoint.status.value,
+            checkpoint.proof_method,
+        ] += checkpoint.wall_time_seconds
 
     lines = [
         "# Issue #73 placement template quality report",

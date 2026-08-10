@@ -17,7 +17,10 @@ from football_scheduler.placement_template_aggregator import (
     load_optimizer_checkpoints,
     write_text_atomic,
 )
-from football_scheduler.placement_template_contract import PlacementOptimizationTargetManifest
+from football_scheduler.placement_template_contract import (
+    PlacementOptimizationStageCheckpoint,
+    PlacementOptimizationTargetManifest,
+)
 from football_scheduler.placement_template_generator import (
     PlacementTemplateGenerationError,
     write_json_atomic,
@@ -82,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.target_manifest.read_text(encoding="utf-8")
             )
             optimizer_entries = None
-            checkpoints = ()
+            checkpoints: tuple[PlacementOptimizationStageCheckpoint, ...] = ()
             if args.optimizer_directory is not None:
                 optimizer_directory = args.optimizer_directory.resolve()
                 optimizer_entries = load_issue73_optimizer_entries(
