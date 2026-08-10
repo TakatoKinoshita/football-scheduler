@@ -102,6 +102,14 @@ function fourTeamBracketDocument(): ReturnType<typeof tournamentResultsFixture> 
   return document;
 }
 
+function fourTeamFallbackDocument(): ReturnType<typeof tournamentResultsFixture> {
+  const document = fourTeamBracketDocument();
+  const result = document.tournament.result as unknown as JsonObject;
+  const plan = result.tournament_plan as JsonObject;
+  for (const pool of plan.pools as JsonObject[]) delete pool.logical_layout;
+  return document;
+}
+
 async function expectDiagramContentInsideSvg(bracket: Locator): Promise<void> {
   const result = await bracket.locator("svg").evaluate((svg) => {
     const viewBox = (svg as SVGSVGElement).viewBox.baseVal;
@@ -128,6 +136,110 @@ async function expectDiagramContentInsideSvg(bracket: Locator): Promise<void> {
     return { outside, overlaps };
   });
   expect(result).toEqual({ outside: [], overlaps: [] });
+}
+
+async function expectStandardFallbackGeometry(bracket: Locator): Promise<void> {
+  const issues = await bracket.locator("svg").evaluate((rawSvg) => {
+    const svg = rawSvg as SVGSVGElement;
+    const viewBox = svg.viewBox.baseVal;
+    type Bounds = { left: number; right: number; top: number; bottom: number };
+    const bounds = (element: SVGGraphicsElement, clearance = 0): Bounds => {
+      const box = element.getBBox();
+      return {
+        left: box.x - clearance,
+        right: box.x + box.width + clearance,
+        top: box.y - clearance,
+        bottom: box.y + box.height + clearance,
+      };
+    };
+    const intersects = (left: Bounds, right: Bounds): boolean =>
+      left.left < right.right && left.right > right.left &&
+      left.top < right.bottom && left.bottom > right.top;
+    const inside = (inner: Bounds, outer: Bounds, padding = 0): boolean =>
+      inner.left >= outer.left + padding && inner.right <= outer.right - padding &&
+      inner.top >= outer.top + padding && inner.bottom <= outer.bottom - padding;
+    const diagram = {
+      left: viewBox.x,
+      right: viewBox.x + viewBox.width,
+      top: viewBox.y,
+      bottom: viewBox.y + viewBox.height,
+    };
+    const failures: string[] = [];
+    const visibleText = [...svg.querySelectorAll<SVGGraphicsElement>([
+      ".bracket-entry-name",
+      ".bracket-entry-source",
+      ".bracket-match-heading",
+      ".bracket-match-meta",
+      ".bracket-matchup",
+      ".bracket-winner-label",
+      ".bracket-terminal",
+    ].join(","))];
+    for (const text of visibleText) {
+      if (!inside(bounds(text), diagram, 1)) {
+        failures.push(`text-outside:${text.getAttribute("class") ?? ""}`);
+      }
+    }
+    for (const [index, text] of visibleText.entries()) {
+      const textBounds = bounds(text, 1);
+      for (const other of visibleText.slice(index + 1)) {
+        if (intersects(textBounds, bounds(other, 1))) {
+          failures.push(
+            `text-overlap:${text.closest("[data-match-id]")?.getAttribute("data-match-id") ?? "entry"}:${text.getAttribute("class") ?? ""}:${other.closest("[data-match-id]")?.getAttribute("data-match-id") ?? "entry"}:${other.getAttribute("class") ?? ""}`,
+          );
+        }
+      }
+    }
+    for (const slot of svg.querySelectorAll<SVGGElement>(".bracket-entry-slot")) {
+      const card = slot.querySelector<SVGRectElement>(".bracket-entry-card");
+      if (card === null) continue;
+      const cardBounds = bounds(card);
+      for (const label of slot.querySelectorAll<SVGGraphicsElement>(
+        ".bracket-entry-name,.bracket-entry-source",
+      )) {
+        if (!inside(bounds(label), cardBounds, 3)) {
+          failures.push(`entry-outside:${label.textContent ?? ""}`);
+        }
+      }
+    }
+    const lines = [...svg.querySelectorAll<SVGGeometryElement>([
+      ".bracket-entry-line",
+      ".bracket-connector",
+      ".bracket-match-line",
+      ".bracket-terminal-line",
+    ].join(","))];
+    for (const line of lines) {
+      if (!inside(bounds(line), diagram)) {
+        failures.push(`line-outside:${line.getAttribute("class") ?? ""}`);
+      }
+      // connectorは複数の直交segmentを1本のpathに持つため、path全体のbboxでは
+      // 線が存在しない矩形内部まで衝突扱いになる。1.5px間隔（2px以下）で実線上を
+      // 走査し、stroke半幅約1px＋視認余白1pxを含む文字bboxとの交差を検査する。
+      const sampleInterval = 1.5;
+      const lineClearance = 2;
+      const lineLength = line.getTotalLength();
+      for (const text of visibleText) {
+        const textBounds = bounds(text, lineClearance);
+        let overlapsText = false;
+        for (let distance = 0; distance <= lineLength; distance += sampleInterval) {
+          const point = line.getPointAtLength(Math.min(distance, lineLength));
+          if (
+            textBounds.left < point.x && point.x < textBounds.right &&
+            textBounds.top < point.y && point.y < textBounds.bottom
+          ) {
+            overlapsText = true;
+            break;
+          }
+        }
+        if (overlapsText) {
+          failures.push(
+            `line-text-overlap:${line.getAttribute("data-source-match-id") ?? "entry-or-match"}->${line.getAttribute("data-target-match-id") ?? ""}:${line.getAttribute("class") ?? ""}:${line.getAttribute("d") ?? ""}:${text.firstChild?.textContent ?? ""}:${JSON.stringify(textBounds)}`,
+          );
+        }
+      }
+    }
+    return failures;
+  });
+  expect(issues).toEqual([]);
 }
 
 async function openFourTeamBracket(page: Page, width: number, height: number): Promise<void> {
@@ -199,4 +311,57 @@ test("4チーム表をA4横・縦の印刷ページへ割り当てる", async ({
   expect(await page.locator(".tournament-bracket.exploration.vertical").evaluateAll(
     (figures) => figures.map((figure) => getComputedStyle(figure).page),
   )).toEqual(["bracket", "bracket"]);
+});
+
+test("logical_layoutがない4チーム標準版も長名・順位・進行線を重ねない", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, fourTeamFallbackDocument());
+
+  const brackets = page.locator("#tournament-plan-view .tournament-bracket:not(.exploration)");
+  await expect(brackets).toHaveCount(2);
+  await expect(page.locator(".tournament-bracket-fallback")).toHaveCount(2);
+  await expect(page.locator(".tournament-bracket-fallback").first()).toContainText("配置情報");
+  const firstName = brackets.first().locator(".bracket-entry-name").first();
+  expect(await firstName.evaluate((label) => label.firstChild?.textContent)).toBe("北関東ジュ…");
+  await expect(firstName.locator("title")).toHaveText("北関東ジュニアフットボールクラブ");
+  await expect(brackets.first().locator(".bracket-entry-slot").first())
+    .toHaveAttribute("aria-label", /北関東ジュニアフットボールクラブ/u);
+  await expectStandardFallbackGeometry(brackets.first());
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(await page.evaluate(() => document.documentElement.clientWidth));
+  const scroll = await brackets.first().locator(".tournament-bracket-scroll").evaluate(
+    (element) => ({ client: element.clientWidth, scroll: element.scrollWidth }),
+  );
+  expect(scroll.scroll).toBeGreaterThan(scroll.client);
+});
+
+test("logical_layoutがない4チーム標準版をA4内へ印刷する", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, fourTeamFallbackDocument());
+  await page.evaluate(() => {
+    document.body.dataset.printScope = "bracket";
+  });
+  await page.emulateMedia({ media: "print" });
+
+  const brackets = page.locator("#tournament-plan-view .tournament-bracket:not(.exploration)");
+  await expectStandardFallbackGeometry(brackets.first());
+  expect(await brackets.first().locator(".tournament-bracket-sheet").evaluate(
+    (sheet) => getComputedStyle(sheet).page,
+  )).toBe("bracket");
+  const printBounds = await brackets.first().evaluate((figure) => {
+    const svg = figure.querySelector("svg")!.getBoundingClientRect();
+    const pool = figure.closest(".tournament-pool")!.getBoundingClientRect();
+    return {
+      horizontalOverflow: Math.max(0, svg.right - pool.right, pool.left - svg.left),
+      height: svg.height,
+    };
+  });
+  expect(printBounds.horizontalOverflow).toBeLessThanOrEqual(1);
+  expect(printBounds.height).toBeLessThanOrEqual(181 / 25.4 * 96);
 });

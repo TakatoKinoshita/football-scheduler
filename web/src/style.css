@@ -183,6 +183,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .bracket-entry-slot.bye .bracket-entry-card { fill: #fff6d9; stroke: #966300; }
 .bracket-entry-name { fill: #18332b; font-size: 18px; font-weight: 800; }
 .bracket-entry-source { fill: #52635b; font-size: 16px; }
+.tournament-bracket[data-participant-count="4"] .bracket-entry-name { font-size: 16px; }
+.tournament-bracket[data-participant-count="4"] .bracket-entry-source { font-size: 13px; }
 .bracket-match-heading { fill: #174f3f; font-size: 18px; font-weight: 900; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
 .bracket-match-meta, .bracket-matchup { fill: #3f534b; font-size: 17px; font-weight: 700; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
 .bracket-matchup { fill: #18332b; }
@@ -195,6 +197,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .bracket-terminal { fill: #18332b; font-size: 16px; font-weight: 900; paint-order: stroke; stroke: white; stroke-width: 4px; }
 .bracket-terminal.confirmed { fill: #0f4938; }
 .bracket-terminal.pending { fill: #8a5900; }
+.tournament-bracket[data-participant-count="4"] .bracket-match-heading { font-size: 16px; }
+.tournament-bracket[data-participant-count="4"] .bracket-match-meta,
+.tournament-bracket[data-participant-count="4"] .bracket-matchup,
+.tournament-bracket[data-participant-count="4"] .bracket-winner-label,
+.tournament-bracket[data-participant-count="4"] .bracket-terminal { font-size: 14px; }
 .bracket-continuation { fill: #174f3f; font-size: 16px; font-weight: 900; paint-order: stroke; stroke: white; stroke-width: 4px; }
 .bracket-direct-label { fill: #18332b; font-size: 20px; font-weight: 900; }
 .bracket-sheet-title { display: none; fill: #18332b; font-size: 20px; font-weight: 900; }
@@ -279,6 +286,13 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   .bracket-terminal,
   .bracket-continuation,
   .bracket-direct-label { font-size: 22px; }
+  .tournament-bracket[data-participant-count="4"] .bracket-entry-name { font-size: 16px; }
+  .tournament-bracket[data-participant-count="4"] .bracket-entry-source { font-size: 13px; }
+  .tournament-bracket[data-participant-count="4"] .bracket-match-heading { font-size: 16px; }
+  .tournament-bracket[data-participant-count="4"] .bracket-match-meta,
+  .tournament-bracket[data-participant-count="4"] .bracket-matchup,
+  .tournament-bracket[data-participant-count="4"] .bracket-winner-label,
+  .tournament-bracket[data-participant-count="4"] .bracket-terminal { font-size: 14px; }
   .bracket-sheet-title { display: block; font-size: 22px; }
   .bracket-match-node.narrow .bracket-match-heading,
   .bracket-match-node.narrow .bracket-match-meta,
