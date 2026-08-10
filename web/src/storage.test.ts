@@ -1,8 +1,55 @@
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AutosaveController, TournamentStorage } from "./storage";
+import {
+  AutosaveController,
+  StorageUpgradeBlockedError,
+  TournamentStorage,
+} from "./storage";
+import type { TournamentResultDraftUiState } from "./tournament-result-drafts";
 import { LEGACY_SCHEMA_VERSION, createTournamentDocument } from "./types";
+
+function requestDone(request: IDBRequest): Promise<void> {
+  return new Promise((resolve, reject) => {
+    request.addEventListener("success", () => resolve());
+    request.addEventListener("error", () => reject(request.error));
+  });
+}
+
+async function createVersionOneDatabase(
+  indexedDb: IDBFactory,
+  document = createTournamentDocument(),
+  keepOpen = false,
+): Promise<IDBDatabase | undefined> {
+  const open = indexedDb.open("football-scheduler", 1);
+  open.addEventListener("upgradeneeded", () => {
+    open.result.createObjectStore("documents", { keyPath: "key" });
+  });
+  await requestDone(open);
+  const transaction = open.result.transaction("documents", "readwrite");
+  transaction.objectStore("documents").put({ key: "draft", document });
+  await new Promise<void>((resolve, reject) => {
+    transaction.addEventListener("complete", () => resolve());
+    transaction.addEventListener("error", () => reject(transaction.error));
+  });
+  if (keepOpen) return open.result;
+  open.result.close();
+  return undefined;
+}
+
+const resultDraftState = (
+  planFingerprint = "plan-one",
+): TournamentResultDraftUiState => ({
+  planFingerprint,
+  drafts: {
+    "PT-1": {
+      regularHome: "1",
+      regularAway: "",
+      penaltyHome: "",
+      penaltyAway: "",
+    },
+  },
+});
 
 describe("ブラウザ内保存", () => {
   let storage: TournamentStorage;
@@ -47,6 +94,69 @@ describe("ブラウザ内保存", () => {
     await storage.deleteCurrent();
     expect(await storage.loadLatest()).toBeUndefined();
     expect((await storage.restorePrevious())?.tournament.name).toBe("削除前");
+  });
+
+  it("version 1のdocumentsを保持したままui-state storeを追加する", async () => {
+    const indexedDb = new IDBFactory();
+    const document = createTournamentDocument();
+    document.tournament.name = "移行前大会";
+    await createVersionOneDatabase(indexedDb, document);
+    storage = new TournamentStorage(indexedDb);
+
+    expect((await storage.loadLatest())?.tournament.name).toBe("移行前大会");
+    await storage.saveTournamentResultDrafts(resultDraftState());
+    expect(await storage.loadTournamentResultDrafts("plan-one"))
+      .toEqual(resultDraftState().drafts);
+  });
+
+  it("旧versionを開いた別タブがある場合は案内可能なエラーにし、閉じた後は移行できる", async () => {
+    const indexedDb = new IDBFactory();
+    const document = createTournamentDocument();
+    document.tournament.name = "旧タブで編集中";
+    const legacyConnection = await createVersionOneDatabase(indexedDb, document, true);
+    expect(legacyConnection).toBeDefined();
+
+    storage = new TournamentStorage(indexedDb);
+    await expect(storage.loadLatest()).rejects.toBeInstanceOf(StorageUpgradeBlockedError);
+
+    legacyConnection!.close();
+    const migratedStorage = new TournamentStorage(indexedDb);
+    expect((await migratedStorage.loadLatest())?.tournament.name).toBe("旧タブで編集中");
+    await migratedStorage.saveTournamentResultDrafts(resultDraftState());
+    expect(await migratedStorage.loadTournamentResultDrafts("plan-one"))
+      .toEqual(resultDraftState().drafts);
+  });
+
+  it("plan fingerprintが一致するdraftだけを復元する", async () => {
+    await storage.saveTournamentResultDrafts(resultDraftState());
+
+    expect(await storage.loadTournamentResultDrafts("plan-one"))
+      .toEqual(resultDraftState().drafts);
+    expect(await storage.loadTournamentResultDrafts("plan-two")).toBeUndefined();
+  });
+
+  it("正式結果と入力途中状態を同じtransactionで更新する", async () => {
+    const before = createTournamentDocument();
+    before.tournament.name = "更新前";
+    await storage.saveDraft(before);
+    await storage.saveTournamentResultDrafts(resultDraftState());
+    const after = createTournamentDocument();
+    after.tournament.name = "更新後";
+
+    await storage.commitTournamentResults(after, undefined);
+
+    expect((await storage.loadLatest())?.tournament.name).toBe("更新後");
+    expect(await storage.loadTournamentResultDrafts("plan-one")).toBeUndefined();
+  });
+
+  it("JSON読込みと大会削除では内部draftも消去する", async () => {
+    await storage.saveTournamentResultDrafts(resultDraftState());
+    await storage.replaceImported(createTournamentDocument());
+    expect(await storage.loadTournamentResultDrafts("plan-one")).toBeUndefined();
+
+    await storage.saveTournamentResultDrafts(resultDraftState());
+    await storage.deleteCurrent();
+    expect(await storage.loadTournamentResultDrafts("plan-one")).toBeUndefined();
   });
 });
 
