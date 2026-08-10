@@ -515,7 +515,7 @@ test("水平・垂直の共有選択を端末に保存し、再描画・JSON・�
   )).toHaveCount(2);
 });
 
-test("対応・非対応プールを個別に判定し、全プール非対応では切替を無効化する", async ({
+test("対応・配置情報不足をプールごとに判定し、全プール不足では切替を無効化する", async ({
   page,
 }) => {
   await mockExternalServices(page);
@@ -547,7 +547,7 @@ test("対応・非対応プールを個別に判定し、全プール非対応�
   )).toHaveCount(2);
   await expect(page.locator(
     "#tournament-plan-view .tournament-bracket-fallback",
-  ).first()).toContainText("参加数");
+  ).first()).toContainText("配置情報");
 });
 
 test("mirroredな16チームは順位帯ごとに本番水平版へ選択する", async ({
