@@ -21,6 +21,13 @@ interface StoredTournamentResultDrafts extends TournamentResultDraftUiState {
   key: typeof TOURNAMENT_RESULT_DRAFTS_KEY;
 }
 
+export class StorageUpgradeBlockedError extends Error {
+  constructor() {
+    super("別タブで以前の画面が開かれているため、保存場所を更新できません。");
+    this.name = "StorageUpgradeBlockedError";
+  }
+}
+
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.addEventListener("success", () => resolve(request.result));
@@ -45,6 +52,7 @@ export class TournamentStorage {
     if (this.databasePromise === undefined) {
       this.databasePromise = new Promise((resolve, reject) => {
         const request = this.indexedDb.open(DATABASE_NAME, DATABASE_VERSION);
+        let upgradeBlocked = false;
         request.addEventListener("upgradeneeded", () => {
           if (!request.result.objectStoreNames.contains(STORE_NAME)) {
             request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
@@ -53,7 +61,18 @@ export class TournamentStorage {
             request.result.createObjectStore(UI_STATE_STORE_NAME, { keyPath: "key" });
           }
         });
-        request.addEventListener("success", () => resolve(request.result));
+        request.addEventListener("blocked", () => {
+          upgradeBlocked = true;
+          reject(new StorageUpgradeBlockedError());
+        });
+        request.addEventListener("success", () => {
+          if (upgradeBlocked) {
+            request.result.close();
+            return;
+          }
+          request.result.addEventListener("versionchange", () => request.result.close());
+          resolve(request.result);
+        });
         request.addEventListener("error", () => reject(request.error ?? new Error("保存場所を開けませんでした。")));
       });
     }
@@ -137,6 +156,29 @@ export class TournamentStorage {
       planFingerprint: state.planFingerprint,
       drafts: structuredClone(state.drafts),
     } satisfies StoredTournamentResultDrafts);
+    await transactionDone(transaction);
+  }
+
+  async commitTournamentResults(
+    document: TournamentDocument,
+    draftState: TournamentResultDraftUiState | undefined,
+  ): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction([STORE_NAME, UI_STATE_STORE_NAME], "readwrite");
+    transaction.objectStore(STORE_NAME).put({
+      key: "draft",
+      document: cloneDocument(document),
+    } satisfies StoredDocument);
+    const uiStateStore = transaction.objectStore(UI_STATE_STORE_NAME);
+    if (draftState === undefined) {
+      uiStateStore.delete(TOURNAMENT_RESULT_DRAFTS_KEY);
+    } else {
+      uiStateStore.put({
+        key: TOURNAMENT_RESULT_DRAFTS_KEY,
+        planFingerprint: draftState.planFingerprint,
+        drafts: structuredClone(draftState.drafts),
+      } satisfies StoredTournamentResultDrafts);
+    }
     await transactionDone(transaction);
   }
 

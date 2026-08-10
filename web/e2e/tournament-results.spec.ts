@@ -468,3 +468,80 @@ test("PKの部分入力と保存済み結果の変更をtransactionalに扱い�
   ).toHaveValue("");
   await expect(page.locator("#confirm-tournament-results")).toBeDisabled();
 });
+
+test("有効な変更を確定した直後に再読込みしても正式結果を失わない", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, structuredClone(issue75EightTeamDocument));
+
+  const parent = page.locator(
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
+  );
+  const regularHome = parent.locator('input[data-score-field="regularHome"]');
+  await regularHome.fill("2");
+  await regularHome.press("Tab");
+  await page.reload();
+
+  const restoredParent = page.locator(
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
+  );
+  await expect(
+    restoredParent.locator('input[data-score-field="regularHome"]'),
+  ).toHaveValue("2");
+  await expect(restoredParent.locator(".tournament-result-state-label")).toHaveText("保存済み");
+  await expect(page.locator("#tournament-results-progress")).toContainText("6 / 8試合");
+  await expect(
+    page.locator('#tournament-results-input tr[data-match-id="PT-1-RANK-1-2-M1"]')
+      .locator(".tournament-result-state-label"),
+  ).toHaveText("未入力");
+});
+
+test("正式結果のatomic保存に失敗した場合は以前の結果と入力途中draftを保持する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, structuredClone(issue75EightTeamDocument));
+  await page.evaluate(() => {
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey): IDBRequest {
+      const stored = value as { key?: unknown; document?: {
+        tournament?: { result?: { tournament_results?: Array<{ regular_score_home?: unknown }> } };
+      } };
+      if (
+        this.name === "documents" &&
+        stored.key === "draft" &&
+        stored.document?.tournament?.result?.tournament_results?.[0]
+          ?.regular_score_home === 2
+      ) {
+        throw new DOMException("test quota", "QuotaExceededError");
+      }
+      return key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+    };
+  });
+
+  const row = page.locator(
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
+  );
+  const regularHome = row.locator('input[data-score-field="regularHome"]');
+  await regularHome.fill("2");
+  await regularHome.press("Tab");
+
+  await expect(page.locator("#tournament-results-status")).toContainText(
+    "入力途中の変更と以前の結果は保持されています",
+  );
+  await expect(regularHome).toHaveValue("2");
+  await expect(row.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
+  await page.reload();
+  const restoredRow = page.locator(
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
+  );
+  await expect(
+    restoredRow.locator('input[data-score-field="regularHome"]'),
+  ).toHaveValue("2");
+  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
+});

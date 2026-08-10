@@ -160,4 +160,17 @@ export class TournamentResultDraftController {
       ),
     };
   }
+
+  snapshotWithout(matchIds: Iterable<string>): TournamentResultDraftUiState | undefined {
+    if (this.fingerprint === undefined) return undefined;
+    const omitted = new Set(matchIds);
+    const drafts = Object.fromEntries(
+      [...this.drafts]
+        .filter(([matchId]) => !omitted.has(matchId))
+        .map(([matchId, draft]) => [matchId, cloneDraft(draft)]),
+    );
+    return Object.keys(drafts).length === 0
+      ? undefined
+      : { planFingerprint: this.fingerprint, drafts };
+  }
 }

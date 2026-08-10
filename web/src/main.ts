@@ -59,7 +59,11 @@ import {
   unbindSameRankPlan,
   unbindSameRankSchedule,
 } from "./same-rank-league";
-import { AutosaveController, TournamentStorage } from "./storage";
+import {
+  AutosaveController,
+  StorageUpgradeBlockedError,
+  TournamentStorage,
+} from "./storage";
 import {
   evaluateTournamentResultDraft,
   TournamentResultDraftController,
@@ -1130,12 +1134,12 @@ async function saveSameRankStandings(standings: JsonObject): Promise<void> {
   saveState.textContent = "この端末に保存済み";
 }
 
-function saveTournamentResults(results: JsonObject[]): void {
+function withTournamentResults(results: JsonObject[]): TournamentDocument | undefined {
   const result = asObject(documentState.tournament.result);
-  if (result === undefined) return;
+  if (result === undefined) return undefined;
   const nextResult: JsonObject = { ...result, tournament_results: results };
   delete nextResult.final_standings;
-  documentState = {
+  return {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: {
@@ -1143,18 +1147,6 @@ function saveTournamentResults(results: JsonObject[]): void {
       result: nextResult,
     },
   };
-  saveState.textContent = "保存しています…";
-  autosave.schedule(
-    documentState,
-    () => {
-      saveState.textContent = "この端末に保存済み";
-    },
-    () => {
-      saveState.textContent = "保存できませんでした";
-      tournamentResultsStatus.textContent =
-        "2日目の試合結果を保存できませんでした。ファイルへ保存してください。";
-    },
-  );
 }
 
 async function saveFinalStandings(standings: JsonObject): Promise<void> {
@@ -2607,34 +2599,46 @@ function renderFinalStandings(
   content.append(section);
 }
 
-function renderResultPreservingScoreFocus(): void {
+interface ScoreFocusSnapshot {
+  matchId?: string;
+  scoreField?: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+  scrollX: number;
+  scrollY: number;
+}
+
+function captureScoreFocus(): ScoreFocusSnapshot {
+  const active = window.document.activeElement;
+  const row = active instanceof HTMLInputElement
+    ? active.closest<HTMLTableRowElement>("tr[data-match-id]")
+    : null;
+  return {
+    matchId: row?.dataset.matchId,
+    scoreField: active instanceof HTMLInputElement ? active.dataset.scoreField : undefined,
+    selectionStart: active instanceof HTMLInputElement ? active.selectionStart : null,
+    selectionEnd: active instanceof HTMLInputElement ? active.selectionEnd : null,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  };
+}
+
+function renderResultPreservingScoreFocus(snapshot: ScoreFocusSnapshot): void {
   window.setTimeout(() => {
-    const active = window.document.activeElement;
-    const row = active instanceof HTMLInputElement
-      ? active.closest<HTMLTableRowElement>("tr[data-match-id]")
-      : null;
-    const matchId = row?.dataset.matchId;
-    const scoreField = active instanceof HTMLInputElement
-      ? active.dataset.scoreField
-      : undefined;
-    const selectionStart = active instanceof HTMLInputElement ? active.selectionStart : null;
-    const selectionEnd = active instanceof HTMLInputElement ? active.selectionEnd : null;
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
     renderResult();
-    if (matchId === undefined || scoreField === undefined) return;
+    if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
     const replacementRow = [...window.document.querySelectorAll<HTMLTableRowElement>(
       "#tournament-results-input tr[data-match-id]",
-    )].find((candidate) => candidate.dataset.matchId === matchId);
+    )].find((candidate) => candidate.dataset.matchId === snapshot.matchId);
     const replacement = replacementRow?.querySelector<HTMLInputElement>(
-      `input[data-score-field="${scoreField}"]`,
+      `input[data-score-field="${snapshot.scoreField}"]`,
     );
     if (replacement === undefined || replacement === null) return;
     replacement.focus({ preventScroll: true });
-    if (selectionStart !== null && selectionEnd !== null) {
-      replacement.setSelectionRange(selectionStart, selectionEnd);
+    if (snapshot.selectionStart !== null && snapshot.selectionEnd !== null) {
+      replacement.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
     }
-    window.scrollTo(scrollX, scrollY);
+    window.scrollTo(snapshot.scrollX, snapshot.scrollY);
   }, 0);
 }
 
@@ -2872,16 +2876,43 @@ function renderTournamentResultsInput(
         match.matchId,
         next,
       );
-      tournamentResultDrafts.delete(match.matchId);
-      if (changed.winnerChanged) {
-        tournamentResultDrafts.deleteMany(tournamentMatchDescendants(plan, match.matchId));
+      const nextDocument = withTournamentResults(changed.results);
+      if (nextDocument === undefined) return;
+      const fingerprint = tournamentResultDrafts.planFingerprint ??
+        tournamentPlanFingerprint(plan);
+      const previousDraftState = tournamentResultDrafts.snapshot();
+      const focusSnapshot = captureScoreFocus();
+      const removedDraftIds = [
+        match.matchId,
+        ...(changed.winnerChanged
+          ? tournamentMatchDescendants(plan, match.matchId)
+          : []),
+      ];
+      const nextDraftState = tournamentResultDrafts.snapshotWithout(removedDraftIds);
+      autosave.cancel();
+      saveState.textContent = "保存しています…";
+      for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
+        input.disabled = true;
       }
-      persistTournamentResultDrafts();
-      saveTournamentResults(changed.results);
-      tournamentResultsStatus.textContent = changed.removedDescendantCount > 0
-        ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
-        : "2日目の試合結果をこの端末へ保存しました。";
-      renderResultPreservingScoreFocus();
+      void storage.commitTournamentResults(nextDocument, nextDraftState).then(() => {
+        documentState = nextDocument;
+        tournamentResultDrafts.activate(fingerprint, nextDraftState?.drafts ?? {});
+        saveState.textContent = "この端末に保存済み";
+        tournamentResultsStatus.textContent = changed.removedDescendantCount > 0
+          ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
+          : "2日目の試合結果をこの端末へ保存しました。";
+        renderResultPreservingScoreFocus(focusSnapshot);
+      }).catch(() => {
+        tournamentResultDrafts.activate(fingerprint, previousDraftState?.drafts ?? {});
+        saveState.textContent = "保存できませんでした";
+        tournamentResultsStatus.textContent =
+          "2日目の試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。";
+        for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
+          input.disabled = false;
+        }
+        renderDraftState(tournamentResultDrafts.get(match.matchId));
+        refreshTournamentResultsEnabled();
+      });
     };
     for (const input of [regularHome, regularAway, penaltyHome, penaltyAway]) {
       input.addEventListener("change", commitDraft);
@@ -4415,9 +4446,10 @@ void storage
       saveState.textContent = saved === undefined ? "新しい大会" : "この端末の保存内容を復元しました";
     }
   })
-  .catch(() => {
+  .catch((error: unknown) => {
     render();
     saveState.textContent = "保存内容を読み込めませんでした";
-    backupStatus.textContent =
-      "JSONファイルのバックアップがある場合は「ファイルから復元」をお試しください。";
+    backupStatus.textContent = error instanceof StorageUpgradeBlockedError
+      ? "別タブで以前の画面が開かれています。別タブを閉じてから、この画面を再読み込みしてください。"
+      : "JSONファイルのバックアップがある場合は「ファイルから復元」をお試しください。";
   });

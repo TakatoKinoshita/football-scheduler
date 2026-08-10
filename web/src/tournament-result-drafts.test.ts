@@ -85,4 +85,20 @@ describe("トーナメント結果draft", () => {
       other: draft({ regularHome: "3" }),
     });
   });
+
+  it("確定後のsnapshotをcontrollerを変更せずに組み立てる", () => {
+    const controller = new TournamentResultDraftController();
+    controller.activate("plan-one", {
+      first: draft({ regularHome: "1" }),
+      child: draft({ regularHome: "2" }),
+      other: draft({ regularHome: "3" }),
+    });
+
+    expect(controller.snapshotWithout(["first", "child"])).toEqual({
+      planFingerprint: "plan-one",
+      drafts: { other: draft({ regularHome: "3" }) },
+    });
+    expect(controller.snapshot()?.drafts).toHaveProperty("first");
+    expect(controller.snapshotWithout(["first", "child", "other"])).toBeUndefined();
+  });
 });
