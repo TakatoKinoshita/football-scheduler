@@ -92,6 +92,22 @@ optimizerは基礎generator `placement-template-generator-v8`を維持し、対�
 `true...true,false...false`の連続prefixとし、gap 0、最大待ち1、コート移動0、コート利用偏りの
 算術下限へ到達した実配置は、hydrateと独立validatorに合格した後だけ安全に証明済みへ昇格する。
 
+全列挙後はcurrent・legacyの決定的gzip fixtureとoptimizer shard/checkpointを単一aggregatorへ渡す。
+aggregatorは全候補を現行規則で再監査し、currentと同値ならcurrentのslot配置、legacyとoptimizerが
+同じ改善値ならoptimizer配置を採用する。最終候補はcurrentと全available legacyのどちらよりも
+辞書式に悪化できない。出力は2x4・2x8 shardとmanifestだけで、対象外3 shardは二重digest guardを
+再確認する。品質レポートには証明数、A/B比較、legacy status、optimizer stageの証明方法と実行時間を
+固定順・小数3桁で記録する。
+
+```console
+uv run python scripts/aggregate_placement_templates.py \
+  --current-baseline artifacts/current.json.gz \
+  --legacy-baseline artifacts/legacy.json.gz \
+  --optimizer-directory artifacts/optimized-catalog \
+  --catalog-directory src/football_scheduler/placement_templates \
+  --report artifacts/issue-71-quality-report.md
+```
+
 generatorは理論下限から固定horizonを増やし、目的変数を持たない実行可能性モデルで探索する。
 より短いhorizonの実行不能証明後、最初の実行可能配置を採用するため、使用
 セクション数の最小性は必ず証明される。下位目的は非負下限0へ到達した辞書順の段階までを証明済み
