@@ -162,6 +162,55 @@ def make_maximum_schedule_creation_request() -> dict[str, Any]:
     }
 
 
+def make_twenty_four_team_schedule_creation_request() -> dict[str, Any]:
+    """24チーム・3トーナメントの対象catalogを通る本番経路検証入力を返す。"""
+
+    request = make_maximum_schedule_creation_request()
+    request.update(
+        {
+            "teams": [
+                {"id": f"team-{index + 1:02d}", "name": f"チーム{index + 1}"} for index in range(24)
+            ],
+            "league": {"block_count": 8, "assignment_mode": "random"},
+            "final_stage": {"format": "placement_tournament", "tournament_count": 3},
+            "day": {
+                "id": "day1",
+                "start_time": "09:30",
+                "game_duration_minutes": 35,
+                "margin_minutes": 5,
+                "max_sections": 16,
+            },
+            "day2": {
+                "id": "day2",
+                "start_time": "09:30",
+                "game_duration_minutes": 35,
+                "margin_minutes": 10,
+                "max_sections": 36,
+            },
+        }
+    )
+    return request
+
+
+def make_maximum_four_tournament_schedule_creation_request() -> dict[str, Any]:
+    """32チーム・4トーナメントの対象catalogを通る本番経路検証入力を返す。"""
+
+    request = make_maximum_schedule_creation_request()
+    request.update(
+        {
+            "final_stage": {"format": "placement_tournament", "tournament_count": 4},
+            "day2": {
+                "id": "day2",
+                "start_time": "09:30",
+                "game_duration_minutes": 35,
+                "margin_minutes": 10,
+                "max_sections": 48,
+            },
+        }
+    )
+    return request
+
+
 def make_sixteen_team_schedule_creation_request() -> dict[str, Any]:
     """16チーム・2トーナメントの対象catalogを通る本番経路検証入力を返す。"""
 

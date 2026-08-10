@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,10 @@ from scripts.find_cloudflare_production_deployment import find_deployment_id
 from scripts.write_cloudflare_release_headers import write_release_id
 from scripts.write_lambda_smoke_event import (
     build_maximum_day2_event,
+    build_maximum_four_day2_event,
     build_sixteen_day2_event,
     build_smoke_event,
+    build_twenty_four_day2_event,
 )
 
 
@@ -95,4 +98,28 @@ def test_sixteen_day2_event_uses_optimized_template_release_case() -> None:
     assert request.league.block_count == 4
     assert request.final_stage.format.value == "placement_tournament"
     assert request.final_stage.tournament_count == 2  # type: ignore[union-attr]
+    assert request.referees.organizer_capacity == 4
+
+
+@pytest.mark.parametrize(
+    ("event_factory", "team_count", "block_count", "tournament_count"),
+    [
+        (build_twenty_four_day2_event, 24, 8, 3),
+        (build_maximum_four_day2_event, 32, 8, 4),
+    ],
+)
+def test_large_multi_tournament_events_use_target_catalogs(
+    event_factory: Callable[[], dict[str, object]],
+    team_count: int,
+    block_count: int,
+    tournament_count: int,
+) -> None:
+    event = event_factory()
+    request = ScheduleCreationRequest.model_validate_json(str(event["body"]))
+
+    assert len(request.teams) == team_count
+    assert len(request.courts) == 4
+    assert request.league.block_count == block_count
+    assert request.final_stage.format.value == "placement_tournament"
+    assert request.final_stage.tournament_count == tournament_count  # type: ignore[union-attr]
     assert request.referees.organizer_capacity == 4
