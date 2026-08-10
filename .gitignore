@@ -23,3 +23,4 @@ build/
 samconfig.toml
 benchmark-results/
 .worktrees/
+src/football_scheduler/placement_templates/.checkpoints/

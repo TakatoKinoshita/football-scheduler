@@ -172,8 +172,9 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 
 1. `main`から`operation: plan`を選び、`release_sha`と`change_set_arn`は空欄にする。
 2. 影響確認欄を選択し、Environment承認後に実行する。
-3. workflowは設定値とquotaを確認し、Python、Web、Pages Function、最大32チーム経路、SAM
-   templateを検証する。
+3. workflowは設定値とquotaを確認し、Python、Web、Pages Function、順位決定トーナメントの
+   template catalog全1,360キー、最大32チーム・2トーナメント経路、SAM templateを検証する。
+   catalog root SHA、利用可能数、証明済み実行不能数をActions summaryで確認する。
 4. commit SHAをtagにしたsolver imageをECRへpushし、SAM artifactをS3へuploadする。
 5. CloudFormation change setを作成するが実行しない。初回planでは本番stackは
    `REVIEW_IN_PROGRESS`となり、template内のLambda、API Gateway、Budget、SNSなどはまだ作成されない。
@@ -196,7 +197,9 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
    `REVIEW_IN_PROGRESS`なら初回`CREATE`、`CREATE_COMPLETE`、`UPDATE_COMPLETE`、
    `UPDATE_ROLLBACK_COMPLETE`なら`UPDATE`として完了待機方法を選ぶ。それ以外の不安定な状態では
    change setを実行しない。
-5. change setを実行し、新Lambda `live` aliasを直接invokeしてschemaと独立制約検証を確認する。
+5. change setを実行し、新Lambda `live` aliasを直接invokeする。小規模疎通に加え、32チーム・
+   8ブロック・2トーナメント・4コート・主催者審判数4の両日生成で、2日目64試合、独立・統合
+   制約検証、1 MB応答上限を確認する。この確認はPages配信前に行い、失敗時はLambda aliasを戻す。
 6. stack出力とGitHub secretsをPages Function secretへ同期し、Wranglerで静的assetとFunctionを
    同時配信する。
 7. 公開画面の`X-Release-Id`とapp shellを確認する。失敗時は直前のPages deploymentとLambda
@@ -206,6 +209,12 @@ applyはplanの確認後に別作業として明示承認を得てから行う�
 `football-scheduler-production-*`形式の明示名を使用する。これによりCloudFormation実行roleの
 IAM scope内に限定し、SAMやCloudFormationによる自動生成名の短縮へ依存しない。named IAM resourceを
 含むため、planでは`CAPABILITY_NAMED_IAM`を指定する。
+
+順位決定トーナメントcatalogの生成、checkpoint再開、shard統合、digest検証は
+[日程テンプレートcatalog設計](../architecture/placement-schedule-template-catalog.md)に従う。
+通常release中にcatalogを再計算せず、コミット済みresourceを`--check`で検証する。日程規則を
+変更したreleaseでは全5shardを事前に再生成し、新しいcommit SHAからPlanを作成する。以前のSHAで
+作成したchange setを再利用しない。
 
 ### 4.2.1 公開後の受入確認
 

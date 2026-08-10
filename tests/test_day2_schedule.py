@@ -71,6 +71,7 @@ def _request(
     resolved: bool = False,
     fallback: str = "organizer",
     max_time_seconds: float = 10,
+    random_seed: int = 17,
 ) -> tuple[Day2ScheduleRequest, TournamentPlan]:
     teams, league, standings = _source(team_count, block_count)
     tournament_request: dict[str, Any] = {
@@ -80,7 +81,7 @@ def _request(
             "format": "placement_tournament",
             "tournament_count": tournament_count,
         },
-        "random_seed": 17,
+        "random_seed": random_seed,
     }
     if resolved:
         tournament_request["league_standings"] = standings.model_dump(mode="json")
@@ -104,7 +105,7 @@ def _request(
                 "organizer_capacity": organizer_capacity or court_count,
                 "day2_fallback": fallback,
             },
-            "random_seed": 17,
+            "random_seed": random_seed,
             "solver": {"max_time_seconds": max_time_seconds},
         }
     )
@@ -193,8 +194,13 @@ def test_non_primary_final_max_then_sum_gap_are_audited() -> None:
     assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
     assert result.metrics.non_primary_final_max_gap == max(gaps, default=0)
     assert result.metrics.non_primary_final_sum_gap == sum(gaps)
-    assert "non_primary_final_max_gap" in result.metrics.optimized_objectives
-    assert "non_primary_final_sum_gap" in result.metrics.optimized_objectives
+    stages = {stage.objective: stage for stage in result.metrics.objective_stages}
+    assert stages["non_primary_final_max_gap"].value == max(gaps, default=0)
+    assert stages["non_primary_final_sum_gap"].value == sum(gaps)
+    for objective in ("non_primary_final_max_gap", "non_primary_final_sum_gap"):
+        assert (objective in result.metrics.optimized_objectives) is stages[
+            objective
+        ].optimality_proven
 
 
 def test_first_section_uses_only_organizer_referees() -> None:

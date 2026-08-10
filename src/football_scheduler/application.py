@@ -449,6 +449,10 @@ def _generate_schedule_creation_response(payload: Mapping[str, Any]) -> dict[str
     day2_response = _generate_day2_creation_response(day2_payload)
     if day2_response.get("status") not in {"OPTIMAL", "FEASIBLE"}:
         return _normalize_schedule_creation_failure(day2_response)
+    day2_response = _restore_schedule_creation_public_solver_metrics(
+        day2_response,
+        max_time_seconds=request.solver.max_time_seconds,
+    )
 
     day2_schedule = day2_response.get("day2_schedule")
     integrated_validation = (
@@ -515,6 +519,21 @@ def _apply_schedule_creation_remaining_budget(
     solver_data["max_time_seconds"] = max(0.1, min(float(requested), remaining))
     adjusted["solver"] = solver_data
     return adjusted
+
+
+def _restore_schedule_creation_public_solver_metrics(
+    response: Mapping[str, Any],
+    *,
+    max_time_seconds: float,
+) -> dict[str, Any]:
+    """内部の残り時間ではなく、公開要求の上限を監査値として返す。"""
+
+    restored = _json_round_trip(response)
+    schedule = restored.get("day2_schedule")
+    metrics = schedule.get("metrics") if isinstance(schedule, Mapping) else None
+    if isinstance(metrics, dict):
+        metrics["max_time_seconds"] = max_time_seconds
+    return restored
 
 
 def _normalize_schedule_creation_failure(response: Mapping[str, Any]) -> dict[str, Any]:
