@@ -626,8 +626,10 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
     const source = nodeById.get(edge.sourceMatchId)!;
     const target = nodeById.get(edge.targetMatchId)!;
     const targetX = edge.targetSide === "home" ? target.homeX : target.awayX;
-    const minimumY = Math.min(source.lineY, target.lineY);
-    const maximumY = Math.max(source.lineY, target.lineY);
+    const fourTeamCompleteSheet = sheet.kind === "complete" && sheet.slots.length === 4;
+    const targetApproachY = fourTeamCompleteSheet ? target.lineY + 34 : target.lineY;
+    const minimumY = Math.min(source.lineY, targetApproachY);
+    const maximumY = Math.max(source.lineY, targetApproachY);
     const forbidden = matchSegments
       .filter(
         (segment) =>
@@ -643,6 +645,27 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
     for (const slot of sheet.slots) {
       if (slot.y < maximumY && minimumY < slot.y + slot.height) {
         forbidden.push({ start: slot.x - 7, end: slot.x + slot.width + 7 });
+      }
+    }
+    if (fourTeamCompleteSheet) {
+      for (const node of sheet.nodes) {
+        if (
+          node.labelBox.y < maximumY &&
+          minimumY < node.labelBox.y + node.labelBox.height
+        ) {
+          forbidden.push({
+            start: node.labelBox.x - 7,
+            end: node.labelBox.x + node.labelBox.width + 7,
+          });
+        }
+        for (const terminal of node.terminals) {
+          if (terminal.y - 20 < maximumY && minimumY < terminal.y + 18) {
+            forbidden.push({
+              start: terminal.x - 62,
+              end: terminal.x + 62,
+            });
+          }
+        }
       }
     }
     const routedHorizontal = routedSegments.filter((segment) => segment.y1 === segment.y2);
@@ -671,7 +694,7 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
           x <= segmentMinimumX || segmentMaximumX <= x;
       }) &&
       !crossesRoutedVertical(source.centerX, x, source.lineY) &&
-      !crossesRoutedVertical(x, targetX, target.lineY);
+      !crossesRoutedVertical(x, targetX, targetApproachY);
     const candidates = [
       source.centerX,
       targetX,
@@ -690,12 +713,12 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
     const segments: TournamentBracketSegment[] = [];
     const ownerId = `${source.id}:${edge.outcome}`;
     if (laneX === undefined) {
-      if (source.lineY !== target.lineY) {
+      if (source.lineY !== targetApproachY) {
         segments.push({
           x1: source.centerX,
           y1: source.lineY,
           x2: source.centerX,
-          y2: target.lineY,
+          y2: targetApproachY,
           ownerId,
           role: edge.outcome,
         });
@@ -703,7 +726,17 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
       if (source.centerX !== targetX) {
         segments.push({
           x1: source.centerX,
-          y1: target.lineY,
+          y1: targetApproachY,
+          x2: targetX,
+          y2: targetApproachY,
+          ownerId,
+          role: edge.outcome,
+        });
+      }
+      if (targetApproachY !== target.lineY) {
+        segments.push({
+          x1: targetX,
+          y1: targetApproachY,
           x2: targetX,
           y2: target.lineY,
           ownerId,
@@ -728,18 +761,30 @@ function rerouteEdgesAroundMatchLines(sheet: TournamentBracketSheet): void {
         role: edge.outcome,
       });
     }
-    segments.push({
-      x1: laneX,
-      y1: source.lineY,
-      x2: laneX,
-      y2: target.lineY,
-      ownerId,
-      role: edge.outcome,
-    });
+    if (source.lineY !== targetApproachY) {
+      segments.push({
+        x1: laneX,
+        y1: source.lineY,
+        x2: laneX,
+        y2: targetApproachY,
+        ownerId,
+        role: edge.outcome,
+      });
+    }
     if (laneX !== targetX) {
       segments.push({
         x1: laneX,
-        y1: target.lineY,
+        y1: targetApproachY,
+        x2: targetX,
+        y2: targetApproachY,
+        ownerId,
+        role: edge.outcome,
+      });
+    }
+    if (targetApproachY !== target.lineY) {
+      segments.push({
+        x1: targetX,
+        y1: targetApproachY,
         x2: targetX,
         y2: target.lineY,
         ownerId,
@@ -785,10 +830,14 @@ function layoutSheet(
   };
   const matchIds = new Set(specification.matches.map((match) => match.id));
   const leafEntries = uniqueEntries(specification.leafEntries);
+  const fourTeamCompleteSheet =
+    specification.kind === "complete" && leafEntries.length === 4;
   const compactLayout = leafEntries.length > 8;
   const slotPitch = compactLayout ? COMPACT_SLOT_PITCH : REGULAR_SLOT_PITCH;
   const slotWidth = compactLayout ? COMPACT_SLOT_WIDTH : REGULAR_SLOT_WIDTH;
-  const rowPitch = compactLayout ? COMPACT_ROW_PITCH : REGULAR_ROW_PITCH;
+  const rowPitch = fourTeamCompleteSheet
+    ? 112
+    : compactLayout ? COMPACT_ROW_PITCH : REGULAR_ROW_PITCH;
   const nodeLabelWidth = compactLayout ? 150 : 200;
   sheet.width = Math.max(
     360,
@@ -838,8 +887,8 @@ function layoutSheet(
     context.groupByMatchId,
   );
   const rootY = SHEET_MARGIN_TOP + upper.length * rowPitch;
-  const slotY = rootY + 24;
-  const lowerStartY = slotY + SLOT_HEIGHT + 72;
+  const slotY = rootY + (fourTeamCompleteSheet ? 58 : 24);
+  const lowerStartY = slotY + SLOT_HEIGHT + (fourTeamCompleteSheet ? 96 : 72);
   const yByGroup = new Map<string, number>([[root.key, rootY]]);
   for (const [index, group] of upper.entries()) {
     yByGroup.set(group.key, SHEET_MARGIN_TOP + index * rowPitch);
@@ -935,9 +984,9 @@ function layoutSheet(
       lineY,
       labelBox: {
         x: centerX - nodeLabelWidth / 2,
-        y: lineY - 52,
+        y: lineY - (fourTeamCompleteSheet ? 64 : 52),
         width: nodeLabelWidth,
-        height: 72,
+        height: fourTeamCompleteSheet ? 88 : 72,
       },
       narrow: false,
       home,
@@ -949,11 +998,13 @@ function layoutSheet(
       .map((placement, index) => {
         const champion = placement.poolRank === 1;
         const x = champion
-          ? centerX
+          ? fourTeamCompleteSheet
+            ? Math.max(46, Math.min(homeX, awayX) - 78)
+            : centerX
           : Math.max(28, Math.min(sheet.width - 28, index === 0
-            ? Math.min(homeX, awayX) - 34
-            : Math.max(homeX, awayX) + 34));
-        const y = champion ? lineY - 78 : lineY;
+            ? Math.min(homeX, awayX) - (fourTeamCompleteSheet ? 52 : 34)
+            : Math.max(homeX, awayX) + (fourTeamCompleteSheet ? 52 : 34)));
+        const y = champion ? lineY - (fourTeamCompleteSheet ? 86 : 78) : lineY;
         const state = placement.confirmed
           ? "確定"
           : placement.pendingConfirmation
@@ -1050,14 +1101,36 @@ function layoutSheet(
     }
     for (const terminal of node.terminals) {
       if (terminal.y !== lineY) {
-        sheet.segments.push({
-          x1: centerX,
-          y1: lineY,
-          x2: terminal.x,
-          y2: terminal.y,
-          ownerId: `${match.id}:rank:${String(terminal.rank)}`,
-          role: "terminal",
-        });
+        const ownerId = `${match.id}:rank:${String(terminal.rank)}`;
+        if (fourTeamCompleteSheet && centerX !== terminal.x) {
+          sheet.segments.push(
+            {
+              x1: centerX,
+              y1: lineY,
+              x2: terminal.x,
+              y2: lineY,
+              ownerId,
+              role: "terminal",
+            },
+            {
+              x1: terminal.x,
+              y1: lineY,
+              x2: terminal.x,
+              y2: terminal.y,
+              ownerId,
+              role: "terminal",
+            },
+          );
+        } else {
+          sheet.segments.push({
+            x1: centerX,
+            y1: lineY,
+            x2: terminal.x,
+            y2: terminal.y,
+            ownerId,
+            role: "terminal",
+          });
+        }
       }
     }
   }
@@ -1741,11 +1814,20 @@ function renderSheet(
       slot.centerX,
       slot.y + 22,
       "bracket-entry-name",
-      slot.width <= COMPACT_SLOT_WIDTH ? 4 : 7,
+      model.participantCount === 4
+        ? 6
+        : slot.width <= COMPACT_SLOT_WIDTH ? 4 : 7,
     )
       .setAttribute("text-anchor", "middle");
     if (slot.secondaryLabel !== undefined) {
-      appendSvgText(group, slot.secondaryLabel, slot.centerX, slot.y + 39, "bracket-entry-source", 9)
+      appendSvgText(
+        group,
+        slot.secondaryLabel,
+        slot.centerX,
+        slot.y + (model.participantCount === 4 ? 44 : 39),
+        "bracket-entry-source",
+        9,
+      )
         .setAttribute("text-anchor", "middle");
     }
     if (slot.bye) {
@@ -1772,7 +1854,7 @@ function renderSheet(
       group,
       node.roundLabel,
       node.centerX,
-      node.lineY - 47,
+      node.lineY - (model.participantCount === 4 ? 56 : 47),
       "bracket-match-heading",
       node.narrow ? 5 : 10,
     ).setAttribute("text-anchor", "middle");
@@ -1780,18 +1862,18 @@ function renderSheet(
       group,
       `${node.displayNumber} ${node.metaLabel ?? node.rankRangeLabel}`,
       node.centerX,
-      node.lineY - 28,
+      node.lineY - (model.participantCount === 4 ? 34 : 28),
       "bracket-match-meta",
-      node.narrow ? 9 : 17,
+      node.narrow ? 9 : model.participantCount === 4 ? 14 : 17,
     ).setAttribute("text-anchor", "middle");
     const matchup = `${node.home.primaryLabel} 対 ${node.away.primaryLabel}`;
     appendSvgText(
       group,
       matchup,
       node.centerX,
-      node.lineY - 9,
+      node.lineY - (model.participantCount === 4 ? 12 : 9),
       "bracket-matchup",
-      node.narrow ? 7 : 15,
+      node.narrow ? 7 : model.participantCount === 4 ? 12 : 15,
     )
       .setAttribute("text-anchor", "middle");
     if (node.resultLabel !== undefined || node.home.winner || node.away.winner) {
@@ -1804,16 +1886,21 @@ function renderSheet(
         group,
         `${node.resultLabel ?? ""}${winnerLabel === undefined ? "" : `　勝者：${winnerLabel}`}`,
         node.centerX,
-        node.lineY + 18,
+        node.lineY + (model.participantCount === 4 ? 20 : 18),
         "bracket-winner-label",
-        28,
+        model.participantCount === 4 ? 8 : 28,
       ).setAttribute("text-anchor", "middle");
     }
     svg.append(group);
     for (const terminal of node.terminals) {
       if (terminal.y !== node.lineY) {
+        const path = model.participantCount === 4
+          ? `M ${String(node.centerX)} ${String(node.lineY)} H ${String(terminal.x)} V ${String(
+            terminal.y + (terminal.outcome === "winner" ? 10 : -10),
+          )}`
+          : `M ${String(node.centerX)} ${String(node.lineY)} V ${String(terminal.y)}`;
         svg.append(svgElement("path", {
-          d: `M ${String(node.centerX)} ${String(node.lineY)} V ${String(terminal.y)}`,
+          d: path,
           class: `bracket-terminal-line ${terminal.outcome}`,
           "data-source-match-id": node.id,
           "data-rank": terminal.rank,

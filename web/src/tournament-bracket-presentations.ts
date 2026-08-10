@@ -111,7 +111,11 @@ export function selectTournamentBracketPresentation(
     };
   }
   const logicalLayout = readTournamentLogicalLayout(pool);
-  if (pool.participant_count !== 8 && pool.participant_count !== 16) {
+  if (
+    pool.participant_count !== 4 &&
+    pool.participant_count !== 8 &&
+    pool.participant_count !== 16
+  ) {
     return {
       presentation: tournamentBracketPresentations.standard,
       fallbackReason:
