@@ -544,10 +544,11 @@ def render_issue73_quality_report(
     comparison_counts: Counter[tuple[str, str, str, str]] = Counter()
     status_counts: Counter[tuple[str, str, str]] = Counter()
     status_wall: defaultdict[tuple[str, str, str], float] = defaultdict(float)
+    legacy_reason_counts: Counter[tuple[str, str, str, str]] = Counter()
     source_counts: Counter[tuple[str, str, str]] = Counter()
     target_counts: Counter[tuple[str, str, str]] = Counter()
-    checkpoint_counts: Counter[tuple[str, str, str, str, str]] = Counter()
-    checkpoint_wall: defaultdict[tuple[str, str, str, str, str], float] = defaultdict(float)
+    checkpoint_counts: Counter[tuple[str, str, str, str, str, str]] = Counter()
+    checkpoint_wall: defaultdict[tuple[str, str, str, str, str, str], float] = defaultdict(float)
 
     for final in sorted(final_entries, key=lambda item: item.key.catalog_id):
         topology, fallback = _group(final)
@@ -567,6 +568,9 @@ def render_issue73_quality_report(
         legacy = legacy_by_id[final.key.catalog_id]
         status_counts[topology, fallback, legacy.status.value] += 1
         status_wall[topology, fallback, legacy.status.value] += legacy.wall_time_seconds
+        reasons = legacy.diagnostics or (f"solver_status:{legacy.solver_status or 'none'}",)
+        for reason in reasons:
+            legacy_reason_counts[topology, fallback, legacy.status.value, reason] += 1
         if legacy.objective_values is not None:
             legacy_result = compare_objective_vectors(_entry_vector(final), legacy.objective_values)
             comparison_counts[topology, fallback, "legacy", legacy_result.value] += 1
@@ -583,6 +587,7 @@ def render_issue73_quality_report(
             checkpoint.objective,
             checkpoint.status.value,
             checkpoint.proof_method,
+            checkpoint.termination_reason or "unspecified",
         ] += 1
         checkpoint_wall[
             topology,
@@ -590,6 +595,7 @@ def render_issue73_quality_report(
             checkpoint.objective,
             checkpoint.status.value,
             checkpoint.proof_method,
+            checkpoint.termination_reason or "unspecified",
         ] += checkpoint.wall_time_seconds
 
     lines = [
@@ -603,11 +609,25 @@ def render_issue73_quality_report(
         f"- Catalog SHA-256: `{manifest.catalog_sha256}`",
         "- Objective order: " + ", ".join(f"`{item}`" for item in PLACEMENT_OBJECTIVES),
         "",
-        "## Target distribution",
+        "## Catalog shard digests",
         "",
-        "| Topology | Fallback | First differing objective | Targets |",
-        "| --- | --- | --- | ---: |",
+        "| Topology | File | Entries | Internal SHA-256 |",
+        "| --- | --- | ---: | --- |",
     ]
+    lines.extend(
+        f"| {shard.pool_count}x{shard.pool_size} | `{shard.file}` | {shard.entry_count} | "
+        f"`{shard.sha256}` |"
+        for shard in manifest.shards
+    )
+    lines.extend(
+        (
+            "",
+            "## Target distribution",
+            "",
+            "| Topology | Fallback | First differing objective | Targets |",
+            "| --- | --- | --- | ---: |",
+        )
+    )
     groups = _topology_groups(LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES)
     for topology, fallback in groups:
         for objective in PLACEMENT_OBJECTIVES:
@@ -686,16 +706,29 @@ def render_issue73_quality_report(
     lines.extend(
         (
             "",
-            "## Optimizer stage checkpoints",
+            "## Legacy diagnostics and timeout reasons",
             "",
-            "| Topology | Fallback | Objective | Status | Proof method | Count | Wall time (s) |",
-            "| --- | --- | --- | --- | --- | ---: | ---: |",
+            "| Topology | Fallback | Status | Reason | Count |",
+            "| --- | --- | --- | --- | ---: |",
         )
     )
-    for identity in sorted(checkpoint_counts):
+    for reason_identity in sorted(legacy_reason_counts):
+        lines.append(f"| {' | '.join(reason_identity)} | {legacy_reason_counts[reason_identity]} |")
+    lines.extend(
+        (
+            "",
+            "## Optimizer stage checkpoints",
+            "",
+            "| Topology | Fallback | Objective | Status | Proof method | "
+            "Termination reason | Count | Wall time (s) |",
+            "| --- | --- | --- | --- | --- | --- | ---: | ---: |",
+        )
+    )
+    for checkpoint_identity in sorted(checkpoint_counts):
         lines.append(
-            f"| {' | '.join(identity)} | {checkpoint_counts[identity]} | "
-            f"{checkpoint_wall[identity]:.3f} |"
+            f"| {' | '.join(checkpoint_identity)} | "
+            f"{checkpoint_counts[checkpoint_identity]} | "
+            f"{checkpoint_wall[checkpoint_identity]:.3f} |"
         )
     lines.append("")
     return "\n".join(lines)
