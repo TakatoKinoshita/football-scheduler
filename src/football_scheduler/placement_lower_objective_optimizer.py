@@ -412,22 +412,150 @@ def _optimize_full_exact_objective(
     incumbent_value: int,
     max_time_seconds: float,
 ) -> _StageOutcome:
+    started = perf_counter()
+    fixed_budget = max(min(max_time_seconds * 0.25, max_time_seconds), 0.001)
+    fixed = _run_fixed_section_court_stage(
+        request,
+        path_model,
+        incumbent,
+        fixed_values=fixed_values,
+        objective=objective,
+        incumbent_value=incumbent_value,
+        max_time_seconds=fixed_budget,
+    )
+    fixed_candidate = fixed.schedule or incumbent
+    selected = _select_non_worse(request, path_model, incumbent, fixed_candidate)
+    selected_value = _objective_vector_from_slots(request, path_model, selected.slots)[
+        PLACEMENT_OBJECTIVES.index(objective)
+    ]
+    remaining = max_time_seconds - (perf_counter() - started)
+    if remaining <= 0.001:
+        return _fixed_section_unproven_outcome(selected, fixed, fixed.wall_time_seconds)
+
     exact = _run_full_exact_stage(
         request,
         path_model,
         fixed_values=fixed_values,
         objective=objective,
-        incumbent_value=incumbent_value,
-        max_time_seconds=max_time_seconds,
+        incumbent_value=selected_value,
+        max_time_seconds=remaining,
+        hint_schedule=selected,
     )
+    if exact.status is SolverStatus.INFEASIBLE:
+        raise LowerObjectiveOptimizationError(
+            "固定sectionの検証済み候補をfull exactモデルで再現できません"
+        )
+    if exact.schedule is not None:
+        selected = _select_non_worse(request, path_model, selected, exact.schedule)
+    wall_time = fixed.wall_time_seconds + exact.wall_time_seconds
+    if exact.optimality_proven:
+        return _StageOutcome(
+            schedule=selected,
+            status=SolverStatus.OPTIMAL,
+            optimality_proven=True,
+            proof_method="full_exact",
+            best_bound=exact.best_bound,
+            wall_time_seconds=wall_time,
+            model_fingerprint=exact.model_fingerprint,
+        )
+    if exact.schedule is not None:
+        return _StageOutcome(
+            schedule=selected,
+            status=SolverStatus.FEASIBLE,
+            optimality_proven=False,
+            proof_method="unproven",
+            best_bound=exact.best_bound,
+            wall_time_seconds=wall_time,
+            model_fingerprint=exact.model_fingerprint,
+        )
+    if fixed.schedule is not None:
+        # 候補は固定section探索から保持する一方、status/bound/fingerprintは
+        # グローバルproofを試みたfull exactの終了状態を記録する。
+        return _StageOutcome(
+            schedule=selected,
+            status=exact.status,
+            optimality_proven=False,
+            proof_method="unproven",
+            best_bound=exact.best_bound,
+            wall_time_seconds=wall_time,
+            model_fingerprint=exact.model_fingerprint,
+        )
     return _StageOutcome(
-        schedule=exact.schedule or incumbent,
+        schedule=incumbent,
         status=exact.status,
-        optimality_proven=exact.optimality_proven,
-        proof_method=("full_exact" if exact.optimality_proven else "unproven"),
+        optimality_proven=False,
+        proof_method="unproven",
         best_bound=exact.best_bound,
-        wall_time_seconds=exact.wall_time_seconds,
+        wall_time_seconds=wall_time,
         model_fingerprint=exact.model_fingerprint,
+    )
+
+
+def _run_fixed_section_court_stage(
+    request: Day2ScheduleRequest,
+    path_model: day2_schedule._PathModel,
+    incumbent: Day2Schedule,
+    *,
+    fixed_values: Mapping[str, int],
+    objective: str,
+    incumbent_value: int,
+    max_time_seconds: float,
+) -> _ExactOutcome:
+    """sectionを固定し、コート目的の改善候補だけを短時間で探索する。"""
+
+    horizon = fixed_values["used_sections"]
+    model, variables = _build_exact_model(
+        request,
+        path_model,
+        horizon,
+        fixed_values=fixed_values,
+    )
+    positions = {
+        slot.match_id: slot.section_no for slot in incumbent.slots if slot.match_id is not None
+    }
+    for match_index, match in enumerate(path_model.matches):
+        section_no = positions[match.id]
+        model.add(variables.match_in_section[match_index, section_no - 1] == 1)
+    objective_var = _objective_variable(variables, objective)
+    model.add(objective_var <= incumbent_value)
+    model.minimize(objective_var)
+    _add_schedule_hints(model, variables, request, path_model, incumbent)
+    outcome = _solve_exact_model(
+        request,
+        path_model,
+        model,
+        variables,
+        max_time_seconds,
+        objective=objective_var,
+    )
+    if outcome.schedule is not None:
+        if outcome.objective_value is None:
+            raise LowerObjectiveOptimizationError("固定section探索の目的値がありません")
+        _assert_audited_objectives(
+            request,
+            path_model,
+            outcome.schedule,
+            {**fixed_values, objective: outcome.objective_value},
+            context="固定sectionコート探索",
+        )
+    return outcome
+
+
+def _fixed_section_unproven_outcome(
+    schedule: Day2Schedule,
+    fixed: _ExactOutcome,
+    wall_time_seconds: float,
+) -> _StageOutcome:
+    """固定section内のOPTIMALをグローバルproofへ昇格せず候補だけ保持する。"""
+
+    return _StageOutcome(
+        schedule=schedule,
+        status=(SolverStatus.FEASIBLE if fixed.schedule is not None else fixed.status),
+        optimality_proven=False,
+        proof_method="unproven",
+        best_bound=(None if fixed.schedule is not None else fixed.best_bound),
+        wall_time_seconds=wall_time_seconds,
+        model_fingerprint=fixed.model_fingerprint,
     )
 
 
@@ -439,6 +567,7 @@ def _run_full_exact_stage(
     objective: str,
     incumbent_value: int,
     max_time_seconds: float,
+    hint_schedule: Day2Schedule | None = None,
 ) -> _ExactOutcome:
     horizon = fixed_values["used_sections"]
     model, variables = _build_exact_model(
@@ -450,6 +579,8 @@ def _run_full_exact_stage(
     objective_var = _objective_variable(variables, objective)
     model.add(objective_var <= incumbent_value)
     model.minimize(objective_var)
+    if hint_schedule is not None:
+        _add_schedule_hints(model, variables, request, path_model, hint_schedule)
     outcome = _solve_exact_model(
         request,
         path_model,
@@ -471,6 +602,28 @@ def _run_full_exact_stage(
             context="full exact探索",
         )
     return outcome
+
+
+def _add_schedule_hints(
+    model: cp_model.CpModel,
+    variables: day2_schedule._ModelVariables,
+    request: Day2ScheduleRequest,
+    path_model: day2_schedule._PathModel,
+    schedule: Day2Schedule,
+) -> None:
+    match_index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    court_index_by_id = {court.id: index for index, court in enumerate(request.courts)}
+    occupied = {
+        (
+            match_index_by_id[slot.match_id],
+            slot.section_no - 1,
+            court_index_by_id[slot.court_id],
+        )
+        for slot in schedule.slots
+        if slot.match_id is not None
+    }
+    for coordinate, variable in sorted(variables.placement.items()):
+        model.add_hint(variable, int(coordinate in occupied))
 
 
 def _build_exact_model(

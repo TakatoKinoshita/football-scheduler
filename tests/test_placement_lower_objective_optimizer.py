@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import pytest
 from pydantic import ValidationError
@@ -256,13 +256,40 @@ def test_section_lower_bound_is_proven_only_after_exact_completion() -> None:
     assert optimizer.placement_objective_vector(request, outcome.schedule)[1:3] == (0, 0)
 
 
-def test_small_topology_uses_full_exact_fallback_and_proves_all_objectives() -> None:
+def test_small_topology_uses_full_exact_fallback_and_proves_all_objectives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request, incumbent = _template_schedule(
         pool_size=4,
         court_count=2,
         organizer_capacity=2,
     )
     before = optimizer.placement_objective_vector(request, incumbent)
+    fixed_section_calls: list[str] = []
+    original_fixed_section = optimizer._run_fixed_section_court_stage
+
+    def tracked_fixed_section(
+        request: Day2ScheduleRequest,
+        path_model: day2_schedule._PathModel,
+        incumbent: Day2Schedule,
+        *,
+        fixed_values: Mapping[str, int],
+        objective: str,
+        incumbent_value: int,
+        max_time_seconds: float,
+    ) -> optimizer._ExactOutcome:
+        fixed_section_calls.append(objective)
+        return original_fixed_section(
+            request,
+            path_model,
+            incumbent,
+            fixed_values=fixed_values,
+            objective=objective,
+            incumbent_value=incumbent_value,
+            max_time_seconds=max_time_seconds,
+        )
+
+    monkeypatch.setattr(optimizer, "_run_fixed_section_court_stage", tracked_fixed_section)
 
     result = optimizer.optimize_lower_objectives(
         request,
@@ -275,6 +302,48 @@ def test_small_topology_uses_full_exact_fallback_and_proves_all_objectives() -> 
     assert result.proven_objectives == PLACEMENT_OBJECTIVES
     assert result.objectives[4].proof_method == "full_exact"
     assert all(stage.optimality_proven for stage in result.objectives)
+    assert "team_court_change_count" in fixed_section_calls
+
+
+def test_fixed_section_candidate_is_retained_without_becoming_global_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, incumbent = _template_schedule(
+        pool_size=4,
+        court_count=3,
+        organizer_capacity=2,
+    )
+    path_model = day2_schedule._build_path_model(request.tournament_plan)
+    before = optimizer.placement_objective_vector(request, incumbent)
+    assert before[4] == 6
+
+    def full_exact_unknown(*_args: object, **_kwargs: object) -> optimizer._ExactOutcome:
+        return optimizer._ExactOutcome(
+            status=SolverStatus.UNKNOWN,
+            optimality_proven=False,
+            wall_time_seconds=0,
+            model_fingerprint="1" * 64,
+        )
+
+    monkeypatch.setattr(optimizer, "_run_full_exact_stage", full_exact_unknown)
+    outcome = optimizer._optimize_full_exact_objective(
+        request,
+        path_model,
+        incumbent,
+        fixed_values=optimizer._prior_fixed_values("team_court_change_count", before),
+        objective="team_court_change_count",
+        incumbent_value=before[4],
+        max_time_seconds=4,
+    )
+
+    after = optimizer.placement_objective_vector(request, outcome.schedule)
+    assert after < before
+    assert after[4] == 4
+    assert outcome.status is SolverStatus.UNKNOWN
+    assert outcome.optimality_proven is False
+    assert outcome.proof_method == "unproven"
+    assert outcome.best_bound is None
+    assert outcome.model_fingerprint == "1" * 64
 
 
 def test_result_contract_rejects_non_prefix_proof() -> None:
