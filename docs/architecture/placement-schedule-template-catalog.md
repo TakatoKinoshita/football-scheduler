@@ -122,7 +122,10 @@ legacyがcurrentの証明済み目的prefixを破った場合は、catalog証明
 currentとlegacyはトポロジーごとに独立したpartial fixtureへ書き出す。`3x8`、`2x16`、`4x8`を
 それぞれ1プロセスで並列実行できるが、各CP-SATのworker数は1のままにする。全partialでsource、
 固定環境、digest、重複のない272キーcoverageを検査してから、決定的な816キーのgzip fixtureへ
-単一プロセスで統合する。
+単一プロセスで統合する。各checkpoint directoryには`.legacy-run-contract.json`をatomic保存し、
+固定commit、Python／OR-Tools、seed、`PYTHONHASHSEED`、worker数、1キーの時間上限を束縛する。
+`--resume`ではsidecarのdigestと全条件を照合し、sidecarのない既存checkpointや条件の異なるrunを
+再利用しない。
 
 ```console
 uv run python scripts/generate_placement_ab_baseline.py merge \
@@ -144,6 +147,8 @@ uv run python scripts/generate_placement_ab_baseline.py merge \
 呼ばず、配置とprovenanceを変更しない。targetでは検証済みlegacyを最初のincumbentとして
 `placement-lower-objective-optimizer-v2`を実行する。1目的段階の既定上限は60秒とし、840秒は
 明示的な手動resumeの上限にだけ使用する。`UNKNOWN`やtimeoutでもlegacy incumbentを失わない。
+optimizerの`--output`は空の隔離directoryでよく、workerはcheckpointとtarget候補だけを書き出す。
+target manifestはworkerごとに1回だけ共有し、target件数の二乗に比例する複製を行わない。
 
 v2は証明済み最小使用セクション数を固定し、非最高順位帯決勝の最大gap、最大gapを固定した
 合計gap、最大待ち時間、コート移動、コート使用偏りの順に独立して最適化する。最大gap探索時は
@@ -156,7 +161,9 @@ fingerprint、終了理由を保持する。`--resume`ではすべてのSHAと�
 段階の次から再開する。不一致、欠落、非連続なcheckpointは再利用しない。
 
 最終統合は単一aggregatorだけが行い、再監査済みcurrent、legacy、optimizer-v2候補から辞書式最良を
-選ぶ。同値時の安定順はcurrent、optimizer-v2、legacyとする。更新可能なのは`placement-p3-s8.json`、
+選ぶ。同値時の安定順はcurrent、optimizer-v2、legacyとする。targetが1件でもある場合は全targetの
+optimizer候補と6段階checkpointを必須とし、探索を省略してlegacyだけを採用する集約を拒否する。
+更新可能なのは`placement-p3-s8.json`、
 `placement-p2-s16.json`、`placement-p4-s8.json`、`manifest.json`だけである。`placement-p2-s4.json`と
 `placement-p2-s8.json`は処理前後のraw file SHA-256と内部canonical digestの両方をguardし、
 1 byteでも変化した場合は停止する。統合後は次のコマンドで5shard・全1,360キーのdigest、coverage、
