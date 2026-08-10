@@ -16,6 +16,7 @@ from football_scheduler.placement_template_generator import (
     generate_topology_shard,
     load_manifest,
     merge_shards,
+    optimize_topology_lower_objectives,
     validate_catalog_hydration,
 )
 
@@ -69,6 +70,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="既存JSONとcanonical parsed-JSON digestを検証する",
     )
+    mode.add_argument(
+        "--optimize-lower-objectives",
+        action="store_true",
+        help="2x4/2x8の証明済み最小horizonを固定して下位目的を再最適化する",
+    )
     return parser
 
 
@@ -88,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-secondsは0より大きく840以下にしてください")
     if args.merge and args.topology:
         parser.error("--mergeは全5 shardを対象とするため--topologyを併用できません")
+    if args.optimize_lower_objectives and not args.topology:
+        parser.error("--optimize-lower-objectivesには--topology 2x4/2x8が必要です")
 
     output = args.output.resolve()
     try:
@@ -98,6 +106,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         topologies = _selected_topologies(args.topology)
+        if args.optimize_lower_objectives:
+            unsupported = set(topologies) - {(2, 4), (2, 8)}
+            if unsupported:
+                parser.error("下位目的の再最適化対象は--topology 2x4/2x8だけです")
+            for topology in topologies:
+                shard = optimize_topology_lower_objectives(
+                    topology,
+                    output,
+                    resume=args.resume,
+                    workers=args.workers,
+                    max_time_per_stage=args.max_seconds,
+                )
+                print(
+                    f"下位目的を再最適化しました: {topology[0]}x{topology[1]} "
+                    f"({len(shard.entries)} entries, SHA-256={shard.sha256})"
+                )
+            return 0
         if args.check:
             selected = topologies if args.topology and "all" not in args.topology else None
             shards = check_catalog(output, topologies=selected)

@@ -5,12 +5,15 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
+from shutil import copy2
 
 import pytest
 
 from football_scheduler.models import Day2Fallback, SolverStatus
 from football_scheduler.placement_template_contract import (
+    PLACEMENT_OBJECTIVES,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
     PlacementTemplateEntry,
     PlacementTemplateKey,
@@ -21,6 +24,7 @@ from football_scheduler.placement_template_contract import (
     placement_shard_digest,
 )
 from football_scheduler.placement_template_generator import (
+    LOWER_OBJECTIVE_TARGET_TOPOLOGIES,
     PlacementProblemBounds,
     PlacementSolveAttempt,
     StabilizedPlacementTemplateSolver,
@@ -30,12 +34,21 @@ from football_scheduler.placement_template_generator import (
     check_catalog,
     generate_template_entry,
     generate_topology_shard,
+    guard_untouched_shards,
     load_shard,
     merge_shards,
+    optimization_checkpoint_directory,
+    optimization_stage_checkpoint_file,
+    optimize_template_entry_lower_objectives,
+    reaudit_absolute_lower_bound_proofs,
     shard_file,
     topology_keys,
     validate_catalog_hydration,
     write_json_atomic,
+)
+
+CATALOG_ROOT = (
+    Path(__file__).resolve().parents[1] / "src" / "football_scheduler" / "placement_templates"
 )
 
 
@@ -58,6 +71,60 @@ class _ProvenInfeasibleSolver:
 class _MustNotRunSolver:
     def bounds(self, key: PlacementTemplateKey) -> PlacementProblemBounds:
         raise AssertionError(f"resume済みkeyを再計算しました: {key.catalog_id}")
+
+
+@dataclass(frozen=True)
+class _LowerStage:
+    objective: str
+    value: int
+    status: SolverStatus
+    optimality_proven: bool
+    proof_method: str
+    best_bound: float | None
+    wall_time_seconds: float
+    model_fingerprint: str
+
+
+@dataclass(frozen=True)
+class _LowerResult:
+    schedule: object
+    objectives: tuple[_LowerStage, ...]
+    proven_objectives: tuple[str, ...]
+    wall_time_seconds: float
+
+
+class _KeepIncumbentOptimizer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, request: object, incumbent: object, *, max_time_per_stage: float) -> object:
+        del request, max_time_per_stage
+        self.calls += 1
+        metrics = incumbent.metrics  # type: ignore[attr-defined]
+        by_name = {stage.objective: stage for stage in metrics.objective_stages}
+        stages = tuple(
+            _LowerStage(
+                objective=name,
+                value=by_name[name].value,
+                status=(
+                    SolverStatus.OPTIMAL
+                    if by_name[name].optimality_proven
+                    else SolverStatus.UNKNOWN
+                ),
+                optimality_proven=by_name[name].optimality_proven,
+                proof_method=("existing" if by_name[name].optimality_proven else "unproven"),
+                best_bound=float(by_name[name].value),
+                wall_time_seconds=0,
+                model_fingerprint=sha256(name.encode()).hexdigest(),
+            )
+            for name in PLACEMENT_OBJECTIVES
+        )
+        return _LowerResult(
+            schedule=incumbent,
+            objectives=stages,
+            proven_objectives=tuple(stage.objective for stage in stages if stage.optimality_proven),
+            wall_time_seconds=0,
+        )
 
     def solve_horizon(self, key: PlacementTemplateKey, horizon: int) -> PlacementSolveAttempt:
         raise AssertionError(f"resume済みkeyを再計算しました: {key.catalog_id}")
@@ -523,3 +590,68 @@ def test_single_aggregator_manifest_and_checks_use_parsed_json_digest(tmp_path: 
     assert f"catalog SHA-256: {manifest.catalog_sha256}" in completed.stdout
     assert "available: 0" in completed.stdout
     assert "proven_infeasible: 1360" in completed.stdout
+
+
+def test_absolute_bound_reaudit_promotes_only_a_true_prefix() -> None:
+    shard = load_shard(CATALOG_ROOT / "placement-p2-s8.json")
+    entry = next(
+        item
+        for item in shard.entries
+        if tuple(value.value for value in item.objectives)[1:3] == (0, 0)
+        and not item.objectives[1].optimality_proven
+    )
+
+    reaudited = reaudit_absolute_lower_bound_proofs(entry)
+
+    assert tuple(item.optimality_proven for item in reaudited.objectives) == (
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+    )
+    assert reaudited.sha256 == placement_entry_digest(reaudited)
+
+
+def test_lower_objective_optimization_checkpoints_and_resumes(tmp_path: Path) -> None:
+    source = load_shard(CATALOG_ROOT / "placement-p2-s4.json").entries[4]
+    optimizer = _KeepIncumbentOptimizer()
+
+    optimized = optimize_template_entry_lower_objectives(
+        source,
+        output_directory=tmp_path,
+        optimizer=optimizer,  # type: ignore[arg-type]
+    )
+    resumed = optimize_template_entry_lower_objectives(
+        source,
+        output_directory=tmp_path,
+        resume=True,
+        optimizer=lambda *_args, **_kwargs: pytest.fail("resume must not call optimizer"),  # type: ignore[arg-type]
+    )
+
+    checkpoint_directory = optimization_checkpoint_directory(tmp_path, source.key)
+    assert optimizer.calls == 1
+    assert optimized.provenance.optimization_version == ("placement-lower-objective-optimizer-v1")
+    assert resumed == optimized
+    assert all(
+        optimization_stage_checkpoint_file(checkpoint_directory, index).exists()
+        for index in range(len(PLACEMENT_OBJECTIVES))
+    )
+
+
+def test_untouched_shards_are_guarded_by_raw_and_internal_digest(tmp_path: Path) -> None:
+    assert LOWER_OBJECTIVE_TARGET_TOPOLOGIES == ((2, 4), (2, 8))
+    for name in (
+        "placement-p3-s8.json",
+        "placement-p2-s16.json",
+        "placement-p4-s8.json",
+    ):
+        copy2(CATALOG_ROOT / name, tmp_path / name)
+
+    guard_untouched_shards(tmp_path)
+    protected = tmp_path / "placement-p3-s8.json"
+    protected.write_bytes(protected.read_bytes() + b"\n")
+
+    with pytest.raises(Exception, match="raw SHA-256"):
+        guard_untouched_shards(tmp_path)

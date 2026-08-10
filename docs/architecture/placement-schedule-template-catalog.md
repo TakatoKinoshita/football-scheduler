@@ -74,6 +74,24 @@ uv run python scripts/generate_placement_templates.py --merge
 uv run python scripts/generate_placement_templates.py --check
 ```
 
+8・16チームの下位目的を再最適化する場合は、証明済みの最小horizonを変更せず、対象shardを
+個別に処理する。24・32チームの3shardはraw file SHA-256と内部canonical digestの両方を
+処理前後に検査し、1 byteでも変更されていれば停止する。
+
+```console
+uv run python scripts/generate_placement_templates.py --optimize-lower-objectives --topology 2x4 --workers 2 --resume
+uv run python scripts/generate_placement_templates.py --optimize-lower-objectives --topology 2x8 --workers 2 --resume
+uv run python scripts/generate_placement_templates.py --merge
+uv run python scripts/generate_placement_templates.py --check
+```
+
+optimizerは基礎generator `placement-template-generator-v8`を維持し、対象entryのprovenanceにだけ
+`placement-lower-objective-optimizer-v1`を記録する。未処理entryではfield自体をJSONへ出力しないため、
+既存entryと対象外shardのdigestは変化しない。各key・各目的段階はversion付きcheckpointへatomicに
+保存し、入力entry digestが一致する完全な6段階だけを`--resume`で再利用する。証明フラグは常に
+`true...true,false...false`の連続prefixとし、gap 0、最大待ち1、コート移動0、コート利用偏りの
+算術下限へ到達した実配置は、hydrateと独立validatorに合格した後だけ安全に証明済みへ昇格する。
+
 generatorは理論下限から固定horizonを増やし、目的変数を持たない実行可能性モデルで探索する。
 より短いhorizonの実行不能証明後、最初の実行可能配置を採用するため、使用
 セクション数の最小性は必ず証明される。下位目的は非負下限0へ到達した辞書順の段階までを証明済み

@@ -10,10 +10,19 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from football_scheduler.models import ContractModel, Day2Fallback, Identifier, NonEmptyText
+from football_scheduler.models import (
+    ContractModel,
+    Day2Fallback,
+    Identifier,
+    NonEmptyText,
+    SolverStatus,
+)
 
 TEMPLATE_FORMAT_VERSION: Literal[1] = 1
 PLACEMENT_RULESET_ID: Literal["placement-schedule-v1"] = "placement-schedule-v1"
+LOWER_OBJECTIVE_OPTIMIZER_VERSION: Literal["placement-lower-objective-optimizer-v1"] = (
+    "placement-lower-objective-optimizer-v1"
+)
 SUPPORTED_PLACEMENT_TOPOLOGIES: tuple[tuple[int, int], ...] = (
     (2, 4),
     (2, 8),
@@ -30,6 +39,13 @@ PLACEMENT_OBJECTIVES: tuple[str, ...] = (
     "court_usage_difference",
 )
 Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+OptimizationProofMethod = Literal[
+    "existing",
+    "analytic_lower_bound",
+    "section_relaxation_exact_completion",
+    "full_exact",
+    "unproven",
+]
 
 
 class PlacementTemplateStatus(StrEnum):
@@ -128,6 +144,10 @@ class PlacementTemplateProvenance(ContractModel):
     generator_version: NonEmptyText
     python_version: NonEmptyText
     ortools_version: NonEmptyText
+    optimization_version: Literal["placement-lower-objective-optimizer-v1"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class PlacementTemplateEntry(ContractModel):
@@ -160,12 +180,60 @@ class PlacementTemplateEntry(ContractModel):
             primary = self.objectives[0]
             if primary.value != self.used_sections or not primary.optimality_proven:
                 raise ValueError("使用セクション数の最適性証明が必要です")
+            proof_flags = tuple(item.optimality_proven for item in self.objectives)
+            if any(
+                proof_flags[index] and not proof_flags[index - 1]
+                for index in range(1, len(proof_flags))
+            ):
+                raise ValueError("目的の最適性証明はtrueの連続prefixにしてください")
             if not self.referee_signature:
                 raise ValueError("テンプレートの審判署名が必要です")
         elif self.used_sections is not None or self.slots or self.objectives:
             raise ValueError("実行不能テンプレートに配置情報は保存できません")
         if self.sha256 and self.sha256 != placement_entry_digest(self):
             raise ValueError("テンプレートのSHA-256が一致しません")
+        return self
+
+
+class PlacementOptimizationStageCheckpoint(ContractModel):
+    """下位目的optimizerのkey・目的段階ごとの再開可能な正本。"""
+
+    format_version: Literal[1] = 1
+    optimization_version: Literal["placement-lower-objective-optimizer-v1"] = (
+        LOWER_OBJECTIVE_OPTIMIZER_VERSION
+    )
+    key: PlacementTemplateKey
+    stage_index: Annotated[int, Field(ge=0, le=5)]
+    objective: Identifier
+    input_entry_sha256: Sha256Digest
+    candidate: PlacementTemplateEntry
+    status: SolverStatus
+    value: Annotated[int, Field(ge=0)]
+    optimality_proven: bool
+    proof_method: OptimizationProofMethod
+    best_bound: float | None = None
+    wall_time_seconds: Annotated[float, Field(ge=0)] = 0
+    model_fingerprint: Sha256Digest
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def validate_stage(self) -> Self:
+        if self.objective != PLACEMENT_OBJECTIVES[self.stage_index]:
+            raise ValueError("checkpointの目的と段階番号が一致しません")
+        if self.candidate.key != self.key:
+            raise ValueError("checkpointのkeyとcandidateが一致しません")
+        candidate_values = {item.objective: item.value for item in self.candidate.objectives}
+        if candidate_values.get(self.objective) != self.value:
+            raise ValueError("checkpointの目的値とcandidateが一致しません")
+        candidate_proof = self.candidate.objectives[self.stage_index].optimality_proven
+        if candidate_proof != self.optimality_proven:
+            raise ValueError("checkpointの証明状態とcandidateが一致しません")
+        if self.optimality_proven and self.proof_method == "unproven":
+            raise ValueError("証明済みcheckpointにunprovenは指定できません")
+        if not self.optimality_proven and self.proof_method != "unproven":
+            raise ValueError("未証明checkpointのproof_methodはunprovenにしてください")
+        if self.sha256 and self.sha256 != placement_optimization_checkpoint_digest(self):
+            raise ValueError("最適化checkpointのSHA-256が一致しません")
         return self
 
 
@@ -272,6 +340,13 @@ def sha256_hex(value: object) -> str:
 
 def placement_entry_digest(entry: PlacementTemplateEntry) -> str:
     payload = entry.model_dump(mode="json", exclude={"sha256"})
+    return sha256_hex(payload)
+
+
+def placement_optimization_checkpoint_digest(
+    checkpoint: PlacementOptimizationStageCheckpoint,
+) -> str:
+    payload = checkpoint.model_dump(mode="json", exclude={"sha256"})
     return sha256_hex(payload)
 
 
