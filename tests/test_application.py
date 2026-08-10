@@ -1256,6 +1256,21 @@ def test_schedule_creation_shares_solver_budget_between_both_days(
     assert adjusted["solver"]["max_time_seconds"] == 17.5
 
 
+def test_schedule_creation_reports_public_solver_budget_in_day2_metrics() -> None:
+    response = {
+        "status": "FEASIBLE",
+        "day2_schedule": {"metrics": {"max_time_seconds": 4.25}},
+    }
+
+    restored = application._restore_schedule_creation_public_solver_metrics(
+        response,
+        max_time_seconds=25.0,
+    )
+
+    assert restored["day2_schedule"]["metrics"]["max_time_seconds"] == 25.0
+    assert response["day2_schedule"]["metrics"]["max_time_seconds"] == 4.25
+
+
 def test_schedule_creation_caps_first_solver_to_transport_safe_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

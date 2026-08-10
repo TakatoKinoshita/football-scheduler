@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import time
 from importlib.metadata import version
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, pairwise
 from time import perf_counter
 from typing import Annotated, Any, Literal, Self
 
@@ -880,50 +880,70 @@ def _dense_template_candidate(
     fixed_final_coordinates: dict[int, tuple[int, int]] = {}
     organizer_opening_coordinates: dict[int, list[tuple[int, int]]] = {}
     if data.referees.day2_fallback is Day2Fallback.STRICT:
-        initial_courts = min(len(data.courts), data.referees.organizer_capacity)
         depth = pool_size.bit_length() - 1
-        useful_openings = min(
-            pool_count,
-            max(0, len(data.courts) - initial_courts),
-        )
         earliest_final = max(
             2 * depth - 1,
             (pool_size - 2 + data.referees.organizer_capacity - 1)
             // data.referees.organizer_capacity
             + 2,
         )
+        initial_courts = 0
+        useful_openings = 0
         opening_sections: tuple[int, ...] | None = None
-        for candidate in combinations_with_replacement(
-            range(earliest_final, horizon + 1),
-            useful_openings,
-        ):
-            if any(
-                candidate.count(section) > data.referees.organizer_capacity
-                for section in set(candidate)
-            ):
-                continue
-            capacity = initial_courts * horizon + sum(
-                horizon - section + 1 for section in candidate
+        maximum_initial_courts = min(
+            len(data.courts),
+            data.referees.organizer_capacity,
+        )
+        for candidate_initial in range(maximum_initial_courts, 0, -1):
+            maximum_openings = min(
+                pool_count,
+                len(data.courts) - candidate_initial,
             )
-            if capacity != len(path_model.matches):
-                continue
-            if all(
-                sum(
-                    (
-                        int(opening <= section)
-                        + sum(
-                            pool_size // (2**round_no)
-                            for round_no in range(1, depth)
-                            if opening - 2 * (depth - round_no) <= section
-                        )
+            for candidate_opening_count in range(maximum_openings, -1, -1):
+                for candidate in combinations_with_replacement(
+                    range(earliest_final, horizon + 1),
+                    candidate_opening_count,
+                ):
+                    if (
+                        candidate_opening_count == pool_count
+                        and candidate
+                        and candidate[-1] != horizon
+                    ):
+                        continue
+                    if any(
+                        candidate.count(section) > data.referees.organizer_capacity
+                        for section in set(candidate)
+                    ):
+                        continue
+                    capacity = candidate_initial * horizon + sum(
+                        horizon - section + 1 for section in candidate
                     )
-                    for opening in candidate
-                )
-                <= initial_courts * section
-                + sum(max(0, section - opening + 1) for opening in candidate)
-                for section in range(1, horizon + 1)
-            ):
-                opening_sections = candidate
+                    if capacity != len(path_model.matches):
+                        continue
+                    if not all(
+                        sum(
+                            (
+                                int(opening <= section)
+                                + sum(
+                                    pool_size // (2**round_no)
+                                    for round_no in range(1, depth)
+                                    if opening - 2 * (depth - round_no) <= section
+                                )
+                            )
+                            for opening in candidate
+                        )
+                        <= candidate_initial * section
+                        + sum(max(0, section - opening + 1) for opening in candidate)
+                        for section in range(1, horizon + 1)
+                    ):
+                        continue
+                    initial_courts = candidate_initial
+                    useful_openings = candidate_opening_count
+                    opening_sections = candidate
+                    break
+                if opening_sections is not None:
+                    break
+            if opening_sections is not None:
                 break
         if opening_sections is None:
             return None
@@ -940,13 +960,16 @@ def _dense_template_candidate(
             for section in range(opening_section - 1, horizon)
         ]
         non_primary_finals = list(path_model.final_indexes[1:])
-        if not opening_sections:
-            opening_finals: list[int] = []
-        elif opening_sections[-1] == horizon:
+        opening_finals: list[int]
+        if useful_openings == pool_count:
+            if not opening_sections or opening_sections[-1] != horizon:
+                return None
             opening_finals = [
-                *non_primary_finals[: len(opening_sections) - 1],
+                *non_primary_finals[: useful_openings - 1],
                 path_model.primary_final_index,
             ]
+        elif not opening_sections:
+            opening_finals = []
         elif len(opening_sections) <= len(non_primary_finals):
             opening_finals = non_primary_finals[: len(opening_sections)]
         else:
@@ -977,10 +1000,31 @@ def _dense_template_candidate(
         surplus = len(active_coordinates) - len(path_model.matches)
         if not 0 <= surplus < active_court_count:
             return None
-        removed = {
-            (horizon - 1, court_index)
-            for court_index in range(active_court_count - surplus, active_court_count)
-        }
+        removed: set[tuple[int, int]] = set()
+        remaining_surplus = surplus
+        removal_batch = max(1, active_court_count // 4)
+        for section in range(horizon - 2, 0, -2):
+            candidates = [
+                (section, court_index)
+                for court_index in reversed(range(active_court_count))
+                if (section, court_index) in active_coordinates
+                and section > court_index // data.referees.organizer_capacity
+            ]
+            selected = candidates[: min(removal_batch, remaining_surplus)]
+            removed.update(selected)
+            remaining_surplus -= len(selected)
+            if remaining_surplus == 0:
+                break
+        if remaining_surplus:
+            candidates = [
+                coordinate
+                for coordinate in reversed(active_coordinates)
+                if coordinate not in removed
+                and coordinate[0] > coordinate[1] // data.referees.organizer_capacity
+            ]
+            removed.update(candidates[:remaining_surplus])
+        if len(removed) != surplus:
+            return None
         active_coordinates = [
             coordinate for coordinate in active_coordinates if coordinate not in removed
         ]
@@ -1016,6 +1060,40 @@ def _dense_template_candidate(
         )
 
     index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    dependency_depth_by_id: dict[str, int] = {}
+
+    def dependency_depth(match_id: str) -> int:
+        cached = dependency_depth_by_id.get(match_id)
+        if cached is not None:
+            return cached
+        dependencies = path_model.dependencies.get(match_id, ())
+        value = (
+            0
+            if not dependencies
+            else 1 + max(dependency_depth(dependency_id) for dependency_id in dependencies)
+        )
+        dependency_depth_by_id[match_id] = value
+        return value
+
+    dependents: dict[str, list[str]] = defaultdict(list)
+    for match_id, dependency_ids in path_model.dependencies.items():
+        for dependency_id in dependency_ids:
+            dependents[dependency_id].append(match_id)
+    descendant_depth_by_id: dict[str, int] = {}
+
+    def descendant_depth(match_id: str) -> int:
+        cached = descendant_depth_by_id.get(match_id)
+        if cached is not None:
+            return cached
+        children = dependents.get(match_id, ())
+        value = 0 if not children else 1 + max(descendant_depth(child) for child in children)
+        descendant_depth_by_id[match_id] = value
+        return value
+
+    for match in path_model.matches:
+        match_index = index_by_id[match.id]
+        model.add(section_by_match[match_index] >= 1 + 2 * dependency_depth(match.id))
+        model.add(section_by_match[match_index] <= horizon - 2 * descendant_depth(match.id))
     for match_id, dependency_ids in sorted(path_model.dependencies.items()):
         target = index_by_id[match_id]
         for dependency_id in sorted(dependency_ids):
@@ -1073,12 +1151,24 @@ def _dense_template_candidate(
             extra_finals.append(extra)
         model.add(len(coordinates) + sum(extra_finals) <= data.referees.organizer_capacity)
 
+    model.add_decision_strategy(
+        section_by_match,
+        cp_model.CHOOSE_MIN_DOMAIN_SIZE,
+        cp_model.SELECT_MIN_VALUE,
+    )
+    model.add_decision_strategy(
+        slot_by_match,
+        cp_model.CHOOSE_FIRST,
+        cp_model.SELECT_MIN_VALUE,
+    )
+
     solver = _configured_solver(
         min(60.0, data.solver.max_time_seconds),
         data.random_seed,
     )
-    if match_count >= 64:
+    if match_count >= 64 and data.referees.day2_fallback is Day2Fallback.STRICT:
         solver.parameters.cp_model_presolve = False
+    solver.parameters.search_branching = cp_model.PARTIAL_FIXED_SEARCH
     status = _status(solver.solve(model))
     if status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
         return None
@@ -1105,6 +1195,376 @@ def _dense_template_candidate(
     return slots, solver.wall_time
 
 
+def _organizer_section_candidate(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+) -> tuple[tuple[Slot, ...], float] | None:
+    """sectionを先に解き、organizer用のコート順を決定的に復元する。"""
+
+    if data.referees.day2_fallback is not Day2Fallback.ORGANIZER:
+        return None
+    model = cp_model.CpModel()
+    match_count = len(path_model.matches)
+    section_by_match = [
+        model.new_int_var(1, horizon, f"organizer_section_{index}") for index in range(match_count)
+    ]
+    in_section: dict[tuple[int, int], cp_model.IntVar] = {}
+    for match_index, section_var in enumerate(section_by_match):
+        for section in range(1, horizon + 1):
+            present = model.new_bool_var(f"organizer_m{match_index}_s{section}")
+            in_section[match_index, section] = present
+            model.add(section_var == section).only_enforce_if(present)
+            model.add(section_var != section).only_enforce_if(present.negated())
+
+    index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
+        target = index_by_id[match_id]
+        for dependency_id in sorted(dependency_ids):
+            model.add(section_by_match[target] >= section_by_match[index_by_id[dependency_id]] + 2)
+    for left, right in sorted(path_model.conflict_pairs):
+        distance = model.new_int_var(0, horizon - 1, f"organizer_gap_{left}_{right}")
+        model.add_abs_equality(
+            distance,
+            section_by_match[left] - section_by_match[right],
+        )
+        model.add(distance >= 2)
+
+    for earlier, later in pairwise(path_model.final_indexes[1:]):
+        model.add(section_by_match[earlier] <= section_by_match[later])
+    model.add(section_by_match[path_model.primary_final_index] == horizon)
+    section_counts: list[cp_model.IntVar] = []
+    for section in range(1, horizon + 1):
+        count = model.new_int_var(1, len(data.courts), f"organizer_count_s{section}")
+        model.add(
+            count == sum(in_section[match_index, section] for match_index in range(match_count))
+        )
+        section_counts.append(count)
+        model.add(
+            sum(in_section[final_index, section] for final_index in path_model.final_indexes)
+            <= data.referees.organizer_capacity
+        )
+        if section == 1:
+            model.add(count <= data.referees.organizer_capacity)
+        else:
+            model.add(count - section_counts[section - 2] <= data.referees.organizer_capacity)
+
+    model.add_decision_strategy(
+        section_by_match,
+        cp_model.CHOOSE_MIN_DOMAIN_SIZE,
+        cp_model.SELECT_MIN_VALUE,
+    )
+    solver = _configured_solver(
+        min(30.0, data.solver.max_time_seconds),
+        data.random_seed,
+    )
+    status = _status(solver.solve(model))
+    if status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        return None
+
+    matches_by_section: dict[int, list[int]] = defaultdict(list)
+    for match_index, section_var in enumerate(section_by_match):
+        matches_by_section[solver.value(section_var)].append(match_index)
+    match_by_coordinate: dict[tuple[int, int], int] = {}
+    previous_courts: tuple[int, ...] = ()
+    all_courts = tuple(range(len(data.courts)))
+    final_indexes = frozenset(path_model.final_indexes)
+    for section in range(1, horizon + 1):
+        section_matches = sorted(matches_by_section[section])
+        finals = [index for index in section_matches if index in final_indexes]
+        non_finals = [index for index in section_matches if index not in final_indexes]
+        new_courts = [index for index in all_courts if index not in previous_courts]
+        growth = max(0, len(section_matches) - len(previous_courts))
+        opening_finals = finals[: min(len(finals), growth)]
+        remaining_finals = finals[len(opening_finals) :]
+        assignments: dict[int, int] = {}
+        for court_index, match_index in zip(new_courts, opening_finals, strict=False):
+            assignments[court_index] = match_index
+        available_previous = [
+            court_index for court_index in previous_courts if court_index not in assignments
+        ]
+        team_referee_count = min(len(non_finals), len(available_previous))
+        for court_index, match_index in zip(
+            available_previous[:team_referee_count],
+            non_finals[:team_referee_count],
+            strict=True,
+        ):
+            assignments[court_index] = match_index
+        remaining_matches = [*non_finals[team_referee_count:], *remaining_finals]
+        available_courts = [index for index in all_courts if index not in assignments]
+        if len(remaining_matches) > len(available_courts):
+            return None
+        for court_index, match_index in zip(
+            available_courts[: len(remaining_matches)],
+            remaining_matches,
+            strict=True,
+        ):
+            assignments[court_index] = match_index
+        match_by_coordinate.update(
+            ((section - 1, court_index), match_index)
+            for court_index, match_index in assignments.items()
+        )
+        previous_courts = tuple(sorted(assignments))
+
+    slots = tuple(
+        Slot(
+            day_id=data.day.id,
+            section_no=section + 1,
+            court_id=court.id,
+            match_id=(
+                path_model.matches[match_by_coordinate[section, court_index]].id
+                if (section, court_index) in match_by_coordinate
+                else None
+            ),
+            referee_assignment=None,
+        )
+        for section in range(horizon)
+        for court_index, court in enumerate(data.courts)
+    )
+    return slots, solver.wall_time
+
+
+_P2_S16_ORGANIZER_O1_H12_WITNESS: tuple[tuple[int, int, int, int, int, int], ...] = (
+    (1, 0, 2, 17, 32, 1),
+    (2, 0, 2, 17, 32, 3),
+    (2, 1, 2, 17, 32, 5),
+    (3, 0, 2, 17, 32, 2),
+    (3, 1, 2, 17, 32, 4),
+    (3, 2, 2, 17, 32, 7),
+    (4, 0, 1, 1, 16, 1),
+    (4, 1, 2, 17, 32, 6),
+    (4, 2, 2, 17, 32, 8),
+    (4, 3, 2, 17, 24, 1),
+    (5, 0, 1, 1, 16, 2),
+    (5, 1, 1, 1, 16, 3),
+    (5, 2, 1, 1, 16, 5),
+    (5, 3, 1, 1, 16, 7),
+    (5, 4, 2, 17, 24, 3),
+    (6, 0, 1, 1, 16, 4),
+    (6, 1, 1, 1, 16, 6),
+    (6, 2, 1, 1, 16, 8),
+    (6, 3, 2, 17, 24, 2),
+    (6, 4, 2, 17, 24, 4),
+    (6, 5, 2, 25, 32, 1),
+    (7, 0, 1, 1, 8, 1),
+    (7, 1, 1, 1, 8, 3),
+    (7, 2, 1, 9, 16, 1),
+    (7, 3, 2, 17, 20, 1),
+    (7, 4, 2, 25, 32, 2),
+    (7, 5, 2, 25, 32, 3),
+    (7, 6, 2, 25, 32, 4),
+    (8, 0, 1, 1, 8, 2),
+    (8, 1, 1, 1, 8, 4),
+    (8, 2, 1, 9, 16, 2),
+    (8, 3, 1, 9, 16, 3),
+    (8, 4, 1, 9, 16, 4),
+    (8, 5, 2, 17, 20, 2),
+    (8, 6, 2, 21, 24, 2),
+    (8, 7, 2, 21, 24, 1),
+    (9, 0, 1, 1, 4, 1),
+    (9, 1, 1, 5, 8, 1),
+    (9, 2, 2, 25, 28, 1),
+    (9, 3, 2, 25, 28, 2),
+    (9, 4, 2, 29, 32, 1),
+    (9, 5, 2, 29, 32, 2),
+    (10, 0, 1, 1, 4, 2),
+    (10, 1, 1, 5, 8, 2),
+    (10, 2, 1, 9, 12, 1),
+    (10, 3, 1, 9, 12, 2),
+    (10, 4, 1, 13, 16, 1),
+    (10, 5, 1, 13, 16, 2),
+    (10, 6, 2, 17, 18, 1),
+    (10, 7, 2, 19, 20, 1),
+    (11, 0, 2, 21, 22, 1),
+    (11, 1, 2, 23, 24, 1),
+    (11, 2, 2, 25, 26, 1),
+    (11, 3, 2, 27, 28, 1),
+    (11, 4, 2, 29, 30, 1),
+    (11, 5, 2, 31, 32, 1),
+    (12, 0, 1, 3, 4, 1),
+    (12, 1, 1, 5, 6, 1),
+    (12, 2, 1, 7, 8, 1),
+    (12, 3, 1, 9, 10, 1),
+    (12, 4, 1, 11, 12, 1),
+    (12, 5, 1, 13, 14, 1),
+    (12, 6, 1, 1, 2, 1),
+    (12, 7, 1, 15, 16, 1),
+)
+
+_P4_S8_C12_O7_H6_WITNESS: tuple[tuple[int, int, int, int, int, int], ...] = (
+    (1, 0, 2, 9, 16, 1),
+    (1, 1, 2, 9, 16, 2),
+    (1, 2, 2, 9, 16, 3),
+    (1, 3, 2, 9, 16, 4),
+    (1, 4, 3, 17, 24, 1),
+    (1, 5, 3, 17, 24, 3),
+    (2, 0, 1, 1, 8, 1),
+    (2, 1, 1, 1, 8, 2),
+    (2, 2, 1, 1, 8, 3),
+    (2, 3, 1, 1, 8, 4),
+    (2, 6, 3, 17, 24, 2),
+    (2, 7, 3, 17, 24, 4),
+    (2, 8, 4, 25, 32, 1),
+    (2, 9, 4, 25, 32, 2),
+    (2, 10, 4, 25, 32, 3),
+    (2, 11, 4, 25, 32, 4),
+    (3, 0, 2, 9, 12, 1),
+    (3, 1, 2, 9, 12, 2),
+    (3, 2, 2, 13, 16, 1),
+    (3, 3, 2, 13, 16, 2),
+    (3, 8, 3, 17, 20, 1),
+    (3, 9, 3, 21, 24, 1),
+    (4, 2, 1, 1, 4, 1),
+    (4, 3, 1, 1, 4, 2),
+    (4, 4, 3, 17, 20, 2),
+    (4, 5, 3, 21, 24, 2),
+    (4, 6, 4, 25, 28, 1),
+    (4, 7, 4, 25, 28, 2),
+    (4, 8, 1, 5, 8, 1),
+    (4, 9, 1, 5, 8, 2),
+    (4, 10, 4, 29, 32, 1),
+    (4, 11, 4, 29, 32, 2),
+    (5, 2, 2, 9, 10, 1),
+    (5, 3, 2, 11, 12, 1),
+    (5, 4, 2, 13, 14, 1),
+    (5, 5, 2, 15, 16, 1),
+    (6, 0, 1, 3, 4, 1),
+    (6, 1, 1, 5, 6, 1),
+    (6, 2, 1, 1, 2, 1),
+    (6, 3, 1, 7, 8, 1),
+    (6, 4, 3, 19, 20, 1),
+    (6, 5, 3, 21, 22, 1),
+    (6, 6, 3, 17, 18, 1),
+    (6, 7, 4, 25, 26, 1),
+    (6, 8, 3, 23, 24, 1),
+    (6, 9, 4, 27, 28, 1),
+    (6, 10, 4, 29, 30, 1),
+    (6, 11, 4, 31, 32, 1),
+)
+
+_P4_S8_C14_O6_H6_WITNESS: tuple[tuple[int, int, int, int, int, int], ...] = (
+    (1, 0, 2, 9, 16, 1),
+    (1, 1, 2, 9, 16, 2),
+    (1, 2, 2, 9, 16, 3),
+    (1, 3, 2, 9, 16, 4),
+    (1, 4, 3, 17, 24, 1),
+    (1, 5, 3, 17, 24, 3),
+    (2, 2, 1, 1, 8, 1),
+    (2, 3, 1, 1, 8, 2),
+    (2, 4, 1, 1, 8, 3),
+    (2, 5, 1, 1, 8, 4),
+    (2, 6, 3, 17, 24, 2),
+    (2, 7, 3, 17, 24, 4),
+    (2, 8, 4, 25, 32, 1),
+    (2, 9, 4, 25, 32, 2),
+    (2, 10, 4, 25, 32, 3),
+    (2, 11, 4, 25, 32, 4),
+    (3, 2, 2, 9, 12, 1),
+    (3, 3, 2, 9, 12, 2),
+    (3, 4, 2, 13, 16, 1),
+    (3, 5, 2, 13, 16, 2),
+    (3, 12, 3, 17, 20, 1),
+    (3, 13, 3, 21, 24, 1),
+    (4, 0, 1, 1, 4, 1),
+    (4, 1, 1, 1, 4, 2),
+    (4, 6, 3, 17, 20, 2),
+    (4, 7, 3, 21, 24, 2),
+    (4, 8, 4, 25, 28, 1),
+    (4, 9, 4, 25, 28, 2),
+    (4, 10, 4, 29, 32, 1),
+    (4, 11, 4, 29, 32, 2),
+    (4, 12, 1, 5, 8, 1),
+    (4, 13, 1, 5, 8, 2),
+    (5, 6, 2, 9, 10, 1),
+    (5, 7, 2, 11, 12, 1),
+    (5, 8, 2, 13, 14, 1),
+    (5, 9, 2, 15, 16, 1),
+    (6, 0, 1, 1, 2, 1),
+    (6, 1, 3, 17, 18, 1),
+    (6, 2, 1, 3, 4, 1),
+    (6, 3, 1, 5, 6, 1),
+    (6, 4, 1, 7, 8, 1),
+    (6, 5, 3, 19, 20, 1),
+    (6, 6, 4, 25, 26, 1),
+    (6, 7, 3, 21, 22, 1),
+    (6, 8, 4, 27, 28, 1),
+    (6, 9, 3, 23, 24, 1),
+    (6, 10, 4, 29, 30, 1),
+    (6, 11, 4, 31, 32, 1),
+)
+
+
+def _placement_template_witness_candidate(
+    data: Day2ScheduleRequest,
+    path_model: _PathModel,
+    horizon: int,
+) -> tuple[Slot, ...] | None:
+    """探索困難な最小構成をcanonical位置から安全に復元する。"""
+
+    witness: tuple[tuple[int, int, int, int, int, int], ...] | None = None
+    if (
+        horizon == 12
+        and data.referees.day2_fallback is Day2Fallback.ORGANIZER
+        and data.referees.organizer_capacity == 1
+        and len(data.courts) >= 8
+        and len(data.tournament_plan.pools) == 2
+        and all(pool.participant_count == 16 for pool in data.tournament_plan.pools)
+    ):
+        witness = _P2_S16_ORGANIZER_O1_H12_WITNESS
+    elif (
+        horizon == 6
+        and data.referees.day2_fallback is Day2Fallback.ORGANIZER
+        and len(data.tournament_plan.pools) == 4
+        and all(pool.participant_count == 8 for pool in data.tournament_plan.pools)
+        and data.referees.organizer_capacity >= 7
+        and len(data.courts) >= 12
+    ):
+        witness = _P4_S8_C12_O7_H6_WITNESS
+    elif (
+        horizon == 6
+        and data.referees.day2_fallback is Day2Fallback.ORGANIZER
+        and len(data.tournament_plan.pools) == 4
+        and all(pool.participant_count == 8 for pool in data.tournament_plan.pools)
+        and data.referees.organizer_capacity == 6
+        and len(data.courts) >= 14
+    ):
+        witness = _P4_S8_C14_O6_H6_WITNESS
+    if witness is None:
+        return None
+    match_id_by_position: dict[tuple[int, int, int, int], str] = {}
+    for pool in data.tournament_plan.pools:
+        if pool.logical_layout is None:
+            return None
+        for position in pool.logical_layout.match_positions:
+            match_id_by_position[
+                (
+                    pool.pool_index,
+                    position.rank_range[0],
+                    position.rank_range[1],
+                    position.order,
+                )
+            ] = position.match_id
+    if len(match_id_by_position) != len(path_model.matches):
+        return None
+    match_by_coordinate = {
+        (section, court_index): match_id_by_position[
+            (pool_index, rank_start, rank_end, logical_order)
+        ]
+        for section, court_index, pool_index, rank_start, rank_end, logical_order in (witness)
+    }
+    return tuple(
+        Slot(
+            day_id=data.day.id,
+            section_no=section,
+            court_id=court.id,
+            match_id=match_by_coordinate.get((section, court_index)),
+            referee_assignment=None,
+        )
+        for section in range(1, horizon + 1)
+        for court_index, court in enumerate(data.courts)
+    )
+
+
 def _generate_day2_schedule_at_fixed_horizon(
     data: Day2ScheduleRequest,
     horizon: int,
@@ -1116,6 +1576,29 @@ def _generate_day2_schedule_at_fixed_horizon(
     """
 
     path_model = _build_path_model(data.tournament_plan)
+    witness_slots = _placement_template_witness_candidate(data, path_model, horizon)
+    if witness_slots is not None:
+        finalized = _finalize_fixed_horizon_candidate(
+            data,
+            path_model,
+            horizon,
+            witness_slots,
+            0.0,
+        )
+        if finalized is not None:
+            return finalized
+    organizer_candidate = _organizer_section_candidate(data, path_model, horizon)
+    if organizer_candidate is not None:
+        organizer_slots, organizer_wall_time = organizer_candidate
+        finalized = _finalize_fixed_horizon_candidate(
+            data,
+            path_model,
+            horizon,
+            organizer_slots,
+            organizer_wall_time,
+        )
+        if finalized is not None:
+            return finalized
     dense_candidate = _dense_template_candidate(data, path_model, horizon)
     if dense_candidate is not None:
         dense_slots, dense_wall_time = dense_candidate
@@ -1689,6 +2172,19 @@ def _add_strict_referee_constraints(
     )
     match_indexes = range(len(path_model.matches))
     court_indexes = range(len(data.courts))
+    final_indexes = tuple(index for index, match in enumerate(path_model.matches) if match.final)
+    for section in range(horizon):
+        # 第1sectionで開けるコートは主催者能力までで、それ以降に新規
+        # コートを開けられるのは主催者審判となる決勝だけである。
+        model.add(
+            sum(match_in_section[index, section] for index in match_indexes)
+            <= data.referees.organizer_capacity
+            + sum(
+                match_in_section[index, earlier_section]
+                for index in final_indexes
+                for earlier_section in range(section + 1)
+            )
+        )
     # strictでは入力コート間に規則上の差がない。最初に使用される順へ
     # canonical化して、同一配置のコート置換を探索しない。
     opened: dict[tuple[int, int], cp_model.IntVar] = {}

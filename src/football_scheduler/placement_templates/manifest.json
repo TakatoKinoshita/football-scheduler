@@ -1,0 +1,46 @@
+{
+  "catalog_sha256": "8e9ca7f272e145478dd366f774d3b4d3f051300378261a39e36ce14c0e0d2a6c",
+  "format_version": 1,
+  "generator_version": "placement-template-generator-v8",
+  "ortools_version": "9.15.6755",
+  "python_version": "3.14.2",
+  "ruleset_id": "placement-schedule-v1",
+  "shards": [
+    {
+      "entry_count": 272,
+      "file": "placement-p2-s4.json",
+      "pool_count": 2,
+      "pool_size": 4,
+      "sha256": "7ca7422e85a9b298fa6f438021af38736d99cc21cb8c1acac37036802e031a5a"
+    },
+    {
+      "entry_count": 272,
+      "file": "placement-p2-s8.json",
+      "pool_count": 2,
+      "pool_size": 8,
+      "sha256": "fea6bc9787e8647db8bf3643cda1c112f2ab15cda428cdbe8c4dbad48c20ec2d"
+    },
+    {
+      "entry_count": 272,
+      "file": "placement-p3-s8.json",
+      "pool_count": 3,
+      "pool_size": 8,
+      "sha256": "5450d7e20501c6f14d6a36b4de2267ef68c7178b46f3e018d9733bfafb27fe2b"
+    },
+    {
+      "entry_count": 272,
+      "file": "placement-p2-s16.json",
+      "pool_count": 2,
+      "pool_size": 16,
+      "sha256": "8942027d9f81366b2dd7ef2d278e62c32d4846086000cabe71d0d8d7d9666580"
+    },
+    {
+      "entry_count": 272,
+      "file": "placement-p4-s8.json",
+      "pool_count": 4,
+      "pool_size": 8,
+      "sha256": "8ba3869afbe4e8f789da9aa97a758bfb51dd5edd0a8617da99fc26af79025b70"
+    }
+  ],
+  "total_entry_count": 1360
+}

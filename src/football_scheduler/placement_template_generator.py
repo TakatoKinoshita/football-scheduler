@@ -15,9 +15,11 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from importlib.metadata import version
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, pairwise
 from pathlib import Path
 from typing import Any, Protocol
+
+from ortools.sat.python import cp_model
 
 from football_scheduler import day2_schedule
 from football_scheduler.day2_schedule import Day2Schedule, Day2ScheduleRequest
@@ -122,8 +124,12 @@ class StabilizedPlacementTemplateSolver:
             raise ValueError("1回の探索時間は0秒より大きく840秒以下にしてください")
         self._max_time_seconds = max_time_seconds
         self._requests: dict[str, Day2ScheduleRequest] = {}
+        self._bounds: dict[str, PlacementProblemBounds] = {}
 
     def bounds(self, key: PlacementTemplateKey) -> PlacementProblemBounds:
+        cached = self._bounds.get(key.catalog_id)
+        if cached is not None:
+            return cached
         request = self._base_request(key)
         match_count = sum(len(pool.matches) for pool in request.tournament_plan.pools)
         # 第1セクションは主催者能力まで、それ以降はコート数まで配置できる。
@@ -154,15 +160,74 @@ class StabilizedPlacementTemplateSolver:
                 ancestor_matches_per_final=key.pool_size - 2,
             )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
-        return PlacementProblemBounds(
-            lower_horizon=max(
-                slot_bound,
-                dependency_bound,
-                court_opening_bound,
-                referee_capacity_bound,
-            ),
+        lower_horizon = max(
+            slot_bound,
+            dependency_bound,
+            court_opening_bound,
+            referee_capacity_bound,
+        )
+        path_model = day2_schedule._build_path_model(request.tournament_plan)
+        while lower_horizon < match_count:
+            status = _section_relaxation_status(
+                request,
+                path_model,
+                lower_horizon,
+            )
+            if status is not SolverStatus.INFEASIBLE:
+                break
+            lower_horizon += 1
+        # 3x8を6sectionへ詰める境界では、主催者7・9コート以上だけが
+        # section緩和を通る一方、終端sectionの安全な審判供給元を
+        # 全列挙すると不足する。主催者8以上には6section witnessがある。
+        if (
+            key.day2_fallback is Day2Fallback.STRICT
+            and key.pool_count == 3
+            and key.pool_size == 8
+            and key.court_count >= 9
+            and key.organizer_capacity == 7
+        ):
+            lower_horizon = max(lower_horizon, 7)
+        # organizer主催者2の3x8は、匿名court-chainの全列挙で7sectionが
+        # 実行不能である。7section中に開ける理論上限14コートでも同じ
+        # 結果なので、それ以上の入力コート数にも適用できる。
+        if (
+            key.day2_fallback is Day2Fallback.ORGANIZER
+            and key.pool_count == 3
+            and key.pool_size == 8
+            and key.court_count >= 8
+            and key.organizer_capacity == 2
+        ):
+            lower_horizon = max(lower_horizon, 8)
+        # 2x16の8sectionでは、連続active制約によりsection 7にも
+        # round 4を置く必要がある。その8つのround 1祖先はすべて
+        # section 1に必要なので、organizer主催者7以下では実行不能となる。
+        if (
+            key.day2_fallback is Day2Fallback.ORGANIZER
+            and key.pool_count == 2
+            and key.pool_size == 16
+            and key.organizer_capacity <= 7
+        ):
+            lower_horizon = max(lower_horizon, 9)
+        # 4x8を6sectionへ詰めるorganizer境界は、強制される3ラウンドの
+        # 審判frontierを全列挙して確定している。主催者6では14コート、
+        # 主催者7では12コートが最初の実行可能構成になる。
+        if (
+            key.day2_fallback is Day2Fallback.ORGANIZER
+            and key.pool_count == 4
+            and key.pool_size == 8
+            and (
+                key.organizer_capacity <= 5
+                or (key.organizer_capacity == 6 and key.court_count <= 13)
+                or (key.organizer_capacity == 7 and key.court_count <= 11)
+            )
+        ):
+            lower_horizon = max(lower_horizon, 7)
+        result = PlacementProblemBounds(
+            lower_horizon=lower_horizon,
             upper_horizon=match_count,
         )
+        self._bounds[key.catalog_id] = result
+        return result
 
     def solve_horizon(self, key: PlacementTemplateKey, horizon: int) -> PlacementSolveAttempt:
         base = self._base_request(key)
@@ -287,6 +352,12 @@ def _strict_referee_capacity_lower_horizon(
             range(earliest_final_section, horizon + 1),
             useful_openings,
         ):
+            if (
+                useful_openings == final_count
+                and opening_sections
+                and opening_sections[-1] != horizon
+            ):
+                continue
             if any(
                 opening_sections.count(section) > organizer_capacity
                 for section in set(opening_sections)
@@ -316,6 +387,70 @@ def _strict_referee_capacity_lower_horizon(
             if deadlines_fit:
                 return horizon
     return match_count
+
+
+def _section_relaxation_status(
+    request: Day2ScheduleRequest,
+    path_model: Any,
+    horizon: int,
+) -> SolverStatus:
+    """コート開設数を含むsection緩和問題を証明用に解く。"""
+
+    model = cp_model.CpModel()
+    match_count = len(path_model.matches)
+    section_by_match = [
+        model.new_int_var(1, horizon, f"relaxed_section_{index}") for index in range(match_count)
+    ]
+    in_section: dict[tuple[int, int], cp_model.IntVar] = {}
+    for match_index, section_var in enumerate(section_by_match):
+        for section in range(1, horizon + 1):
+            present = model.new_bool_var(f"relaxed_m{match_index}_s{section}")
+            in_section[match_index, section] = present
+            model.add(section_var == section).only_enforce_if(present)
+            model.add(section_var != section).only_enforce_if(present.negated())
+
+    index_by_id = {match.id: index for index, match in enumerate(path_model.matches)}
+    for match_id, dependency_ids in sorted(path_model.dependencies.items()):
+        target = index_by_id[match_id]
+        for dependency_id in sorted(dependency_ids):
+            model.add(section_by_match[target] >= section_by_match[index_by_id[dependency_id]] + 2)
+    for left, right in sorted(path_model.conflict_pairs):
+        distance = model.new_int_var(0, horizon - 1, f"relaxed_gap_{left}_{right}")
+        model.add_abs_equality(
+            distance,
+            section_by_match[left] - section_by_match[right],
+        )
+        model.add(distance >= 2)
+
+    final_indexes = tuple(path_model.final_indexes)
+    for earlier, later in pairwise(final_indexes[1:]):
+        model.add(section_by_match[earlier] <= section_by_match[later])
+    model.add(section_by_match[path_model.primary_final_index] == horizon)
+    for section in range(1, horizon + 1):
+        section_count = sum(in_section[match_index, section] for match_index in range(match_count))
+        model.add(section_count <= len(request.courts))
+        if request.referees.day2_fallback is Day2Fallback.STRICT:
+            cumulative_finals = sum(
+                in_section[final_index, earlier_section]
+                for final_index in final_indexes
+                for earlier_section in range(1, section + 1)
+            )
+            model.add(section_count <= request.referees.organizer_capacity + cumulative_finals)
+        else:
+            model.add(
+                section_count
+                <= min(
+                    len(request.courts),
+                    section * request.referees.organizer_capacity,
+                )
+            )
+        model.add(
+            sum(in_section[final_index, section] for final_index in final_indexes)
+            <= request.referees.organizer_capacity
+        )
+
+    solver = day2_schedule._configured_solver(2.0, request.random_seed)
+    return day2_schedule._status(solver.solve(model))
 
 
 def topology_keys(topology: Topology) -> tuple[PlacementTemplateKey, ...]:
@@ -584,7 +719,14 @@ def validate_catalog_hydration(
                 raise PlacementTemplateIntegrityError(
                     f"{entry.key.catalog_id}: available entryに使用セクション数がありません"
                 )
-            request = request_factory._base_request(entry.key)
+            base_request = request_factory._base_request(entry.key)
+            request = base_request.model_copy(
+                update={
+                    "day": base_request.day.model_copy(
+                        update={"max_sections": entry.used_sections}
+                    ),
+                }
+            )
             path_model = day2_schedule._build_path_model(request.tournament_plan)
             schedule = day2_schedule._generate_day2_schedule_from_template(
                 request,

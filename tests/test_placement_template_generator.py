@@ -157,6 +157,24 @@ def test_smallest_real_candidate_is_hydrated_and_independently_validated() -> No
     assert entry.sha256 == placement_entry_digest(entry)
 
 
+def test_catalog_hydration_uses_each_entry_horizon() -> None:
+    available = generate_template_entry(
+        _key(),
+        solver=StabilizedPlacementTemplateSolver(max_time_seconds=30),
+    )
+    entries = [
+        available if key == available.key else _infeasible_entry(key)
+        for key in topology_keys((2, 4))
+    ]
+    shard = PlacementTemplateShard(
+        pool_count=2,
+        pool_size=4,
+        entries=tuple(entries),
+    )
+
+    assert validate_catalog_hydration((shard,)) == 1
+
+
 def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() -> None:
     source = PlacementTemplateKey(
         pool_count=2,
@@ -205,6 +223,7 @@ def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() 
         (3, 8, 3, 19, 19),
         (4, 8, 3, 23, 23),
         (2, 16, 2, 40, 40),
+        (2, 16, 3, 39, 39),
     ),
 )
 def test_strict_capacity_bound_delays_new_courts_until_finals(
@@ -241,6 +260,106 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
     )
 
 
+def test_strict_capacity_bound_counts_parallel_final_ancestor_deadlines() -> None:
+    assert (
+        _strict_referee_capacity_lower_horizon(
+            match_count=36,
+            court_count=4,
+            organizer_capacity=2,
+            final_count=3,
+            earliest_final_section=5,
+            ancestor_matches_per_final=6,
+        )
+        == 13
+    )
+
+
+def test_strict_section_relaxation_rejects_unopenable_court_profile() -> None:
+    key = PlacementTemplateKey(
+        pool_count=4,
+        pool_size=8,
+        court_count=8,
+        organizer_capacity=4,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+
+    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == 10
+
+
+def test_strict_terminal_referee_frontier_rejects_three_pool_six_section_boundary() -> None:
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+    insufficient = PlacementTemplateKey(
+        pool_count=3,
+        pool_size=8,
+        court_count=9,
+        organizer_capacity=7,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+    feasible = insufficient.model_copy(update={"organizer_capacity": 8})
+    extra_court = insufficient.model_copy(update={"court_count": 10})
+
+    assert solver.bounds(insufficient).lower_horizon == 7
+    assert solver.bounds(extra_court).lower_horizon == 7
+    assert solver.bounds(feasible).lower_horizon == 6
+
+
+def test_organizer_chain_proof_rejects_three_pool_seven_section_boundary() -> None:
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+    key = PlacementTemplateKey(
+        pool_count=3,
+        pool_size=8,
+        court_count=10,
+        organizer_capacity=2,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+
+    assert solver.bounds(key).lower_horizon == 8
+    assert solver.bounds(key.model_copy(update={"court_count": 16})).lower_horizon == 8
+
+
+def test_organizer_chain_proof_rejects_large_pool_eight_section_boundary() -> None:
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+    key = PlacementTemplateKey(
+        pool_count=2,
+        pool_size=16,
+        court_count=16,
+        organizer_capacity=6,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+
+    assert solver.bounds(key).lower_horizon == 9
+    assert solver.bounds(key.model_copy(update={"organizer_capacity": 7})).lower_horizon == 9
+
+
+@pytest.mark.parametrize(
+    ("court_count", "organizer_capacity", "expected"),
+    (
+        (16, 5, 7),
+        (12, 6, 7),
+        (13, 6, 7),
+        (14, 6, 6),
+        (11, 7, 7),
+        (12, 7, 6),
+    ),
+)
+def test_organizer_frontier_proof_fixes_four_pool_six_section_boundary(
+    court_count: int,
+    organizer_capacity: int,
+    expected: int,
+) -> None:
+    key = PlacementTemplateKey(
+        pool_count=4,
+        pool_size=8,
+        court_count=court_count,
+        organizer_capacity=organizer_capacity,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+
+    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
+        expected
+    )
+
+
 @pytest.mark.parametrize(
     ("pool_count", "pool_size", "court_count", "organizer_capacity", "expected"),
     (
@@ -248,6 +367,8 @@ def test_strict_capacity_bound_delays_new_courts_until_finals(
         (3, 8, 4, 1, 11),
         (4, 8, 3, 1, 17),
         (2, 16, 2, 1, 33),
+        (4, 8, 10, 7, 7),
+        (2, 16, 9, 6, 9),
     ),
 )
 def test_organizer_bound_accounts_for_opening_new_courts(
@@ -284,6 +405,60 @@ def test_dense_strict_candidate_reaches_the_proven_opening_bound() -> None:
 
     assert entry.used_sections == 18
     assert entry.objectives[0].optimality_proven is True
+
+
+def test_large_organizer_witness_reaches_the_proven_opening_bound() -> None:
+    key = PlacementTemplateKey(
+        pool_count=2,
+        pool_size=16,
+        court_count=8,
+        organizer_capacity=1,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+
+    entry = generate_template_entry(key, solver=solver)
+
+    assert entry.used_sections == 12
+    assert entry.objectives[0].optimality_proven is True
+
+
+def test_organizer_section_first_candidate_avoids_full_referee_search() -> None:
+    key = PlacementTemplateKey(
+        pool_count=4,
+        pool_size=8,
+        court_count=10,
+        organizer_capacity=2,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+
+    attempt = solver.solve_horizon(key, 8)
+
+    assert attempt.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    assert attempt.schedule is not None
+    assert attempt.schedule.metrics.used_sections == 8
+
+
+@pytest.mark.parametrize(("court_count", "organizer_capacity"), ((12, 7), (14, 6)))
+def test_four_pool_organizer_boundary_witness_is_independently_audited(
+    court_count: int,
+    organizer_capacity: int,
+) -> None:
+    key = PlacementTemplateKey(
+        pool_count=4,
+        pool_size=8,
+        court_count=court_count,
+        organizer_capacity=organizer_capacity,
+        day2_fallback=Day2Fallback.ORGANIZER,
+    )
+    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
+
+    attempt = solver.solve_horizon(key, 6)
+
+    assert attempt.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    assert attempt.schedule is not None
+    assert attempt.schedule.metrics.used_sections == 6
 
 
 def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(
