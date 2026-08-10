@@ -1,7 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { tournamentFixture } from "./fixtures";
-import { importDocument, mockExternalServices, openApp } from "./helpers";
+import {
+  GENERATE_API,
+  importDocument,
+  mockExternalServices,
+  openApp,
+} from "./helpers";
 
 async function fillValidTournament(page: Page, courts = "Aコート\nBコート"): Promise<void> {
   await page.locator("#tournament-name").fill("入力誘導確認大会");
@@ -117,4 +122,82 @@ test("共通設定内部の不備だけが閉じたdetailsを開いてfocusす�
   await expectGuidedTo(page, "organizer-capacity", 2);
   await expect(page.locator("#organizer-capacity-error")).toContainText("0以上の整数");
   await expect(page.locator("#block-count-error")).toContainText("選択してください");
+});
+
+test("1日目の詳細設定にあるlocal errorはdetailsを開いてfocusする", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillValidTournament(page);
+  const maxSections = page.locator("#max-sections");
+  const details = maxSections.locator("xpath=ancestor::details[1]");
+  await details.locator("summary").click();
+  await maxSections.fill("129");
+  await details.locator("summary").click();
+
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+
+  await expect(details).toHaveAttribute("open", "");
+  await expectGuidedTo(page, "max-sections", 2);
+  await expect(page.locator("#max-sections-error")).toContainText("1から128");
+});
+
+test("APIの詳細設定errorでも該当detailsを開いてfocus・強調する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillValidTournament(page);
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "error",
+        diagnostics: [{
+          code: "INPUT_SCHEMA_INVALID",
+          message: "2日目の休憩設定を確認してください。",
+          details: { errors: [{ field: "day2.breaks", type: "value_error" }] },
+        }],
+      }),
+    });
+  });
+  const day2Breaks = page.locator("#day2-breaks");
+  const details = day2Breaks.locator("xpath=ancestor::details[1]");
+  await expect(details).not.toHaveAttribute("open", "");
+
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+
+  await expect(details).toHaveAttribute("open", "");
+  await expectGuidedTo(page, "day2-breaks", 2);
+  await expect(page.locator("#day2-breaks-error")).toContainText("2日目の休憩");
+});
+
+test("手動割当てerrorのteam対象が不明でもfieldset自体へfocusする", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillValidTournament(page);
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "error",
+        diagnostics: [{
+          code: "MANUAL_BLOCKS_REQUIRED",
+          message: "手動ブロック割当てを確認してください。",
+          details: {},
+        }],
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+
+  const fieldset = page.locator("#manual-blocks");
+  await expect(fieldset).toBeFocused();
+  await expect(fieldset).toHaveAttribute("tabindex", "-1");
+  await expect(fieldset).toHaveAttribute("aria-invalid", "true");
+  await expect(fieldset).toHaveClass(/field-has-error/u);
+  await expect(page.locator("#manual-blocks-error")).toContainText("手動ブロック割当て");
 });

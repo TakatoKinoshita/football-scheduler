@@ -235,7 +235,7 @@ root.innerHTML = `
           <small id="assignment-help">同じ抽選番号なら、同じブロック分けを再現できます。</small>
           <span id="assignment-mode-error" class="field-error" role="alert"></span>
         </label>
-        <fieldset id="manual-blocks" class="manual-block-assignment field-wide" hidden>
+        <fieldset id="manual-blocks" class="manual-block-assignment field-wide" tabindex="-1" hidden>
           <legend>チームごとの割当て先 <em>必須</em></legend>
           <p id="manual-block-summary" class="manual-block-summary" role="status" aria-live="polite"></p>
           <div id="manual-block-counts" class="manual-block-counts" aria-label="ブロック別の現在人数"></div>
