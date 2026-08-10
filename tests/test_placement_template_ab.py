@@ -12,6 +12,7 @@ from football_scheduler.placement_template_ab import (
     BaselineSource,
     LegacyPlacementWorker,
     LexicographicResult,
+    PlacementABError,
     PlacementBaselineEnvironment,
     PlacementBaselineFixture,
     PrimaryProofConflict,
@@ -21,7 +22,9 @@ from football_scheduler.placement_template_ab import (
     compare_baselines,
     compare_objective_vectors,
     current_baseline_record,
+    merge_baseline_fixtures,
     read_deterministic_gzip,
+    render_comparison_markdown,
     with_fixture_digest,
     write_deterministic_gzip,
 )
@@ -151,6 +154,95 @@ def test_fixture_gzip_is_canonical_and_mtime_zero(tmp_path: Path) -> None:
     assert first.read_bytes()[4:8] == b"\x00\x00\x00\x00"
     assert read_deterministic_gzip(first) == fixture
     assert baseline_candidate_for(fixture, _entry()) == fixture.records[0].candidate  # type: ignore[arg-type]
+
+
+def test_three_large_topology_partials_are_validated_and_merged_deterministically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    topologies = ((3, 8), (2, 16), (4, 8))
+    entries = tuple(
+        load_placement_template_entry(
+            PlacementTemplateKey(
+                pool_count=pool_count,
+                pool_size=pool_size,
+                court_count=16,
+                organizer_capacity=16,
+                day2_fallback="organizer",
+            )
+        )
+        for pool_count, pool_size in topologies
+    )
+    keys = {topology: (entry.key,) for topology, entry in zip(topologies, entries, strict=True)}
+    monkeypatch.setattr(
+        "football_scheduler.placement_template_ab.topology_keys", lambda topology: keys[topology]
+    )
+    environment = PlacementBaselineEnvironment(
+        commit_sha="a" * 40,
+        python_version="3.14.2",
+        ortools_version="9.15.6755",
+    )
+    partials = tuple(
+        with_fixture_digest(
+            PlacementBaselineFixture(
+                source=BaselineSource.CURRENT,
+                topologies=(topology,),
+                environment=environment,
+                complete=True,
+                records=(current_baseline_record(entry),),
+            )
+        )
+        for topology, entry in zip(topologies, entries, strict=True)
+    )
+    paths = tuple(tmp_path / f"partial-{index}.json.gz" for index in range(3))
+    for path, partial in zip(paths, partials, strict=True):
+        write_deterministic_gzip(path, partial)
+
+    merged = merge_baseline_fixtures(
+        tuple(read_deterministic_gzip(path) for path in reversed(paths)), topologies
+    )
+    first = tmp_path / "merged-first.json.gz"
+    second = tmp_path / "merged-second.json.gz"
+    write_deterministic_gzip(first, merged)
+    write_deterministic_gzip(second, merged)
+
+    assert merged.complete is True
+    assert merged.topologies == topologies
+    assert len(merged.records) == 3
+    assert first.read_bytes() == second.read_bytes()
+    report = render_comparison_markdown(merged, merged)
+    assert "| 3x8 | organizer |" in report
+    assert "| 2x16 | organizer |" in report
+    assert "| 4x8 | organizer |" in report
+
+
+def test_partial_merge_rejects_environment_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = _entry()
+    monkeypatch.setattr(
+        "football_scheduler.placement_template_ab.topology_keys", lambda _topology: (entry.key,)
+    )
+    first = with_fixture_digest(
+        PlacementBaselineFixture(
+            source=BaselineSource.CURRENT,
+            topologies=((2, 4),),
+            environment=PlacementBaselineEnvironment(
+                commit_sha="a" * 40,
+                python_version="3.14.2",
+                ortools_version="9.15.6755",
+            ),
+            complete=True,
+            records=(current_baseline_record(entry),),  # type: ignore[arg-type]
+        )
+    )
+    second = with_fixture_digest(
+        first.model_copy(
+            update={"environment": first.environment.model_copy(update={"commit_sha": "b" * 40})}
+        )
+    )
+
+    with pytest.raises(PlacementABError, match="実行環境"):
+        merge_baseline_fixtures((first, second), ((2, 4),))
 
 
 def test_lexicographic_comparison_and_report_count_only_available_records() -> None:

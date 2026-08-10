@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""8・16チーム用テンプレートのcurrent/legacy baselineを生成・比較する。"""
+"""順位決定トーナメント用テンプレートのcurrent/legacy baselineを生成・比較する。"""
 
 from __future__ import annotations
 
@@ -11,24 +11,29 @@ from pathlib import Path
 
 from football_scheduler.placement_template_ab import (
     BASELINE_RANDOM_SEED,
+    LARGE_TARGET_TOPOLOGIES,
     LEGACY_SOLVER_COMMIT,
-    TARGET_TOPOLOGIES,
     BaselineSource,
     PlacementABError,
     PlacementBaselineEnvironment,
     PlacementBaselineFixture,
     current_baseline_record,
+    merge_baseline_fixtures,
     read_deterministic_gzip,
     render_comparison_markdown,
     run_legacy_records,
     with_fixture_digest,
     write_deterministic_gzip,
 )
+from football_scheduler.placement_template_contract import SUPPORTED_PLACEMENT_TOPOLOGIES
 from football_scheduler.placement_template_generator import load_shard, shard_file
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_DIRECTORY = PROJECT_ROOT / "src" / "football_scheduler" / "placement_templates"
-TOPOLOGY_NAMES = {"2x4": (2, 4), "2x8": (2, 8)}
+TOPOLOGY_NAMES = {
+    f"{pool_count}x{pool_size}": (pool_count, pool_size)
+    for pool_count, pool_size in SUPPORTED_PLACEMENT_TOPOLOGIES
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,12 +58,16 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--baseline", type=Path, required=True)
     report.add_argument("--candidate", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
+    merge = subparsers.add_parser("merge")
+    merge.add_argument("--partial", type=Path, action="append", required=True)
+    merge.add_argument("--output", type=Path, required=True)
+    merge.add_argument("--topology", action="append", choices=tuple(TOPOLOGY_NAMES))
     return parser
 
 
 def _topologies(values: list[str]) -> tuple[tuple[int, int], ...]:
     requested = {TOPOLOGY_NAMES[value] for value in values}
-    return tuple(item for item in TARGET_TOPOLOGIES if item in requested)
+    return tuple(item for item in SUPPORTED_PLACEMENT_TOPOLOGIES if item in requested)
 
 
 def _entries(catalog: Path, topologies: tuple[tuple[int, int], ...]) -> tuple[object, ...]:
@@ -80,6 +89,17 @@ def main(argv: list[str] | None = None) -> int:
                 render_comparison_markdown(baseline, candidate), encoding="utf-8"
             )
             print(f"A/B reportを書き出しました: {args.output}")
+            return 0
+
+        if args.command == "merge":
+            expected = _topologies(args.topology) if args.topology else LARGE_TARGET_TOPOLOGIES
+            fixture = merge_baseline_fixtures(
+                tuple(read_deterministic_gzip(path) for path in args.partial), expected
+            )
+            write_deterministic_gzip(args.output, fixture)
+            print(f"baselineを統合しました: {args.output}")
+            print(f"Records: {len(fixture.records)}")
+            print(f"SHA-256: {fixture.sha256}")
             return 0
 
         topologies = _topologies(args.topology)

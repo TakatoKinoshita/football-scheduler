@@ -1,4 +1,4 @@
-"""8・16チーム用テンプレートの再現可能なA/B比較基盤。
+"""順位決定トーナメント用テンプレートの再現可能なA/B比較基盤。
 
 このmoduleはcatalog生成のruntime経路から独立したoffline toolingである。旧solverの
 自己申告metricsは採用せず、canonical配置を現行規則でhydrateしてから独立validatorで
@@ -27,6 +27,7 @@ from football_scheduler import day2_schedule
 from football_scheduler.models import ContractModel, Day2Fallback, Slot, SolverStatus
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
+    SUPPORTED_PLACEMENT_TOPOLOGIES,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateObjective,
@@ -53,7 +54,9 @@ LEGACY_PYTHON_PREFIX = "3.14."
 LEGACY_ORTOOLS_VERSION = "9.15.6755"
 BASELINE_FORMAT_VERSION: Literal[1] = 1
 BASELINE_RANDOM_SEED = 20260803
+# Issue #71の呼び出し側とfixtureの互換性のため旧名は維持する。
 TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((2, 4), (2, 8))
+LARGE_TARGET_TOPOLOGIES: tuple[tuple[int, int], ...] = ((3, 8), (2, 16), (4, 8))
 ObjectiveVector = tuple[int, int, int, int, int, int]
 
 
@@ -135,10 +138,17 @@ class PlacementBaselineFixture(ContractModel):
 
     @model_validator(mode="after")
     def validate_coverage(self) -> Self:
-        if not self.topologies or any(item not in TARGET_TOPOLOGIES for item in self.topologies):
-            raise ValueError("baselineの対象は2x4または2x8です")
+        if not self.topologies or any(
+            item not in SUPPORTED_PLACEMENT_TOPOLOGIES for item in self.topologies
+        ):
+            raise ValueError("baselineの対象は対応済みトポロジーにしてください")
         if tuple(dict.fromkeys(self.topologies)) != self.topologies:
             raise ValueError("baselineのtopologyが重複しています")
+        canonical_topologies = tuple(
+            item for item in SUPPORTED_PLACEMENT_TOPOLOGIES if item in self.topologies
+        )
+        if self.topologies != canonical_topologies:
+            raise ValueError("baselineのtopologyは正規順にしてください")
         ids = [record.key.catalog_id for record in self.records]
         if ids != sorted(ids) or len(ids) != len(set(ids)):
             raise ValueError("baseline recordはcatalog ID順かつ一意にしてください")
@@ -205,6 +215,62 @@ def read_deterministic_gzip(path: Path) -> PlacementBaselineFixture:
     if not fixture.sha256 or fixture.sha256 != baseline_fixture_digest(fixture):
         raise PlacementABError(f"baseline fixtureのdigestが一致しません: {path}")
     return fixture
+
+
+def merge_baseline_fixtures(
+    fixtures: Sequence[PlacementBaselineFixture],
+    expected_topologies: Sequence[tuple[int, int]],
+) -> PlacementBaselineFixture:
+    """digest付きpartial fixtureを環境とcoverageを確認して統合する。"""
+
+    if not fixtures:
+        raise PlacementABError("統合するbaseline fixtureがありません")
+    requested = tuple(expected_topologies)
+    expected = tuple(item for item in SUPPORTED_PLACEMENT_TOPOLOGIES if item in requested)
+    if not requested or len(requested) != len(set(requested)) or requested != expected:
+        raise PlacementABError("統合対象topologyは重複のない正規順にしてください")
+
+    first = fixtures[0]
+    records: list[PlacementBaselineRecord] = []
+    actual_topologies: list[tuple[int, int]] = []
+    for fixture in fixtures:
+        # in-memoryで組み立てたfixtureでも、ファイル読込み時と同じ検査を行う。
+        checked = PlacementBaselineFixture.model_validate(fixture.model_dump(mode="json"))
+        if not checked.sha256 or checked.sha256 != baseline_fixture_digest(checked):
+            raise PlacementABError("partial baseline fixtureのdigestが一致しません")
+        if not checked.complete:
+            raise PlacementABError("partial baseline fixtureのcompleteがfalseです")
+        if checked.source is not first.source:
+            raise PlacementABError("partial baseline fixtureのsourceが一致しません")
+        if checked.environment != first.environment:
+            raise PlacementABError("partial baseline fixtureの実行環境が一致しません")
+        overlap = set(actual_topologies) & set(checked.topologies)
+        if overlap:
+            names = ", ".join(
+                f"{pool_count}x{pool_size}" for pool_count, pool_size in sorted(overlap)
+            )
+            raise PlacementABError(f"partial baseline fixtureのtopologyが重複しています: {names}")
+        actual_topologies.extend(checked.topologies)
+        records.extend(checked.records)
+
+    if set(actual_topologies) != set(expected):
+        actual = ", ".join(
+            f"{pool_count}x{pool_size}" for pool_count, pool_size in actual_topologies
+        )
+        wanted = ", ".join(f"{pool_count}x{pool_size}" for pool_count, pool_size in expected)
+        raise PlacementABError(
+            f"partial baseline fixtureのtopology coverageが一致しません: "
+            f"expected={wanted}, actual={actual}"
+        )
+
+    merged = PlacementBaselineFixture(
+        source=first.source,
+        topologies=expected,
+        environment=first.environment,
+        complete=True,
+        records=tuple(sorted(records, key=lambda item: item.key.catalog_id)),
+    )
+    return with_fixture_digest(merged)
 
 
 def compare_objective_vectors(
@@ -738,7 +804,13 @@ def render_comparison_markdown(
         "| Topology | Fallback | Better | Equal | Worse | Unavailable |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    for topology in ("2x4", "2x8"):
+    report_topologies = tuple(
+        topology
+        for topology in SUPPORTED_PLACEMENT_TOPOLOGIES
+        if topology in set(baseline.topologies) | set(candidate.topologies)
+    )
+    for pool_count, pool_size in report_topologies:
+        topology = f"{pool_count}x{pool_size}"
         for fallback in (Day2Fallback.ORGANIZER.value, Day2Fallback.STRICT.value):
             lines.append(
                 f"| {topology} | {fallback} | {grouped[topology, fallback, 'better']} | "
