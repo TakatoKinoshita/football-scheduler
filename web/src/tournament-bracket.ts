@@ -838,8 +838,10 @@ function layoutSheet(
     context.groupByMatchId,
   );
   const rootY = SHEET_MARGIN_TOP + upper.length * rowPitch;
-  const slotY = rootY + 24;
-  const lowerStartY = slotY + SLOT_HEIGHT + 72;
+  const fourTeamCompleteSheet =
+    specification.kind === "complete" && leafEntries.length === 4;
+  const slotY = rootY + (fourTeamCompleteSheet ? 48 : 24);
+  const lowerStartY = slotY + SLOT_HEIGHT + (fourTeamCompleteSheet ? 88 : 72);
   const yByGroup = new Map<string, number>([[root.key, rootY]]);
   for (const [index, group] of upper.entries()) {
     yByGroup.set(group.key, SHEET_MARGIN_TOP + index * rowPitch);
@@ -1782,7 +1784,7 @@ function renderSheet(
       node.centerX,
       node.lineY - 28,
       "bracket-match-meta",
-      node.narrow ? 9 : 17,
+      node.narrow ? 9 : model.participantCount === 4 ? 14 : 17,
     ).setAttribute("text-anchor", "middle");
     const matchup = `${node.home.primaryLabel} 対 ${node.away.primaryLabel}`;
     appendSvgText(
@@ -1791,7 +1793,7 @@ function renderSheet(
       node.centerX,
       node.lineY - 9,
       "bracket-matchup",
-      node.narrow ? 7 : 15,
+      node.narrow ? 7 : model.participantCount === 4 ? 12 : 15,
     )
       .setAttribute("text-anchor", "middle");
     if (node.resultLabel !== undefined || node.home.winner || node.away.winner) {
@@ -1806,7 +1808,7 @@ function renderSheet(
         node.centerX,
         node.lineY + 18,
         "bracket-winner-label",
-        28,
+        model.participantCount === 4 ? 14 : 28,
       ).setAttribute("text-anchor", "middle");
     }
     svg.append(group);

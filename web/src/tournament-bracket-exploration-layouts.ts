@@ -136,6 +136,50 @@ const MULTILINE_MATCH_LABEL_OFFSET = 24;
 const HORIZONTAL_MATCH_LABEL_OFFSET = 40;
 const TERMINAL_MATCH_LABEL_X_OFFSET = 60;
 
+interface ExplorationSizing {
+  boxWidth: number;
+  boxHeight: number;
+  slotPitch: number;
+  sheetMargin: number;
+  flowMargin: number;
+  openingGap: number;
+  rowGap: number;
+  terminalLength: number;
+  terminalMatchLabelXOffset: number;
+}
+
+function explorationSizing(
+  participantCount: number,
+  orientation: TournamentBracketExplorationOrientation,
+): ExplorationSizing {
+  if (participantCount === 4) {
+    return {
+      boxWidth: 124,
+      boxHeight: 64,
+      slotPitch: 152,
+      sheetMargin: 54,
+      flowMargin: orientation === "horizontal" ? 96 : 54,
+      openingGap: orientation === "horizontal" ? 120 : 42,
+      rowGap: 112,
+      terminalLength: 32,
+      terminalMatchLabelXOffset: 76,
+    };
+  }
+  return {
+    boxWidth: BOX_WIDTH,
+    boxHeight: BOX_HEIGHT,
+    slotPitch: SLOT_PITCH,
+    sheetMargin: SHEET_MARGIN,
+    flowMargin: orientation === "horizontal" ? HORIZONTAL_FLOW_MARGIN : SHEET_MARGIN,
+    openingGap: orientation === "horizontal" ? HORIZONTAL_OPENING_GAP : OPENING_GAP,
+    rowGap: participantCount >= 16 ? SIXTEEN_TEAM_ROW_GAP : ROW_GAP,
+    terminalLength: participantCount >= 16
+      ? SIXTEEN_TEAM_TERMINAL_LENGTH
+      : TERMINAL_LENGTH,
+    terminalMatchLabelXOffset: TERMINAL_MATCH_LABEL_X_OFFSET,
+  };
+}
+
 interface ExplorationBounds {
   left: number;
   right: number;
@@ -341,7 +385,27 @@ function explorationEntryDescription(
       ? seed.team_id
       : undefined;
   const teamName = teamId === undefined ? undefined : teamNames.get(teamId);
-  if (teamName !== undefined) return { primaryLabel: teamName, fullLabel: teamName };
+  if (teamName !== undefined) {
+    if (pool.participant_count !== 4) return { primaryLabel: teamName, fullLabel: teamName };
+    const maximumUnits = 6;
+    const fullUnits = [...teamName].reduce(
+      (total, character) => total + (/^[\x20-\x7e]$/u.test(character) ? 0.55 : 1),
+      0,
+    );
+    if (fullUnits <= maximumUnits) return { primaryLabel: teamName, fullLabel: teamName };
+    let units = 0;
+    let primaryLabel = "";
+    for (const character of [...teamName]) {
+      const width = /^[\x20-\x7e]$/u.test(character) ? 0.55 : 1;
+      if (units + width > maximumUnits - 1) {
+        primaryLabel += "…";
+        break;
+      }
+      primaryLabel += character;
+      units += width;
+    }
+    return { primaryLabel, fullLabel: teamName };
+  }
   if (entry.type === "league_rank") {
     const fallback = `${String(entry.block_id)}${String(entry.rank)}位`;
     return { primaryLabel: fallback, fullLabel: fallback };
@@ -786,10 +850,9 @@ function buildExplorationModel(
     throw new TournamentBracketError("このレイアウトは2〜16チームの単一ページに対応します。");
   }
   const baseSheet = base.sheets[0]!;
-  const rowGap = base.participantCount >= 16 ? SIXTEEN_TEAM_ROW_GAP : ROW_GAP;
-  const terminalLength = base.participantCount >= 16
-    ? SIXTEEN_TEAM_TERMINAL_LENGTH
-    : TERMINAL_LENGTH;
+  const sizing = explorationSizing(base.participantCount, orientation);
+  const rowGap = sizing.rowGap;
+  const terminalLength = sizing.terminalLength;
   const terminalMatchIds = new Set(
     arrayValue(pool.placements, "最終順位を読み取れませんでした。").flatMap((placement) => {
       const placementReference = reference(placement.entry);
@@ -822,29 +885,31 @@ function buildExplorationModel(
   const maximumLoserScore = powerOfTwo
     ? Math.max(rawMaximumLoserScore, maximumWinnerScore)
     : rawMaximumLoserScore;
-  const openingGap = orientation === "horizontal" ? HORIZONTAL_OPENING_GAP : OPENING_GAP;
-  const flowMargin = orientation === "horizontal" ? HORIZONTAL_FLOW_MARGIN : SHEET_MARGIN;
+  const openingGap = sizing.openingGap;
+  const flowMargin = sizing.flowMargin;
   const boxY = flowMargin + terminalLength + openingGap + maximumWinnerScore * rowGap;
   const width = Math.max(
     360,
-    SHEET_MARGIN * 2 + BOX_WIDTH + Math.max(0, baseSheet.slots.length - 1) * SLOT_PITCH,
+    sizing.sheetMargin * 2 + sizing.boxWidth +
+      Math.max(0, baseSheet.slots.length - 1) * sizing.slotPitch,
   );
   const height =
-    boxY + BOX_HEIGHT + openingGap + maximumLoserScore * rowGap + terminalLength + flowMargin;
+    boxY + sizing.boxHeight + openingGap + maximumLoserScore * rowGap +
+      terminalLength + flowMargin;
   const slots: TournamentBracketExplorationSlot[] = baseSheet.slots.map((slot, index) => ({
     key: slot.entryKey,
     label: slot.primaryLabel,
     fullLabel: slot.fullLabel,
     center: {
-      x: SHEET_MARGIN + BOX_WIDTH / 2 + index * SLOT_PITCH,
-      y: boxY + BOX_HEIGHT / 2,
+      x: sizing.sheetMargin + sizing.boxWidth / 2 + index * sizing.slotPitch,
+      y: boxY + sizing.boxHeight / 2,
     },
-    width: BOX_WIDTH,
-    height: BOX_HEIGHT,
+    width: sizing.boxWidth,
+    height: sizing.boxHeight,
   }));
   const slotByKey = new Map(slots.map((slot) => [slot.key, slot]));
   const openingWinnerY = boxY - openingGap;
-  const openingLoserY = boxY + BOX_HEIGHT + openingGap;
+  const openingLoserY = boxY + sizing.boxHeight + openingGap;
   const segments: TournamentBracketExplorationSegment[] = [];
   const matchGeometry = new Map<string, MatchGeometry>();
   const sheetCenterX = width / 2;
@@ -874,7 +939,7 @@ function buildExplorationModel(
         slotAttachment: { slotKey: slot.key, outcome: "winner" },
       });
       segments.push({
-        start: { x: slot.center.x, y: boxY + BOX_HEIGHT },
+        start: { x: slot.center.x, y: boxY + sizing.boxHeight },
         end: { x: slot.center.x, y: openingLoserY },
         outcome: "loser",
         ownerId: `${match.id}:opening:loser`,
@@ -917,7 +982,7 @@ function buildExplorationModel(
       if (slot === undefined) throw new TournamentBracketError("シード枠を読み取れませんでした。");
       return {
         x: slot.center.x,
-        y: branch === "winner" ? boxY : boxY + BOX_HEIGHT,
+        y: branch === "winner" ? boxY : boxY + sizing.boxHeight,
         outcome: branch,
         slotKey: slot.key,
       };
@@ -1146,20 +1211,29 @@ function buildExplorationModel(
       .filter((part): part is string => part !== undefined);
     if (lines.length === 0) return [];
     const lineY = geometry.opening ? geometry.winnerLineY! : geometry.lineY;
-    const direction = geometry.branch === "loser" ? -1 : 1;
+    const direction =
+      orientation === "vertical" && base.participantCount === 4 && geometry.opening
+        ? -1
+        : geometry.branch === "loser" ? -1 : 1;
     const offset = orientation === "horizontal"
       ? HORIZONTAL_MATCH_LABEL_OFFSET
-      : lines.length > 1 ? MULTILINE_MATCH_LABEL_OFFSET : MATCH_LABEL_OFFSET;
+      : base.participantCount === 4
+        ? lines.length > 1 ? 34 : 26
+        : lines.length > 1 ? MULTILINE_MATCH_LABEL_OFFSET : MATCH_LABEL_OFFSET;
     const terminalIndex = Math.floor((match.rangeStart - 1) / 2);
     const terminalXOffset = terminalMatchIds.has(match.id)
-      ? (terminalIndex % 2 === 0 ? 1 : -1) * TERMINAL_MATCH_LABEL_X_OFFSET
+      ? (terminalIndex % 2 === 0 ? 1 : -1) * sizing.terminalMatchLabelXOffset
       : 0;
+    const openingXOffset =
+      orientation === "vertical" && base.participantCount === 4 && geometry.opening
+        ? (geometry.centerX < sheetCenterX ? -116 : 116)
+        : 0;
     return [{
       matchId: match.id,
       text: lines.join(" "),
       lines,
       center: {
-        x: geometry.centerX + terminalXOffset,
+        x: geometry.centerX + terminalXOffset + openingXOffset,
         y: lineY + direction * offset,
       },
       lineY,
