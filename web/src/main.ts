@@ -103,6 +103,7 @@ import {
   type JsonObject,
   type TournamentDocument,
 } from "./types";
+import { guideToInvalidField } from "./validation-guidance";
 import "./style.css";
 
 declare global {
@@ -196,9 +197,9 @@ root.innerHTML = `
         </div>
       </div>
       <section id="common-settings" class="settings-section" aria-labelledby="common-settings-heading">
-        <h3 id="common-settings-heading">両日共通</h3>
-        <details class="advanced-settings" open>
-          <summary>共通設定を表示</summary>
+        <h3 id="common-settings-heading">共通設定</h3>
+        <details id="common-advanced-settings" class="advanced-settings">
+          <summary>詳細設定を表示</summary>
           <div class="form-grid">
             <label class="field" for="organizer-capacity">
               <span>同時に担当できる主催者審判数</span>
@@ -234,7 +235,7 @@ root.innerHTML = `
           <small id="assignment-help">同じ抽選番号なら、同じブロック分けを再現できます。</small>
           <span id="assignment-mode-error" class="field-error" role="alert"></span>
         </label>
-        <fieldset id="manual-blocks" class="manual-block-assignment field-wide" hidden>
+        <fieldset id="manual-blocks" class="manual-block-assignment field-wide" tabindex="-1" hidden>
           <legend>チームごとの割当て先 <em>必須</em></legend>
           <p id="manual-block-summary" class="manual-block-summary" role="status" aria-live="polite"></p>
           <div id="manual-block-counts" class="manual-block-counts" aria-label="ブロック別の現在人数"></div>
@@ -703,6 +704,9 @@ const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
 const gameDurationInput = requiredElement<HTMLInputElement>("#game-duration");
 const marginInput = requiredElement<HTMLInputElement>("#margin-minutes");
 const organizerCapacityInput = requiredElement<HTMLInputElement>("#organizer-capacity");
+const commonAdvancedSettings = requiredElement<HTMLDetailsElement>(
+  "#common-advanced-settings",
+);
 const maxSectionsInput = requiredElement<HTMLInputElement>("#max-sections");
 const randomSeedInput = requiredElement<HTMLInputElement>("#random-seed");
 const teamRefereesInput = requiredElement<HTMLInputElement>("#team-referees");
@@ -3357,6 +3361,8 @@ function updateReview(): void {
 }
 
 function renderStep(): void {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
   for (const panel of document.querySelectorAll<HTMLElement>("[data-panel]")) {
     panel.hidden = Number(panel.dataset.panel) !== currentStep;
   }
@@ -3371,7 +3377,9 @@ function renderStep(): void {
   if (currentStep === 3) document.body.dataset.printScope = "day1";
   if (currentStep === 4) document.body.dataset.printScope = "day2";
   if (currentStep === 2) setupTurnstile();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (window.scrollX !== scrollX || window.scrollY !== scrollY) {
+    window.scrollTo({ left: scrollX, top: scrollY, behavior: "auto" });
+  }
 }
 
 function render(): void {
@@ -3428,6 +3436,7 @@ function render(): void {
   day2BreaksInput.value = asObjectArray(day2?.breaks)
     .map((item) => `${String(item.after_section)}:${String(item.duration_minutes)}`)
     .join("\n");
+  commonAdvancedSettings.open = false;
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   setLegacyControlsDisabled(legacyCompatibility);
@@ -3555,6 +3564,21 @@ function clearFieldIssues(): void {
   for (const invalid of document.querySelectorAll<HTMLElement>("[aria-invalid='true']")) {
     invalid.removeAttribute("aria-invalid");
   }
+  for (const container of document.querySelectorAll<HTMLElement>(".field-has-error")) {
+    container.classList.remove("field-has-error");
+  }
+  for (const error of document.querySelectorAll<HTMLElement>("[data-error-active='true']")) {
+    delete error.dataset.errorActive;
+  }
+  for (const field of document.querySelectorAll<HTMLElement>("[data-validation-error-id]")) {
+    const errorId = field.dataset.validationErrorId;
+    const descriptions = (field.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/u)
+      .filter((description) => description.length > 0 && description !== errorId);
+    if (descriptions.length === 0) field.removeAttribute("aria-describedby");
+    else field.setAttribute("aria-describedby", descriptions.join(" "));
+    delete field.dataset.validationErrorId;
+  }
 }
 
 function renderDay2Preparation(
@@ -3655,8 +3679,48 @@ function showFieldIssues(issues: FieldIssue[]): void {
     const field = document.getElementById(issue.field);
     const error = document.getElementById(`${issue.field}-error`);
     field?.setAttribute("aria-invalid", "true");
-    if (error !== null) error.textContent = issue.message;
+    const container = field?.closest<HTMLElement>(
+      ".field, .check-field, .manual-block-team-row, .manual-block-assignment",
+    );
+    container?.classList.add("field-has-error");
+    if (error !== null) {
+      error.textContent = issue.message;
+      error.dataset.errorActive = "true";
+      if (field !== null) {
+        const descriptions = new Set(
+          (field.getAttribute("aria-describedby") ?? "").split(/\s+/u).filter(Boolean),
+        );
+        descriptions.add(error.id);
+        field.setAttribute("aria-describedby", [...descriptions].join(" "));
+        field.dataset.validationErrorId = error.id;
+      }
+    }
   }
+}
+
+function orderFieldIssues(issues: readonly FieldIssue[]): FieldIssue[] {
+  return [...issues].sort((left, right) => {
+    if (left.step !== right.step) return left.step - right.step;
+    const leftField = document.getElementById(left.field);
+    const rightField = document.getElementById(right.field);
+    if (leftField === null || rightField === null || leftField === rightField) return 0;
+    return leftField.compareDocumentPosition(rightField) & Node.DOCUMENT_POSITION_FOLLOWING
+      ? -1
+      : 1;
+  });
+}
+
+function guideToFirstFieldIssue(issues: readonly FieldIssue[]): void {
+  const first = issues[0];
+  if (first === undefined) return;
+  currentStep = first.step;
+  renderStep();
+  const field = document.getElementById(first.field);
+  if (field === null) return;
+  guideToInvalidField(field, {
+    viewportHeight: window.innerHeight,
+    reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  });
 }
 
 function goToStep(step: WizardStep): boolean {
@@ -3957,15 +4021,15 @@ function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
 generateButton.addEventListener("click", () => {
   updateDraft(false);
   if (!legacyCompatibility) {
-    const issues = [...validateDay1LeagueDocument(documentState), ...day2InputIssues()];
+    const issues = orderFieldIssues([
+      ...validateDay1LeagueDocument(documentState),
+      ...day2InputIssues(),
+    ]);
     if (issues.length > 0) {
-      const first = issues[0];
       showFieldIssues(issues);
-      currentStep = first?.step ?? 2;
       generationStatus.textContent =
-        "日程を生成する前に入力を修正してください。赤字の説明に、必要な対応を表示しています。";
-      renderStep();
-      document.getElementById(first?.field ?? "")?.focus();
+        "日程を生成する前に入力を修正してください。強調表示された項目に、必要な対応を表示しています。";
+      guideToFirstFieldIssue(issues);
       return;
     }
   }
@@ -4072,14 +4136,12 @@ generateButton.addEventListener("click", () => {
     })
     .catch((error: unknown) => {
       if (error instanceof ScheduleApiError) {
-        const issues = apiFieldIssues(error);
+        const issues = orderFieldIssues(apiFieldIssues(error));
         if (issues.length > 0) {
           showFieldIssues(issues);
-          currentStep = issues[0]?.step ?? 2;
           generationStatus.textContent =
-            "日程を生成できませんでした。赤字の説明に沿って入力を修正してください。";
-          renderStep();
-          document.getElementById(issues[0]?.field ?? "")?.focus();
+            "日程を生成できませんでした。強調表示された項目の説明に沿って入力を修正してください。";
+          guideToFirstFieldIssue(issues);
         } else {
           const operationStage = typeof error.details?.operation_stage === "string"
             ? error.details.operation_stage
