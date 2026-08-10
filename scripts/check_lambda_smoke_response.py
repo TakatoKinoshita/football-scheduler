@@ -47,6 +47,17 @@ def main() -> int:
     )
     if day2_profile is not None:
         tournament_result = body.get("tournament_result")
+        tournament_plan = (
+            tournament_result.get("tournament_plan")
+            if isinstance(tournament_result, dict)
+            else None
+        )
+        pools = tournament_plan.get("pools") if isinstance(tournament_plan, dict) else None
+        participant_count = (
+            sum(int(pool.get("participant_count", 0)) for pool in pools if isinstance(pool, dict))
+            if isinstance(pools, list)
+            else -1
+        )
         day2 = (
             tournament_result.get("day2_schedule") if isinstance(tournament_result, dict) else None
         )
@@ -67,6 +78,10 @@ def main() -> int:
         )
         if (
             body.get("status") not in {"OPTIMAL", "FEASIBLE"}
+            or not isinstance(pools, list)
+            or any(not isinstance(pool, dict) for pool in pools)
+            or len(pools) != expected_tournament_count
+            or participant_count != expected_team_count
             or not isinstance(matches, list)
             or len(matches) != expected_match_count
             or occupied_count != expected_match_count
