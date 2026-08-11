@@ -57,6 +57,8 @@ async function enterAllSameRankLeagueResults(page: import("@playwright/test").Pa
   await page.getByLabel("青空FC 対 みどりSC・みどりSCの得点").fill("1");
   await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・中央キッカーズの得点").fill("0");
   await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・海浜ユナイテッドの得点").fill("0");
+  await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・海浜ユナイテッドの得点")
+    .press("Tab");
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
@@ -98,6 +100,7 @@ async function enterPlacementLeagueResults(
     await inputs.nth(0).fill("1");
     await inputs.nth(1).fill("0");
   }
+  await rows.nth(3).locator("input").nth(1).press("Tab");
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
@@ -170,7 +173,7 @@ test("順位未確定でも1回の操作で仮トーナメントと仮日程を�
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
 });
 
-test("最終試合の入力直後に順位を確定し、変更時は確定順位を失効する", async ({ page }) => {
+test("最終試合の入力確定直後に順位を確定し、変更時は確定順位を失効する", async ({ page }) => {
   await openGeneratedLeague(page);
   await page.unroute(GENERATE_API);
   const requests: unknown[] = [];
@@ -199,13 +202,47 @@ test("最終試合の入力直後に順位を確定し、変更時は確定順�
   });
 
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
+  await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").press("Tab");
   await expect(page.locator("#league-standings-view")).toHaveCount(0);
-  await expect(page.locator("#standings-status")).toContainText("確定順位を取り消しました");
+  await expect(page.locator("#standings-status")).toContainText(
+    "確定順位と影響する2日目の結果を取り消しました",
+  );
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
 
   await page.reload();
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toHaveValue("3");
   await expect(page.getByLabel("青空FC 対 みどりSC・みどりSCの得点")).toHaveValue("1");
+});
+
+test("1日目の部分入力を正式結果と分けて復元し、change時だけ保存する", async ({ page }) => {
+  await openGeneratedLeague(page);
+  const homeLabel = "青空FC 対 みどりSC・青空FCの得点";
+  const awayLabel = "青空FC 対 みどりSC・みどりSCの得点";
+  const resultRow = () => page.locator(
+    '#league-results-input .result-input-entry[data-match-id="LG-A-M1"]',
+  );
+
+  await page.getByLabel(homeLabel).fill("7");
+  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
+
+  await page.reload();
+  await expect(page.getByLabel(homeLabel)).toHaveValue("7");
+  await expect(page.getByLabel(awayLabel)).toHaveValue("");
+  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
+
+  await page.getByLabel(awayLabel).fill("7");
+  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
+  await page.getByLabel(awayLabel).press("Tab");
+  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("保存済");
+  await expect(page.locator("#league-results-progress")).toContainText("入力済み 1 / 2試合");
+
+  await page.getByLabel(homeLabel).fill("");
+  await resultRow().getByRole("button", { name: "変更を取り消す" }).click();
+  await expect(page.getByLabel(homeLabel)).toHaveValue("7");
+  await expect(page.getByLabel(awayLabel)).toHaveValue("7");
 });
 
 test("順位確定時に仮トーナメントと仮日程の構造を保ったままチーム名を反映する", async ({ page }) => {
@@ -236,6 +273,7 @@ test("順位確定時に仮トーナメントと仮日程の構造を保った�
   await expect(page.locator("#day2-schedule-view")).not.toContainText("【仮】");
   await page.locator("#tab-day1").click();
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
+  await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").press("Tab");
   await page.locator("#tab-day2").click();
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#day2-schedule-view")).toContainText("【仮】2日目の日程・審判");
@@ -312,8 +350,11 @@ test("確定順位から2日目を作成し、得点変更時は仮表と仮日�
 
   await page.locator("#tab-day1").click();
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("3");
+  await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").press("Tab");
   await expect(page.locator("#league-standings-view")).toHaveCount(0);
-  await expect(page.locator("#standings-status")).toContainText("仮トーナメントへ戻しました");
+  await expect(page.locator("#standings-status")).toContainText(
+    "確定順位と影響する2日目の結果を取り消しました",
+  );
   await page.locator("#tab-day2").click();
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#tournament-plan-view")).toContainText("Aブロック 1位");

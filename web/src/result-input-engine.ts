@@ -71,6 +71,76 @@ export interface RenderResultInputOptions {
   host: ResultInputHostAdapter;
 }
 
+interface ResultCommitQueueState {
+  tail: Promise<void>;
+  pendingCount: number;
+  failed: boolean;
+  focus: ResultInputFocusSnapshot;
+}
+
+const resultCommitQueues = new WeakMap<ResultDraftController, ResultCommitQueueState>();
+
+function enqueueResultCommit(
+  row: ResultInputRowModel,
+  value: SavedResultInputValue,
+  fingerprint: string,
+  focus: ResultInputFocusSnapshot,
+  inputs: readonly HTMLInputElement[],
+  host: ResultInputHostAdapter,
+): void {
+  let queue = resultCommitQueues.get(host.drafts);
+  if (queue === undefined) {
+    queue = {
+      tail: Promise.resolve(),
+      pendingCount: 0,
+      failed: false,
+      focus,
+    };
+    resultCommitQueues.set(host.drafts, queue);
+  }
+  const state = queue;
+  state.pendingCount += 1;
+  state.focus = focus;
+  host.setSaveStatus("保存しています…");
+  for (const input of inputs) input.disabled = true;
+
+  const run = async (): Promise<void> => {
+    try {
+      if (host.drafts.planFingerprint !== fingerprint) {
+        throw new Error("結果入力の対象が変更されました。");
+      }
+      const draftState = host.drafts.snapshotWithout([row.matchId]);
+      const outcome = await host.commitResult(row, value, draftState);
+      if (host.drafts.planFingerprint === fingerprint) host.drafts.delete(row.matchId);
+      host.announce(outcome.announcement);
+    } catch {
+      state.failed = true;
+    }
+    try {
+      host.refreshCompletion();
+    } catch {
+      state.failed = true;
+    }
+  };
+
+  state.tail = state.tail.then(run, run).then(() => {
+    state.pendingCount -= 1;
+    if (state.pendingCount > 0) return;
+    if (state.failed) {
+      host.setSaveStatus("保存できませんでした");
+      host.announce(
+        "試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。",
+      );
+    } else {
+      host.setSaveStatus("この端末に保存済み");
+    }
+    host.rerender(state.focus);
+    if (resultCommitQueues.get(host.drafts) === state) {
+      resultCommitQueues.delete(host.drafts);
+    }
+  });
+}
+
 function appendTextElement<K extends keyof HTMLElementTagNameMap>(
   parent: HTMLElement,
   tagName: K,
@@ -182,13 +252,14 @@ function editorForRow(
   if (!row.ready) return emptyEditor("waiting");
   const saved = row.savedResult;
   const restored = host.drafts.get(row.matchId);
+  const regularScoreKind = row.penaltySupported ? "通常得点" : "得点";
   const regularHome = scoreInput(
-    `${row.homeName} 対 ${row.awayName}・${row.homeName}の通常得点`,
+    `${row.homeName} 対 ${row.awayName}・${row.homeName}の${regularScoreKind}`,
     restored?.regularHome ?? (saved === undefined ? "" : String(saved.regularHome)),
   );
   regularHome.dataset.scoreField = "regularHome";
   const regularAway = scoreInput(
-    `${row.homeName} 対 ${row.awayName}・${row.awayName}の通常得点`,
+    `${row.homeName} 対 ${row.awayName}・${row.awayName}の${regularScoreKind}`,
     restored?.regularAway ?? (saved === undefined ? "" : String(saved.regularAway)),
   );
   regularAway.dataset.scoreField = "regularAway";
@@ -296,24 +367,8 @@ function editorForRow(
     };
     const fingerprint = host.drafts.planFingerprint;
     if (fingerprint === undefined) return;
-    const previous = host.drafts.snapshot();
-    const next = host.drafts.snapshotWithout([row.matchId]);
     const focus = captureResultInputFocus();
-    host.setSaveStatus("保存しています…");
-    for (const input of inputs) input.disabled = true;
-    void host.commitResult(row, value, next).then((outcome) => {
-      host.drafts.activate(fingerprint, next?.drafts ?? {});
-      host.setSaveStatus("この端末に保存済み");
-      host.announce(outcome.announcement);
-      host.rerender(focus);
-    }).catch(() => {
-      host.drafts.activate(fingerprint, previous?.drafts ?? {});
-      host.setSaveStatus("保存できませんでした");
-      host.announce("試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。");
-      for (const input of inputs) input.disabled = false;
-      renderDraftState(host.drafts.get(row.matchId));
-      host.refreshCompletion();
-    });
+    enqueueResultCommit(row, value, fingerprint, focus, inputs, host);
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);
   cancelDraft.addEventListener("click", () => {
