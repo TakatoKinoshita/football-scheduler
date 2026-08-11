@@ -77,6 +77,8 @@
   font-size: .78rem;
   line-height: 1.35;
 }
+.results-preview-entry .result-input-match-summary .tournament-result-state-label,
+.results-preview-card > header .tournament-result-state-label { margin-top: 0; }
 
 .results-preview-state-label--visually-hidden {
   position: absolute !important;
@@ -89,6 +91,30 @@
   clip-path: inset(50%) !important;
   white-space: nowrap !important;
   border: 0 !important;
+}
+
+.results-preview-entry button.results-preview-state-label--visually-hidden {
+  position: static !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  clip: auto !important;
+  clip-path: none !important;
+  white-space: normal !important;
+  border: 0 !important;
+  color: transparent !important;
+  font-size: 0 !important;
+}
+
+.results-preview-entry button.results-preview-state-label--visually-hidden
+  .result-input-state-trigger-marker {
+  margin: 0;
+  color: var(--muted);
+  font-size: .75rem;
 }
 
 .results-preview-entry .tournament-result-state-label[data-state="saved"] {
@@ -144,10 +170,7 @@
   font-weight: 800;
 }
 
-.results-preview-entry .score-input,
-.results-preview-entry .tournament-result-cancel {
-  min-height: 44px;
-}
+.results-preview-entry .score-input { min-height: 44px; }
 
 .results-preview-entry .tournament-result-error:empty {
   display: none;
@@ -156,10 +179,6 @@
 .results-preview-entry .tournament-result-error:not(:empty) {
   min-height: 0;
   margin-block: .45rem .2rem;
-}
-
-.results-preview-entry .tournament-result-cancel {
-  padding-block: .4rem;
 }
 
 .results-preview-waiting {
@@ -193,6 +212,7 @@
   align-items: start;
   justify-content: space-between;
   gap: .7rem;
+  min-height: 44px;
 }
 
 .results-preview-card h4 {

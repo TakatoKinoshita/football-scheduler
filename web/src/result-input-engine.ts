@@ -12,6 +12,10 @@ import {
   type ResultInputPresentation,
   type ResultInputRenderRow,
 } from "./result-input-layout";
+import {
+  createResultInputStateControl,
+  type ResultInputEntryState,
+} from "./result-input-state-control";
 
 export interface SavedResultInputValue {
   regularHome: number;
@@ -47,7 +51,7 @@ export interface ResultInputCommitOutcome {
 
 export interface ResultInputHostAdapter {
   drafts: ResultDraftController;
-  persistDrafts: () => void;
+  persistDrafts: (state: ResultDraftUiState | undefined) => Promise<void>;
   commitResult: (
     row: ResultInputRowModel,
     value: SavedResultInputValue,
@@ -72,7 +76,6 @@ export interface RenderResultInputOptions {
 }
 
 interface ResultCommitQueueState {
-  tail: Promise<void>;
   pendingCount: number;
   pendingSignatures: Set<string>;
   failed: boolean;
@@ -80,6 +83,22 @@ interface ResultCommitQueueState {
 }
 
 const resultCommitQueues = new WeakMap<ResultDraftController, ResultCommitQueueState>();
+const resultOperationTails = new WeakMap<ResultDraftController, Promise<void>>();
+
+function enqueueResultOperation(
+  host: ResultInputHostAdapter,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const previous = resultOperationTails.get(host.drafts) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  resultOperationTails.set(host.drafts, next);
+  void next.finally(() => {
+    if (resultOperationTails.get(host.drafts) === next) {
+      resultOperationTails.delete(host.drafts);
+    }
+  }).catch(() => undefined);
+  return next;
+}
 
 function enqueueResultCommit(
   row: ResultInputRowModel,
@@ -87,6 +106,7 @@ function enqueueResultCommit(
   fingerprint: string,
   focus: ResultInputFocusSnapshot,
   inputs: readonly HTMLInputElement[],
+  stateControl: ReturnType<typeof createResultInputStateControl>,
   host: ResultInputHostAdapter,
 ): void {
   const signature = JSON.stringify([
@@ -99,7 +119,6 @@ function enqueueResultCommit(
   let queue = resultCommitQueues.get(host.drafts);
   if (queue === undefined) {
     queue = {
-      tail: Promise.resolve(),
       pendingCount: 0,
       pendingSignatures: new Set(),
       failed: false,
@@ -117,6 +136,7 @@ function enqueueResultCommit(
   state.focus = focus;
   host.setSaveStatus("保存しています…");
   for (const input of inputs) input.disabled = true;
+  stateControl.setBusy(true);
 
   const run = async (): Promise<void> => {
     try {
@@ -137,7 +157,7 @@ function enqueueResultCommit(
     }
   };
 
-  state.tail = state.tail.then(run, run).then(() => {
+  void enqueueResultOperation(host, run).then(() => {
     state.pendingCount -= 1;
     state.pendingSignatures.delete(signature);
     if (state.pendingCount > 0) return;
@@ -149,7 +169,12 @@ function enqueueResultCommit(
     } else {
       host.setSaveStatus("この端末に保存済み");
     }
-    host.rerender(state.focus);
+    const liveFocus = captureResultInputFocus();
+    host.rerender(
+      liveFocus.matchId !== undefined && liveFocus.scoreField !== undefined
+        ? liveFocus
+        : state.focus,
+    );
     if (resultCommitQueues.get(host.drafts) === state) {
       resultCommitQueues.delete(host.drafts);
     }
@@ -186,31 +211,6 @@ function parsedScore(input: HTMLInputElement): number | null | undefined {
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function stateLabel(state: "waiting" | "empty" | "editing" | "invalid" | "saved"): HTMLElement {
-  const label = document.createElement("span");
-  label.className = "tournament-result-state-label";
-  label.dataset.state = state;
-  label.textContent = {
-    waiting: "待機中",
-    empty: "未入力",
-    editing: "入力中",
-    invalid: "要確認",
-    saved: "保存済",
-  }[state];
-  if (state === "waiting") label.setAttribute("aria-label", "前提試合待ち");
-  if (state === "saved") label.setAttribute("aria-label", "保存済み");
-  return label;
-}
-
-function setState(label: HTMLElement, state: "waiting" | "empty" | "editing" | "invalid" | "saved"): void {
-  const replacement = stateLabel(state);
-  label.dataset.state = replacement.dataset.state;
-  label.textContent = replacement.textContent;
-  const accessibleName = replacement.getAttribute("aria-label");
-  if (accessibleName === null) label.removeAttribute("aria-label");
-  else label.setAttribute("aria-label", accessibleName);
-}
-
 export function captureResultInputFocus(): ResultInputFocusSnapshot {
   const active = document.activeElement;
   const entry = active instanceof HTMLInputElement
@@ -245,15 +245,11 @@ export function restoreResultInputFocus(
 }
 
 function emptyEditor(state: "waiting" | "empty"): ResultInputEditorView {
-  const cancelDraft = document.createElement("button");
-  cancelDraft.type = "button";
-  cancelDraft.hidden = true;
   return {
     regularFields: document.createElement("span"),
     penaltyFields: document.createElement("span"),
-    stateLabel: stateLabel(state),
+    stateControl: createResultInputStateControl(state),
     errorArea: document.createElement("span"),
-    cancelDraft,
     inputs: [],
   };
 }
@@ -297,16 +293,13 @@ function editorForRow(
     penaltyInputs.push(penaltyHome, penaltyAway);
   }
   const inputs = [regularHome, regularAway, ...penaltyInputs];
-  const label = stateLabel(restored === undefined ? (saved === undefined ? "empty" : "saved") : "editing");
+  const stateControl = createResultInputStateControl(
+    restored === undefined ? (saved === undefined ? "empty" : "saved") : "editing",
+  );
   const errorArea = document.createElement("span");
   errorArea.className = "tournament-result-error";
   errorArea.id = `result-input-error-${row.matchId}`;
   errorArea.setAttribute("aria-live", "polite");
-  const cancelDraft = document.createElement("button");
-  cancelDraft.type = "button";
-  cancelDraft.className = "text-button tournament-result-cancel";
-  cancelDraft.textContent = "変更を取り消す";
-  cancelDraft.hidden = saved === undefined;
   for (const input of inputs) input.setAttribute("aria-describedby", errorArea.id);
 
   const savedDraft: ResultDraft = {
@@ -314,6 +307,32 @@ function editorForRow(
     regularAway: saved === undefined ? "" : String(saved.regularAway),
     penaltyHome: saved?.penaltyHome === undefined ? "" : String(saved.penaltyHome),
     penaltyAway: saved?.penaltyAway === undefined ? "" : String(saved.penaltyAway),
+  };
+  const inputByField = new Map(
+    inputs.map((input) => [input.dataset.scoreField!, input] as const),
+  );
+  const firstChangedField = restored === undefined
+    ? "regularHome"
+    : (Object.keys(savedDraft) as (keyof ResultDraft)[])
+      .find((field) => restored[field] !== savedDraft[field]) ?? "regularHome";
+  const firstChangedInput = inputByField.get(firstChangedField) ?? regularHome;
+  let lastEditedFocus: ResultInputFocusSnapshot = {
+    matchId: row.matchId,
+    scoreField: firstChangedInput.dataset.scoreField,
+    selectionStart: firstChangedInput.value.length,
+    selectionEnd: firstChangedInput.value.length,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  };
+  const rememberEditedFocus = (input: HTMLInputElement): void => {
+    lastEditedFocus = {
+      matchId: row.matchId,
+      scoreField: input.dataset.scoreField,
+      selectionStart: input.selectionStart,
+      selectionEnd: input.selectionEnd,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    };
   };
   const draftFromInputs = (): ResultDraft => ({
     regularHome: regularHome.value,
@@ -336,11 +355,21 @@ function editorForRow(
     for (const input of inputs) input.removeAttribute("aria-invalid");
     errorArea.textContent = "";
     if (draft === undefined) {
-      setState(label, saved === undefined ? "empty" : "saved");
+      stateControl.setState(saved === undefined ? "empty" : "saved");
+      stateControl.setDraftAction(undefined);
       return;
     }
     const evaluation = evaluateResultDraft(draft, rule);
-    setState(label, evaluation.status === "invalid" ? "invalid" : "editing");
+    stateControl.setState(
+      (evaluation.status === "invalid" ? "invalid" : "editing") satisfies ResultInputEntryState,
+    );
+    const actionLabel = saved === undefined ? "入力をクリア" : "保存済の得点に戻す";
+    stateControl.setDraftAction({
+      label: actionLabel,
+      accessibleName:
+        `試合番号 ${row.displayNumber}、${row.homeName} 対 ${row.awayName}：${actionLabel}`,
+      onActivate: () => discardDraft(),
+    });
     if (evaluation.status !== "invalid") return;
     errorArea.textContent = evaluation.message;
     const regularError = evaluation.message.startsWith("通常得点");
@@ -360,15 +389,81 @@ function editorForRow(
       .some((key) => draft[key] !== savedDraft[key]);
     if (changed) host.drafts.set(row.matchId, draft);
     else host.drafts.delete(row.matchId);
-    host.persistDrafts();
+    const draftState = host.drafts.snapshot();
+    void enqueueResultOperation(host, () => host.persistDrafts(draftState)).catch(() => {
+      host.announce(
+        "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。",
+      );
+    });
     renderDraftState(changed ? draft : undefined);
     host.refreshCompletion();
     return draft;
   };
 
+  const discardDraft = async (): Promise<void> => {
+    if (host.drafts.get(row.matchId) === undefined) return;
+    const fingerprint = host.drafts.planFingerprint;
+    if (fingerprint === undefined) return;
+    const nextDraftState = host.drafts.snapshotWithout([row.matchId]);
+    const entry = stateControl.element.closest<HTMLElement>("[data-match-id]");
+    entry?.setAttribute("aria-busy", "true");
+    stateControl.setBusy(true);
+    for (const input of inputs) input.disabled = true;
+    host.setSaveStatus("保存しています…");
+    let focusToRestore: ResultInputFocusSnapshot | undefined;
+    try {
+      await enqueueResultOperation(host, async () => {
+        if (host.drafts.planFingerprint !== fingerprint) {
+          throw new Error("結果入力の対象が変更されました。");
+        }
+        await host.persistDrafts(nextDraftState);
+      });
+      if (host.drafts.planFingerprint !== fingerprint) return;
+      host.drafts.delete(row.matchId);
+      for (const [field, input] of inputByField) {
+        input.value = savedDraft[field as keyof ResultDraft];
+      }
+      updatePenaltyVisibility();
+      renderDraftState(undefined);
+      host.refreshCompletion();
+      host.setSaveStatus("この端末に保存済み");
+
+      const preferred = lastEditedFocus.scoreField === undefined
+        ? undefined
+        : inputByField.get(lastEditedFocus.scoreField);
+      const focusInput = preferred === undefined || preferred.closest("[hidden]") !== null
+        ? regularHome
+        : preferred;
+      focusToRestore = focusInput === preferred
+        ? lastEditedFocus
+        : {
+            ...lastEditedFocus,
+            scoreField: "regularHome",
+            selectionStart: regularHome.value.length,
+            selectionEnd: regularHome.value.length,
+          };
+    } catch {
+      host.setSaveStatus("保存できませんでした");
+      host.announce(
+        "入力途中の変更を破棄できませんでした。入力内容は保持されています。もう一度お試しください。",
+      );
+    } finally {
+      entry?.removeAttribute("aria-busy");
+      stateControl.setBusy(false);
+      for (const input of inputs) input.disabled = false;
+    }
+    if (focusToRestore !== undefined) restoreResultInputFocus(focusToRestore);
+  };
+
   updatePenaltyVisibility();
   renderDraftState(restored);
-  for (const input of inputs) input.addEventListener("input", recordDraft);
+  for (const input of inputs) {
+    input.addEventListener("input", () => {
+      rememberEditedFocus(input);
+      recordDraft();
+    });
+    input.addEventListener("select", () => rememberEditedFocus(input));
+  }
   const commitDraft = (event: Event): void => {
     const changedInput = event.currentTarget as HTMLInputElement;
     const capturedFocus = captureResultInputFocus();
@@ -394,23 +489,10 @@ function editorForRow(
     };
     const fingerprint = host.drafts.planFingerprint;
     if (fingerprint === undefined) return;
-    enqueueResultCommit(row, value, fingerprint, focus, inputs, host);
+    enqueueResultCommit(row, value, fingerprint, focus, inputs, stateControl, host);
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);
-  cancelDraft.addEventListener("click", () => {
-    host.drafts.delete(row.matchId);
-    host.persistDrafts();
-    host.announce("入力途中の変更を取り消し、保存済みの結果へ戻しました。");
-    host.rerender({
-      matchId: row.matchId,
-      scoreField: "regularHome",
-      selectionStart: null,
-      selectionEnd: null,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-    });
-  });
-  return { regularFields, penaltyFields, stateLabel: label, errorArea, cancelDraft, inputs };
+  return { regularFields, penaltyFields, stateControl, errorArea, inputs };
 }
 
 export function renderResultInput(options: RenderResultInputOptions): HTMLElement {

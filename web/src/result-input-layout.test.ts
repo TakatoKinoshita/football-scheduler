@@ -8,6 +8,7 @@ import {
   type ResultInputRenderRow,
 } from "./result-input-layout";
 import { restoreResultInputFocus } from "./result-input-engine";
+import { createResultInputStateControl } from "./result-input-state-control";
 import { restoreTournamentScoreFocus } from "./tournament-results-input";
 
 function row(ready = true): ResultInputRenderRow {
@@ -17,12 +18,7 @@ function row(ready = true): ResultInputRenderRow {
     input.setAttribute("aria-label", name);
     regularFields.append(input);
   }
-  const stateLabel = document.createElement("span");
-  stateLabel.className = "tournament-result-state-label";
-  stateLabel.dataset.state = ready ? "saved" : "waiting";
-  stateLabel.textContent = ready ? "保存済" : "待機中";
-  const cancelDraft = document.createElement("button");
-  cancelDraft.hidden = true;
+  const stateControl = createResultInputStateControl(ready ? "saved" : "waiting");
   return {
     matchId: "M-1",
     displayNumber: "A①",
@@ -34,9 +30,8 @@ function row(ready = true): ResultInputRenderRow {
     editor: {
       regularFields,
       penaltyFields: document.createElement("span"),
-      stateLabel,
+      stateControl,
       errorArea: document.createElement("span"),
-      cancelDraft,
       inputs: [...regularFields.querySelectorAll("input")],
     },
   };

@@ -115,8 +115,14 @@ test("状態バッジなし変種はテーブルだけバッジを隠し、カ�
     await expect(state).toHaveClass(/results-preview-state-label--visually-hidden/u);
     const box = await state.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeLessThanOrEqual(1);
-    expect(box!.height).toBeLessThanOrEqual(1);
+    if (await state.evaluate((element) => element instanceof HTMLButtonElement)) {
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      await expect(state).toHaveAccessibleName(/入力操作を開く$/u);
+    } else {
+      expect(box!.width).toBeLessThanOrEqual(1);
+      expect(box!.height).toBeLessThanOrEqual(1);
+    }
   }
 
   await page.locator("#preview-width").selectOption("768");
@@ -223,6 +229,50 @@ test("推奨版の表とカードがアクセシブルな名前・状態・コ�
   await expect(page.getByRole("list", { name: "2日目の試合結果入力" })).toBeVisible();
   await expect(page.getByRole("group", { name: "試合結果" }).first()).toBeVisible();
 });
+
+for (const width of [899, 900] as const) {
+  test(`推奨版${String(width)}pxの状態メニューは通常フローを動かさずキーボードで閉じられる`, async ({
+    page,
+  }) => {
+    await openPreview(page, { layout: "responsive-cards", width });
+    const entry = entries(page).filter({
+      has: page.locator(".result-input-state-trigger"),
+    }).first();
+    const trigger = entry.locator(".result-input-state-trigger");
+    const action = entry.locator(".result-input-draft-action");
+    const score = entry.locator('input[data-score-field="regularHome"]');
+    const beforeEntry = await entry.boundingBox();
+    const beforeScore = await score.boundingBox();
+
+    const staticSaved = entries(page).filter({
+      has: page.locator('.tournament-result-state-label[data-state="saved"]'),
+    }).first();
+    await expect(staticSaved.locator(".result-input-state-trigger")).toHaveCount(0);
+
+    await trigger.click();
+    await expect(action).toBeFocused();
+    const actionBox = await action.boundingBox();
+    expect(actionBox).not.toBeNull();
+    expect(actionBox!.width).toBeGreaterThanOrEqual(44);
+    expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+    const openEntry = await entry.boundingBox();
+    const openScore = await score.boundingBox();
+    expect(Math.abs(openEntry!.width - beforeEntry!.width)).toBeLessThan(1);
+    expect(Math.abs(openEntry!.height - beforeEntry!.height)).toBeLessThan(1);
+    expect(Math.abs(openScore!.x - beforeScore!.x)).toBeLessThan(1);
+    expect(Math.abs(
+      (openScore!.y - openEntry!.y) - (beforeScore!.y - beforeEntry!.y),
+    )).toBeLessThan(1);
+
+    await page.keyboard.press("Escape");
+    await expect(action).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await page.locator("#preview-heading").click();
+    await expect(action).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+}
 
 for (const width of widths) {
   for (const layout of candidateLayouts) {

@@ -4,6 +4,10 @@ import type {
   TournamentResultsRenderRow,
 } from "./tournament-results-input";
 import {
+  createResultInputStateControl,
+  type ResultInputEntryState,
+} from "./result-input-state-control";
+import {
   TOURNAMENT_RESULTS_CARD_BREAKPOINT_DEFAULT,
   tournamentResultsPreviewLayout,
   tournamentResultsPreviewLayouts,
@@ -27,20 +31,14 @@ function editor(state: string): TournamentResultEditorView {
   const penaltyFields = document.createElement("span");
   penaltyFields.append(penaltyHome, document.createTextNode(" - "), penaltyAway);
   penaltyFields.hidden = true;
-  const stateLabel = document.createElement("span");
-  stateLabel.className = "tournament-result-state-label";
-  stateLabel.dataset.state = state;
-  stateLabel.textContent = state === "waiting" ? "前提試合待ち" : "未入力";
+  const stateControl = createResultInputStateControl(state as ResultInputEntryState);
   const errorArea = document.createElement("span");
   errorArea.className = "tournament-result-error";
-  const cancelDraft = document.createElement("button");
-  cancelDraft.className = "tournament-result-cancel";
   return {
     regularFields,
     penaltyFields,
-    stateLabel,
+    stateControl,
     errorArea,
-    cancelDraft,
     inputs: [regularHome, regularAway, penaltyHome, penaltyAway],
   };
 }
@@ -105,8 +103,7 @@ describe("tournament result preview layouts", () => {
 
   it("uses three-kanji visible labels while preserving full accessible names", () => {
     const saved = row(true);
-    saved.editor.stateLabel.dataset.state = "saved";
-    saved.editor.stateLabel.textContent = "保存済み";
+    saved.editor.stateControl.setState("saved");
     const waiting = row(false);
     const section = document.createElement("section");
     tournamentResultsPreviewLayouts["integrated-status-table"].render(

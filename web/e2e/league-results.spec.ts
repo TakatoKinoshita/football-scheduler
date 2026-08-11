@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   day2ScheduleResult,
@@ -50,6 +50,13 @@ async function openGeneratedLeague(page: import("@playwright/test").Page): Promi
   await openApp(page);
   await importDocument(page, tournamentFixture({ withResult: true }));
   await expect(page.locator("#standings-confirmation")).toBeVisible();
+}
+
+async function expectEditingState(row: Locator): Promise<void> {
+  const label = row.locator(".tournament-result-state-label");
+  await expect(label).toHaveAttribute("data-state", "editing");
+  await expect.poll(() => label.evaluate((element) => element.firstChild?.textContent))
+    .toBe("入力中");
 }
 
 async function enterAllSameRankLeagueResults(page: import("@playwright/test").Page): Promise<void> {
@@ -236,26 +243,33 @@ test("1日目の部分入力を正式結果と分けて復元し、change時だ�
   );
 
   await page.getByLabel(homeLabel).fill("7");
-  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(resultRow());
   await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
 
   await page.reload();
   await expect(page.getByLabel(homeLabel)).toHaveValue("7");
   await expect(page.getByLabel(awayLabel)).toHaveValue("");
-  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(resultRow());
   await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
 
   await page.getByLabel(awayLabel).fill("7");
-  await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(resultRow());
   await expect(page.locator("#league-results-progress")).toContainText("入力済み 0 / 2試合");
   await page.getByLabel(awayLabel).press("Tab");
   await expect(resultRow().locator(".tournament-result-state-label")).toHaveText("保存済");
   await expect(page.locator("#league-results-progress")).toContainText("入力済み 1 / 2試合");
+  await expect(resultRow().getByRole("button")).toHaveCount(0);
 
   await page.getByLabel(homeLabel).fill("");
-  await resultRow().getByRole("button", { name: "変更を取り消す" }).click();
+  await resultRow().getByRole("button", { name: /入力操作を開く$/u }).click();
+  const restoreAction = resultRow().getByRole("button", {
+    name: /保存済の得点に戻す$/u,
+  });
+  await expect(restoreAction).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(page.getByLabel(homeLabel)).toHaveValue("7");
   await expect(page.getByLabel(awayLabel)).toHaveValue("7");
+  await expect(resultRow().getByRole("button")).toHaveCount(0);
 });
 
 test("1日目結果入力は375〜899pxをカード、900px以上を5列表で表示する", async ({

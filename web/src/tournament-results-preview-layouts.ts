@@ -73,12 +73,15 @@ function prepareScoreFields(row: TournamentResultsRenderRow): void {
 }
 
 function prepareCandidateStateLabel(row: TournamentResultsRenderRow): void {
-  if (row.editor.stateLabel.dataset.state === "saved") {
-    row.editor.stateLabel.textContent = "保存済";
-    row.editor.stateLabel.setAttribute("aria-label", "保存済み");
-  } else if (row.editor.stateLabel.dataset.state === "waiting") {
-    row.editor.stateLabel.textContent = "待機中";
-    row.editor.stateLabel.setAttribute("aria-label", "前提試合待ち");
+  const stateLabel = row.editor.stateControl.element.querySelector<HTMLElement>(
+    ".tournament-result-state-label",
+  );
+  if (stateLabel?.dataset.state === "saved") {
+    stateLabel.textContent = "保存済";
+    stateLabel.setAttribute("aria-label", "保存済み");
+  } else if (stateLabel?.dataset.state === "waiting") {
+    stateLabel.textContent = "待機中";
+    stateLabel.setAttribute("aria-label", "前提試合待ち");
   }
 }
 
@@ -111,7 +114,7 @@ function appendEditorFeedback(
   parent: HTMLElement,
   row: TournamentResultsRenderRow,
 ): void {
-  parent.append(row.editor.errorArea, row.editor.cancelDraft);
+  parent.append(row.editor.errorArea);
 }
 
 function appendTableShell(
@@ -183,7 +186,7 @@ function compactTableLayout(
     const state = document.createElement("td");
     state.dataset.field = "state";
     state.className = "results-preview-state-cell";
-    state.append(item.editor.stateLabel);
+    state.append(item.editor.stateControl.element);
     row.append(state);
     body.append(row);
   }
@@ -213,8 +216,11 @@ function integratedStatusTableLayout(
     row.className = "tournament-result-entry results-preview-entry";
     const match = document.createElement("td");
     match.dataset.field = "match";
-    appendDisplayNumber(match, item);
-    match.append(item.editor.stateLabel);
+    const summary = document.createElement("div");
+    summary.className = "result-input-match-summary";
+    appendDisplayNumber(summary, item);
+    summary.append(item.editor.stateControl.element);
+    match.append(summary);
     row.append(match);
     const time = appendTextElement(row, "td", item.timeLabel);
     time.dataset.field = "time";
@@ -274,7 +280,7 @@ function cardsLayout(
     const heading = document.createElement("h4");
     heading.dataset.field = "match";
     appendDisplayNumber(heading, item);
-    header.append(heading, item.editor.stateLabel);
+    header.append(heading, item.editor.stateControl.element);
     article.append(header);
     appendCardMetadata(article, item);
     const teams = appendTextElement(
