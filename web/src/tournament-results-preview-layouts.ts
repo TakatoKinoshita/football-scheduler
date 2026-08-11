@@ -216,8 +216,11 @@ function integratedStatusTableLayout(
     row.className = "tournament-result-entry results-preview-entry";
     const match = document.createElement("td");
     match.dataset.field = "match";
-    appendDisplayNumber(match, item);
-    match.append(item.editor.stateControl.element);
+    const summary = document.createElement("div");
+    summary.className = "result-input-match-summary";
+    appendDisplayNumber(summary, item);
+    summary.append(item.editor.stateControl.element);
+    match.append(summary);
     row.append(match);
     const time = appendTextElement(row, "td", item.timeLabel);
     time.dataset.field = "time";

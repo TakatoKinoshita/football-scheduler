@@ -139,8 +139,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .tournament-result-state-cell { width: 14rem; min-width: 14rem; }
 .tournament-result-state-label { display: block; min-height: 1.5rem; color: var(--muted); font-weight: 800; }
 .tournament-result-error { display: block; min-height: 3.2rem; margin-top: .2rem; color: var(--danger); font-size: .82rem; font-weight: 800; line-height: 1.35; }
-.tournament-result-cancel { min-width: 0; min-height: 36px; padding: .2rem 0; font-size: .82rem; }
-.tournament-result-cancel[hidden] { display: none; }
 .penalty-score-fields { display: inline-flex; align-items: center; gap: .25rem; }
 .penalty-score-fields[hidden] { display: none; }
 .result-input-root {
@@ -185,6 +183,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   white-space: nowrap;
 }
 .result-input-state-control { display: inline-flex; flex: 0 0 auto; align-items: center; }
+.result-input-match-summary .tournament-result-state-label { margin-top: 0; }
 .result-input-state-trigger {
   min-width: 44px;
   min-height: 44px !important;
@@ -219,10 +218,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .result-input-score-kind { color: var(--muted); font-size: .78rem; font-weight: 800; }
 .result-input-score-pair { display: grid; grid-template-columns: 4.5rem 1rem 4.5rem; gap: .2rem; align-items: center; justify-items: center; }
 .result-input-score-separator { width: 1rem; text-align: center; font-weight: 800; }
-.result-input-entry .score-input, .result-input-entry .tournament-result-cancel { min-height: 44px; }
+.result-input-entry .score-input { min-height: 44px; }
 .result-input-entry .tournament-result-error:empty { display: none; }
 .result-input-entry .tournament-result-error:not(:empty) { min-height: 0; margin-block: .45rem .2rem; }
-.result-input-entry .tournament-result-cancel { padding-block: .4rem; }
 .result-input-waiting-placeholder { color: var(--result-input-waiting); font-weight: 800; }
 .result-input-card-list { display: grid; gap: .8rem; margin: 0; padding: 0; list-style: none; }
 .result-input-card { padding: 1rem; border: 1px solid var(--result-input-border); border-radius: .6rem; background: #fff; }
@@ -432,6 +430,9 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   body[data-print-scope="bracket"] .tournament-bracket-sheet:last-of-type { break-after: auto; }
   body[data-print-scope="bracket"] .tournament-bracket figcaption { font-size: 14pt; }
   .score-input { min-height: 0; padding: .1rem; border: 0; background: white; }
+  .result-input-state-trigger-marker,
+  .result-input-draft-popover { display: none !important; }
+  .result-input-state-trigger { min-height: 0 !important; cursor: default; }
   .result-input-card-list { display: block; }
   .result-input-card-list > li, .result-input-card { break-inside: avoid; }
 }

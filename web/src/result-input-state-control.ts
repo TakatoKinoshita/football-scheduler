@@ -88,7 +88,8 @@ class StateControl implements ResultInputStateControl {
 
   setBusy(busy: boolean): void {
     this.busy = busy;
-    this.element.toggleAttribute("aria-busy", busy);
+    if (busy) this.element.setAttribute("aria-busy", "true");
+    else this.element.removeAttribute("aria-busy");
     for (const button of this.element.querySelectorAll<HTMLButtonElement>("button")) {
       button.disabled = busy;
     }
@@ -141,7 +142,11 @@ class StateControl implements ResultInputStateControl {
     popover.append(actionButton);
 
     const closeOnViewportChange = (): void => {
-      if (popover.matches(":popover-open")) popover.hidePopover();
+      try {
+        if (popover.matches(":popover-open")) popover.hidePopover();
+      } catch {
+        // `:popover-open` is unavailable only in unsupported test/browser environments.
+      }
     };
     popover.addEventListener("toggle", (event) => {
       const open = (event as Event & { newState?: string }).newState === "open";
@@ -151,6 +156,12 @@ class StateControl implements ResultInputStateControl {
         actionButton.focus({ preventScroll: true });
         window.addEventListener("resize", closeOnViewportChange, { once: true });
         window.addEventListener("scroll", closeOnViewportChange, { once: true, capture: true });
+      } else {
+        window.removeEventListener("resize", closeOnViewportChange);
+        window.removeEventListener("scroll", closeOnViewportChange, { capture: true });
+        if (trigger.isConnected && popover.contains(document.activeElement)) {
+          trigger.focus({ preventScroll: true });
+        }
       }
     });
     actionButton.addEventListener("click", () => {
