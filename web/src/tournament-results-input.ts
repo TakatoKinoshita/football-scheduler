@@ -306,6 +306,7 @@ export function responsiveTournamentResultsLayout(
 function buildEditor(
   match: TournamentMatchProgress,
   ready: boolean,
+  displayNumber: string,
   homeName: string,
   awayName: string,
   options: RenderTournamentResultsInputOptions,
@@ -388,6 +389,38 @@ function buildEditor(
           ? ""
           : String(match.result.penalty_score_away),
       };
+  const baselineDraft: TournamentResultDraft = savedDraft ?? {
+    regularHome: "",
+    regularAway: "",
+    penaltyHome: "",
+    penaltyAway: "",
+  };
+  type ScoreField = keyof TournamentResultDraft;
+  const inputByField: Record<ScoreField, HTMLInputElement> = {
+    regularHome,
+    regularAway,
+    penaltyHome,
+    penaltyAway,
+  };
+  const firstChangedField = (currentDraft: TournamentResultDraft): ScoreField =>
+    (Object.keys(baselineDraft) as ScoreField[]).find(
+      (field) => currentDraft[field] !== baselineDraft[field],
+    ) ?? "regularHome";
+  let lastEditedField: ScoreField = draft === undefined
+    ? "regularHome"
+    : firstChangedField(draft);
+  const selections = new Map<ScoreField, { start: number | null; end: number | null }>();
+  for (const [field, input] of Object.entries(inputByField) as Array<
+    [ScoreField, HTMLInputElement]
+  >) {
+    const rememberSelection = (): void => {
+      lastEditedField = field;
+      selections.set(field, { start: input.selectionStart, end: input.selectionEnd });
+    };
+    input.addEventListener("focus", rememberSelection);
+    input.addEventListener("select", rememberSelection);
+    input.addEventListener("input", rememberSelection);
+  }
 
   const updatePenaltyVisibility = (): void => {
     const home = scoreValue(regularHome);
@@ -405,6 +438,7 @@ function buildEditor(
     penaltyHome: penaltyHome.value,
     penaltyAway: penaltyAway.value,
   });
+  let discardDraft: () => Promise<void>;
   const renderDraftState = (currentDraft = host.drafts.get(matchId)): void => {
     for (const input of inputs) input.removeAttribute("aria-invalid");
     errorArea.textContent = "";
@@ -413,6 +447,7 @@ function buildEditor(
       return;
     }
     if (currentDraft === undefined) {
+      stateControl.setDraftAction(undefined);
       stateControl.setState(
         match.result === undefined ? "empty" : "saved",
         layout.invalidStateLabel,
@@ -420,6 +455,13 @@ function buildEditor(
       return;
     }
     const evaluation = evaluateTournamentResultDraft(currentDraft);
+    const actionLabel = match.result === undefined ? "入力をクリア" : "保存済の得点に戻す";
+    const accessibleName = `試合番号 ${displayNumber}、${homeName} 対 ${awayName}：${actionLabel}`;
+    stateControl.setDraftAction({
+      label: actionLabel,
+      accessibleName,
+      onActivate: () => discardDraft(),
+    });
     stateControl.setState(
       (evaluation.status === "invalid" ? "invalid" : "editing") satisfies ResultInputEntryState,
       layout.invalidStateLabel,
@@ -439,22 +481,24 @@ function buildEditor(
       markInvalid(penaltyAway, tiedPenalty || scoreValue(penaltyAway) === undefined);
     }
   };
+  const queueDraftPersistence = (
+    state: TournamentResultDraftUiState | undefined,
+  ): Promise<void> => {
+    const queue = commitQueue(host.drafts);
+    const operation = queue.tail.then(() => host.persistDrafts(state));
+    queue.tail = operation.catch(() => undefined);
+    return operation;
+  };
   const recordDraft = (): TournamentResultDraft => {
     updatePenaltyVisibility();
     const currentDraft = draftFromInputs();
-    const baseline = savedDraft ?? {
-      regularHome: "",
-      regularAway: "",
-      penaltyHome: "",
-      penaltyAway: "",
-    };
-    const changed = Object.keys(baseline).some(
+    const changed = Object.keys(baselineDraft).some(
       (key) => currentDraft[key as keyof TournamentResultDraft] !==
-        baseline[key as keyof TournamentResultDraft],
+        baselineDraft[key as keyof TournamentResultDraft],
     );
     if (changed) host.drafts.set(matchId, currentDraft);
     else host.drafts.delete(matchId);
-    void host.persistDrafts(host.drafts.snapshot()).catch(() => {
+    void queueDraftPersistence(host.drafts.snapshot()).catch(() => {
       host.announce(
         "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。",
       );
@@ -462,6 +506,59 @@ function buildEditor(
     renderDraftState(changed ? currentDraft : undefined);
     host.refreshCompletion();
     return currentDraft;
+  };
+  discardDraft = async (): Promise<void> => {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const focusField = lastEditedField.startsWith("penalty") &&
+        (baselineDraft.regularHome !== baselineDraft.regularAway || savedDraft === undefined)
+      ? "regularHome"
+      : lastEditedField;
+    const selection = selections.get(focusField);
+    const row = regularFields.closest<HTMLElement>("[data-match-id]");
+    row?.setAttribute("aria-busy", "true");
+    stateControl.setBusy(true);
+    for (const input of inputs) input.disabled = true;
+    try {
+      const queue = commitQueue(host.drafts);
+      const operation = queue.tail.then(async () => {
+        const nextDraftState = host.drafts.snapshotWithout([matchId]);
+        await host.persistDrafts(nextDraftState);
+        host.drafts.delete(matchId);
+      });
+      queue.tail = operation.catch(() => undefined);
+      await operation;
+      for (const [field, input] of Object.entries(inputByField) as Array<
+        [ScoreField, HTMLInputElement]
+      >) input.value = baselineDraft[field];
+      updatePenaltyVisibility();
+      renderDraftState(undefined);
+      host.announce(match.result === undefined
+        ? "入力途中の得点をクリアしました。"
+        : "入力途中の変更を取り消し、保存済みの結果へ戻しました。");
+      host.refreshCompletion();
+      const focusInput = inputByField[focusField];
+      focusInput.disabled = !ready;
+      focusInput.focus({ preventScroll: true });
+      if (selection?.start !== null && selection?.start !== undefined &&
+          selection.end !== null && selection.end !== undefined) {
+        const end = focusInput.value.length;
+        focusInput.setSelectionRange(
+          Math.min(selection.start, end),
+          Math.min(selection.end, end),
+        );
+      }
+      window.scrollTo(scrollX, scrollY);
+    } catch {
+      host.announce(
+        "入力途中の変更を破棄できませんでした。入力内容は保持されています。もう一度お試しください。",
+      );
+      renderDraftState(host.drafts.get(matchId));
+    } finally {
+      row?.removeAttribute("aria-busy");
+      stateControl.setBusy(false);
+      for (const input of inputs) input.disabled = !ready;
+    }
   };
   updatePenaltyVisibility();
   renderDraftState(draft);
@@ -538,7 +635,12 @@ function buildEditor(
         host.setSaveStatus("この端末に保存済み");
       }
       host.refreshCompletion();
-      host.rerender(focusSnapshot);
+      const liveFocus = captureTournamentScoreFocus();
+      host.rerender(
+        liveFocus.matchId === undefined || liveFocus.scoreField === undefined
+          ? focusSnapshot
+          : liveFocus,
+      );
       tournamentResultCommitQueues.delete(host.drafts);
     }).catch(() => {
       queue.failed = true;
@@ -550,7 +652,12 @@ function buildEditor(
       for (const input of inputs) input.disabled = false;
       renderDraftState(host.drafts.get(matchId));
       host.refreshCompletion();
-      host.rerender(focusSnapshot);
+      const liveFocus = captureTournamentScoreFocus();
+      host.rerender(
+        liveFocus.matchId === undefined || liveFocus.scoreField === undefined
+          ? focusSnapshot
+          : liveFocus,
+      );
       tournamentResultCommitQueues.delete(host.drafts);
     });
   };
@@ -599,7 +706,14 @@ export function renderTournamentResultsInput(
       ready,
       homeName,
       awayName,
-      editor: buildEditor(match, ready, homeName, awayName, options),
+      editor: buildEditor(
+        match,
+        ready,
+        details?.displayNumber ?? match.matchId,
+        homeName,
+        awayName,
+        options,
+      ),
     };
   });
   layout.render(section, rows);

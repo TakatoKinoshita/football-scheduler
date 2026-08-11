@@ -2802,7 +2802,7 @@ function requestTournamentStandings(): void {
   if (result === undefined || plan === undefined) return;
   if (tournamentResultDrafts.hasPendingDrafts) {
     tournamentResultsStatus.textContent =
-      "入力途中の得点があります。保存するか「変更を取り消す」で元に戻してください。";
+      "入力途中の得点があります。保存するか、入力中または要確認の状態メニューから入力途中の内容を破棄してください。";
     refreshTournamentResultsEnabled();
     return;
   }
