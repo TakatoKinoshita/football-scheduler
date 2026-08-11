@@ -371,6 +371,14 @@ describe("大会JSONの入出力", () => {
     expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/トーナメント|順位帯/);
   });
 
+  it("名前一覧のない旧生成計画を新しい入力設定と組み合わせて復元する", () => {
+    const document = scheduleViewTournamentFixture() as unknown as TournamentDocument;
+    const finalStage = document.tournament.input.final_stage as Record<string, unknown>;
+    finalStage.tournament_names = ["第1トーナメント", "第2トーナメント"];
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("同順位リーグの仮計画と仮日程を同じ内容で復元する", () => {
     const document = sameRankWebFixture(16, { resolved: false });
     expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))

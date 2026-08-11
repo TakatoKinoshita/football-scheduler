@@ -2622,9 +2622,8 @@ function validateCurrentTournamentPlan(
     || !Number.isInteger(blockSize)
     || !Number.isInteger(rankBandWidth)
     || (planTournamentNames !== undefined && planTournamentNames.length !== tournamentCount)
-    || (expectedTournamentNames !== undefined && (
+    || (expectedTournamentNames !== undefined && planTournamentNames !== undefined && (
       expectedTournamentNames.length !== tournamentCount ||
-      planTournamentNames === undefined ||
       planTournamentNames.some((name, index) => name !== expectedTournamentNames[index])
     ))
   ) {
@@ -2670,7 +2669,7 @@ function validateCurrentTournamentPlan(
       || pool.display_name.length === 0
       || (planTournamentNames !== undefined &&
         pool.display_name !== planTournamentNames[index])
-      || (expectedTournamentNames !== undefined &&
+      || (expectedTournamentNames !== undefined && planTournamentNames !== undefined &&
         pool.display_name !== expectedTournamentNames[index])
       || pool.byes !== undefined
     ) {
