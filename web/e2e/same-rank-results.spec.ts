@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 import { sameRankWebFixture } from "./fixtures";
@@ -30,6 +30,13 @@ function sameRankScheduleIdentity(schedule: Record<string, unknown>): unknown {
       };
     }),
   };
+}
+
+async function expectEditingState(row: Locator): Promise<void> {
+  const label = row.locator(".tournament-result-state-label");
+  await expect(label).toHaveAttribute("data-state", "editing");
+  await expect.poll(() => label.evaluate((element) => element.firstChild?.textContent))
+    .toBe("入力中");
 }
 
 test("16チーム4ブロックの同順位リーグを再表示し、引き分け結果から総合順位を確定する", async ({
@@ -127,7 +134,7 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   const firstRow = page.locator(`#same-rank-results-input tr[data-match-id="${matchIds[0]}"]`);
   const regularHome = firstRow.locator('input[data-score-field="regularHome"]');
   await regularHome.fill("01");
-  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(firstRow);
   await expect(page.locator("#same-rank-standings-view")).toBeVisible();
   await regularHome.press("Tab");
   await expect(firstRow.locator(".tournament-result-state-label"))
@@ -220,7 +227,7 @@ test("同順位リーグの部分draftを再読込み後も復元する", async 
 
   const firstRow = page.locator("#same-rank-results-input .result-input-entry").first();
   await firstRow.locator('input[data-score-field="regularHome"]').fill("3");
-  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(firstRow);
   await expect(page.locator("#tournament-results-progress")).toContainText("0 / 24試合");
   await page.waitForTimeout(50);
   await page.reload();
@@ -228,7 +235,7 @@ test("同順位リーグの部分draftを再読込み後も復元する", async 
   const restoredRow = page.locator("#same-rank-results-input .result-input-entry").first();
   await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("3");
   await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("");
-  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(restoredRow);
   await expect(page.locator("#tournament-results-progress")).toContainText("0 / 24試合");
 });
 
@@ -282,7 +289,7 @@ test("同順位リーグの正式結果保存に失敗しても以前の引き�
   );
   await expect(regularHome).toHaveValue("2");
   await expect(regularAway).toHaveValue("1");
-  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expectEditingState(firstRow);
   await expect(page.locator("#tournament-results-progress")).toContainText("1 / 24試合");
   await page.reload();
 
@@ -291,8 +298,13 @@ test("同順位リーグの正式結果保存に失敗しても以前の引き�
   );
   await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("2");
   await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("1");
-  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("入力中");
-  await restoredRow.getByRole("button", { name: "変更を取り消す" }).click();
+  await expectEditingState(restoredRow);
+  await restoredRow.getByRole("button", { name: /入力操作を開く$/u }).click();
+  const restoreAction = restoredRow.getByRole("button", {
+    name: /保存済の得点に戻す$/u,
+  });
+  await expect(restoreAction).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("1");
   await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("1");
   await expect(restoredRow.locator(".tournament-result-state-label"))
