@@ -181,6 +181,43 @@ uv run python scripts/write_tournament_bracket_preview_fixtures.py
 uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
 ```
 
+## 2日目結果入力レイアウトのローカル比較
+
+本番画面、API、Turnstile、IndexedDBへ接続せず、2日目の結果入力を固定fixtureで比較できる。
+Web依存関係を準備した後、`web`ディレクトリで次を実行する。
+
+```console
+cd web
+npm run preview:results
+```
+
+現行7列表、得点をまとめた圧縮表、状態統合表、レスポンシブカード、および広幅テーブルだけ
+状態バッジを隠すレスポンシブ変種を、375、768、1002、1280pxで画像化する。出力先は実行ごとに作られる
+`/tmp/football-scheduler-result-input-previews-*`で、生成物はリポジトリへ保存しない。
+対象を限定する場合は次のように指定する。
+
+```console
+npm run preview:results -- --layout integrated-status-table --width 1002
+npm run preview:results -- --layout responsive-cards --scenario winner-change --width 375
+npm run preview:results -- --card-breakpoint 899 --output-dir /tmp/result-input-review
+```
+
+ブラウザで操作を比較する場合は`npm run dev`を起動し、表示されたoriginの
+`/tournament-results-preview.html`を開く。画面の選択欄または`layout`、`scenario`、
+`width`、`card-breakpoint`のquery parameterで切り替えられる。境界確認用に899pxと900pxも
+選択できる。レイアウトを切り替えても、
+メモリ上の正式結果と入力途中のdraftを保持する。このページはViteの本番build entryではなく、
+`npm run build`は比較ページ、URL、fixture markerが`dist`とService Worker precacheへ混入して
+いないことも検査する。
+
+候補のハードゲート、採点基準、採用前のユーザー確認は
+[2日目結果入力レイアウトの比較手順](docs/product/tournament-result-input-layout.md)を参照する。
+プレビュー専用E2Eは次で実行する。
+
+```console
+npm run test:e2e:preview
+```
+
 ## 固定fixtureの実行
 
 小さい疎通確認用fixtureは、次のように実行します。

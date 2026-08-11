@@ -1,0 +1,273 @@
+#tournament-results-input[data-results-preview-layout] {
+  --results-preview-border: #c9d5ce;
+  --results-preview-saved: #297144;
+  --results-preview-editing: #995b00;
+  --results-preview-invalid: #a12c2c;
+  --results-preview-waiting: #5d6661;
+}
+
+.results-preview-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.results-preview-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.results-preview-table th,
+.results-preview-table td {
+  padding: .75rem .6rem;
+  vertical-align: top;
+}
+
+.results-preview-table--compact {
+  min-width: 850px;
+}
+
+.results-preview-table--compact [data-field="match"] { width: 6rem; }
+.results-preview-table--compact [data-field="time"] { width: 7rem; }
+.results-preview-table--compact [data-field="court"] { width: 6.5rem; }
+.results-preview-table--compact [data-field="teams"] { width: 13rem; }
+.results-preview-table--compact [data-field="result"] { width: 13.5rem; }
+.results-preview-table--compact [data-field="state"] { width: 8rem; }
+
+.results-preview-table--integrated {
+  min-width: 720px;
+}
+
+.results-preview-table--integrated [data-field="match"] { width: 7.5rem; }
+.results-preview-table--integrated [data-field="time"] { width: 7rem; }
+.results-preview-table--integrated [data-field="court"] { width: 6.5rem; }
+.results-preview-table--integrated [data-field="teams"] { width: 14rem; }
+.results-preview-table--integrated [data-field="result"] { width: 15rem; }
+
+.results-preview-entry {
+  position: relative;
+}
+
+.results-preview-entry:has(.tournament-result-state-label[data-state="saved"]) {
+  box-shadow: inset 5px 0 var(--results-preview-saved);
+}
+
+.results-preview-entry:has(.tournament-result-state-label[data-state="editing"]) {
+  box-shadow: inset 5px 0 var(--results-preview-editing);
+  background: #fff9e9;
+}
+
+.results-preview-entry:has(.tournament-result-state-label[data-state="invalid"]) {
+  box-shadow: inset 5px 0 var(--results-preview-invalid);
+  background: #fff2f2;
+}
+
+.results-preview-entry:has(.tournament-result-state-label[data-state="waiting"]) {
+  box-shadow: inset 5px 0 var(--results-preview-waiting);
+  background: #f2f4f3;
+}
+
+.results-preview-entry .tournament-result-state-label {
+  display: inline-block;
+  min-height: 0;
+  margin-top: .35rem;
+  padding: .18rem .5rem;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  font-size: .78rem;
+  line-height: 1.35;
+}
+
+.results-preview-state-label--visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.results-preview-entry .tournament-result-state-label[data-state="saved"] {
+  color: var(--results-preview-saved);
+}
+
+.results-preview-entry .tournament-result-state-label[data-state="editing"] {
+  color: var(--results-preview-editing);
+}
+
+.results-preview-entry .tournament-result-state-label[data-state="invalid"] {
+  color: var(--results-preview-invalid);
+}
+
+.results-preview-entry .tournament-result-state-label[data-state="waiting"] {
+  color: var(--results-preview-waiting);
+}
+
+.results-preview-score-editor {
+  display: grid;
+  gap: .45rem;
+}
+
+.results-preview-score-line {
+  display: grid;
+  grid-template-columns: 2.6rem auto;
+  gap: .25rem;
+  align-items: center;
+  justify-content: start;
+}
+
+.results-preview-score-line[hidden] {
+  display: none;
+}
+
+.results-preview-score-kind {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.results-preview-score-pair {
+  display: grid;
+  grid-template-columns: 4.5rem 1rem 4.5rem;
+  gap: .2rem;
+  align-items: center;
+  justify-items: center;
+}
+
+.results-preview-score-separator {
+  width: 1rem;
+  text-align: center;
+  font-weight: 800;
+}
+
+.results-preview-entry .score-input,
+.results-preview-entry .tournament-result-cancel {
+  min-height: 44px;
+}
+
+.results-preview-entry .tournament-result-error:empty {
+  display: none;
+}
+
+.results-preview-entry .tournament-result-error:not(:empty) {
+  min-height: 0;
+  margin-block: .45rem .2rem;
+}
+
+.results-preview-entry .tournament-result-cancel {
+  padding-block: .4rem;
+}
+
+.results-preview-waiting {
+  margin: .3rem 0;
+  color: var(--results-preview-waiting);
+  font-weight: 800;
+}
+
+.results-preview-waiting-placeholder {
+  color: var(--results-preview-waiting);
+  font-weight: 800;
+}
+
+.results-preview-card-list {
+  display: grid;
+  gap: .8rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results-preview-card {
+  padding: 1rem;
+  border: 1px solid var(--results-preview-border);
+  border-radius: .6rem;
+  background: #fff;
+}
+
+.results-preview-card > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: .7rem;
+}
+
+.results-preview-card h4 {
+  margin: .25rem 0 0;
+  color: var(--green);
+  font-size: 1.08rem;
+}
+
+.results-preview-card > header .tournament-result-state-label {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.results-preview-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .6rem;
+  margin: .85rem 0;
+}
+
+.results-preview-card-meta div {
+  min-width: 0;
+}
+
+.results-preview-card-meta dt {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.results-preview-card-meta dd {
+  margin: .1rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.results-preview-card-teams {
+  margin: .8rem 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.results-preview-card-result {
+  min-width: 0;
+  margin: 0;
+  padding: .75rem;
+  border: 1px solid var(--results-preview-border);
+  border-radius: .45rem;
+}
+
+.results-preview-card-result legend {
+  padding-inline: .3rem;
+  color: var(--green);
+  font-weight: 800;
+}
+
+@media (max-width: 420px) {
+  .results-preview-card {
+    padding: .8rem;
+  }
+
+  .results-preview-card-result {
+    padding: .65rem;
+  }
+
+  .results-preview-score-line {
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+  }
+
+  .results-preview-score-pair {
+    grid-template-columns: minmax(3.5rem, 4.5rem) 1rem minmax(3.5rem, 4.5rem);
+  }
+
+  .results-preview-entry .score-input {
+    width: 100%;
+    min-width: 0;
+  }
+}
