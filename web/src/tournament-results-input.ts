@@ -1,6 +1,5 @@
 import {
   evaluateTournamentResultDraft,
-  tournamentPlanFingerprint,
   type TournamentResultDraft,
   type TournamentResultDraftController,
   type TournamentResultDraftUiState,
@@ -52,7 +51,8 @@ export interface ScoreFocusSnapshot {
 
 export interface TournamentResultsInputHost {
   drafts: TournamentResultDraftController;
-  persistDrafts: () => void;
+  currentResults: () => readonly JsonObject[];
+  persistDrafts: () => void | Promise<void>;
   commitResults: (
     results: JsonObject[],
     draftState: TournamentResultDraftUiState | undefined,
@@ -61,6 +61,35 @@ export interface TournamentResultsInputHost {
   announce: (message: string) => void;
   refreshCompletion: () => void;
   rerender: (focus: ScoreFocusSnapshot) => void;
+}
+
+interface TournamentResultCommitQueue {
+  tail: Promise<void>;
+  latestRequest: number;
+}
+
+const tournamentResultCommitQueues = new WeakMap<
+  TournamentResultDraftController,
+  TournamentResultCommitQueue
+>();
+
+function commitQueue(controller: TournamentResultDraftController): TournamentResultCommitQueue {
+  const current = tournamentResultCommitQueues.get(controller);
+  if (current !== undefined) return current;
+  const created = { tail: Promise.resolve(), latestRequest: 0 };
+  tournamentResultCommitQueues.set(controller, created);
+  return created;
+}
+
+function sameDraft(
+  left: TournamentResultDraft | undefined,
+  right: TournamentResultDraft,
+): left is TournamentResultDraft {
+  return left !== undefined &&
+    left.regularHome === right.regularHome &&
+    left.regularAway === right.regularAway &&
+    left.penaltyHome === right.penaltyHome &&
+    left.penaltyAway === right.penaltyAway;
 }
 
 export type TournamentResultEditorView = ResultInputEditorView;
@@ -146,6 +175,9 @@ function setState(
 ): void {
   stateLabel.dataset.state = state;
   stateLabel.textContent = state === "invalid" ? invalidStateLabel : stateName(state);
+  if (state === "saved") stateLabel.setAttribute("aria-label", "保存済み");
+  else if (state === "waiting") stateLabel.setAttribute("aria-label", "前提試合待ち");
+  else stateLabel.removeAttribute("aria-label");
 }
 
 export function captureTournamentScoreFocus(): ScoreFocusSnapshot {
@@ -182,12 +214,11 @@ export function restoreTournamentScoreFocus(
   root: ParentNode = document,
 ): void {
   if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
-  const replacement = [...root.querySelectorAll<HTMLElement>("[data-match-id]")]
-    .filter((candidate) => candidate.dataset.matchId === snapshot.matchId)
-    .map((candidate) => candidate.querySelector<HTMLInputElement>(
-      `input[data-score-field="${snapshot.scoreField}"]`,
-    ))
-    .find((candidate) => candidate !== null);
+  const replacement = [...root.querySelectorAll<HTMLInputElement>(
+    `input[data-score-field="${snapshot.scoreField}"]`,
+  )].find((candidate) =>
+    candidate.closest<HTMLElement>("[data-match-id]")?.dataset.matchId === snapshot.matchId
+  );
   if (replacement === undefined || replacement === null) return;
   replacement.focus({ preventScroll: true });
   if (snapshot.selectionStart !== null && snapshot.selectionEnd !== null) {
@@ -455,7 +486,7 @@ function buildEditor(
     );
     if (changed) host.drafts.set(matchId, currentDraft);
     else host.drafts.delete(matchId);
-    host.persistDrafts();
+    void host.persistDrafts();
     renderDraftState(changed ? currentDraft : undefined);
     host.refreshCompletion();
     return currentDraft;
@@ -470,39 +501,55 @@ function buildEditor(
     if (match.result !== undefined && host.drafts.get(matchId) === undefined) return;
     const evaluation = evaluateTournamentResultDraft(currentDraft);
     if (evaluation.status !== "ready") return;
-    const next: JsonObject = {
-      match_id: matchId,
-      home_team_id: match.homeTeamId!,
-      away_team_id: match.awayTeamId!,
-      regular_score_home: evaluation.regularHome,
-      regular_score_away: evaluation.regularAway,
-      ...(evaluation.penaltyRequired
-        ? {
-            penalty_score_home: evaluation.penaltyHome,
-            penalty_score_away: evaluation.penaltyAway,
-          }
-        : {}),
-    };
-    const changed = applyTournamentResultChange(plan, results, matchId, next);
-    const fingerprint = host.drafts.planFingerprint ?? tournamentPlanFingerprint(plan);
-    const previousDraftState = host.drafts.snapshot();
     const focusSnapshot = captureTournamentScoreFocus();
-    const removedDraftIds = [
-      matchId,
-      ...(changed.winnerChanged ? tournamentMatchDescendants(plan, matchId) : []),
-    ];
-    const nextDraftState = host.drafts.snapshotWithout(removedDraftIds);
+    const queue = commitQueue(host.drafts);
+    const request = ++queue.latestRequest;
     host.setSaveStatus("保存しています…");
     for (const input of inputs) input.disabled = true;
-    void host.commitResults(changed.results, nextDraftState).then(() => {
-      host.drafts.activate(fingerprint, nextDraftState?.drafts ?? {});
-      host.setSaveStatus("この端末に保存済み");
+    const operation = queue.tail.then(async () => {
+      const queuedDraft = host.drafts.get(matchId);
+      if (!sameDraft(queuedDraft, currentDraft)) return;
+      const queuedEvaluation = evaluateTournamentResultDraft(queuedDraft);
+      if (queuedEvaluation.status !== "ready") return;
+      const next: JsonObject = {
+        match_id: matchId,
+        home_team_id: match.homeTeamId!,
+        away_team_id: match.awayTeamId!,
+        regular_score_home: queuedEvaluation.regularHome,
+        regular_score_away: queuedEvaluation.regularAway,
+        ...(queuedEvaluation.penaltyRequired
+          ? {
+              penalty_score_home: queuedEvaluation.penaltyHome,
+              penalty_score_away: queuedEvaluation.penaltyAway,
+            }
+          : {}),
+      };
+      const changed = applyTournamentResultChange(
+        plan,
+        host.currentResults(),
+        matchId,
+        next,
+      );
+      const removedDraftIds = [
+        matchId,
+        ...(changed.winnerChanged ? tournamentMatchDescendants(plan, matchId) : []),
+      ];
+      const nextDraftState = host.drafts.snapshotWithout(removedDraftIds);
+      await host.commitResults(changed.results, nextDraftState);
+      host.drafts.deleteMany(removedDraftIds);
+      await host.persistDrafts();
       host.announce(changed.removedDescendantCount > 0
         ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
         : "2日目の試合結果をこの端末へ保存しました。");
+    });
+    queue.tail = operation.then(() => undefined, () => undefined);
+    void operation.then(() => {
+      if (request !== queue.latestRequest) return;
+      host.setSaveStatus("この端末に保存済み");
+      host.refreshCompletion();
       host.rerender(focusSnapshot);
     }).catch(() => {
-      host.drafts.activate(fingerprint, previousDraftState?.drafts ?? {});
+      if (request !== queue.latestRequest) return;
       host.setSaveStatus("保存できませんでした");
       host.announce(
         "2日目の試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。",
@@ -510,6 +557,7 @@ function buildEditor(
       for (const input of inputs) input.disabled = false;
       renderDraftState(host.drafts.get(matchId));
       host.refreshCompletion();
+      host.rerender(focusSnapshot);
     });
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);
@@ -517,7 +565,7 @@ function buildEditor(
   cancelDraft.addEventListener("click", () => {
     if (match.result === undefined) return;
     host.drafts.delete(matchId);
-    host.persistDrafts();
+    void host.persistDrafts();
     host.announce("入力途中の変更を取り消し、保存済みの結果へ戻しました。");
     host.rerender(scoreFocusForMatch(matchId));
   });

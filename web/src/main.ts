@@ -894,12 +894,12 @@ function activateTournamentResultDraftPlan(plan: JsonObject): string {
   return fingerprint;
 }
 
-function persistTournamentResultDrafts(): void {
+function persistTournamentResultDrafts(): Promise<void> {
   const state = tournamentResultDrafts.snapshot();
   const operation = state === undefined
     ? storage.clearTournamentResultDrafts()
     : storage.saveTournamentResultDrafts(state);
-  void operation.catch(() => {
+  return operation.catch(() => {
     tournamentResultsStatus.textContent =
       "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
   });
@@ -2703,6 +2703,7 @@ function renderTournamentResultsInput(
     layout: responsiveTournamentResultsLayout(resultPresentation),
     host: {
       drafts: tournamentResultDrafts,
+      currentResults: tournamentResults,
       persistDrafts: persistTournamentResultDrafts,
       commitResults: async (results, draftState) => {
         const nextDocument = withTournamentResults(results);
@@ -2874,7 +2875,7 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
     const matchId = typeof issue.match_id === "string" ? issue.match_id : undefined;
     const inputIndex = inputIndexByField.get(String(issue.score_field));
     if (matchId === undefined || inputIndex === undefined) continue;
-    const row = [...resultsSection.querySelectorAll<HTMLTableRowElement>("tr[data-match-id]")]
+    const row = [...resultsSection.querySelectorAll<HTMLElement>(".result-input-entry[data-match-id]")]
       .find((candidate) => candidate.dataset.matchId === matchId);
     const input = row?.querySelectorAll<HTMLInputElement>("input.score-input").item(inputIndex);
     const errorArea = row?.querySelector<HTMLElement>(".tournament-result-error");
@@ -2888,7 +2889,11 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
     errorArea.textContent = typeof issue.message === "string"
       ? issue.message
       : "得点は0以上の整数で入力してください。";
-    if (stateLabel !== undefined && stateLabel !== null) stateLabel.textContent = "要確認";
+    if (stateLabel !== undefined && stateLabel !== null) {
+      stateLabel.dataset.state = "invalid";
+      stateLabel.textContent = "要確認";
+      stateLabel.removeAttribute("aria-label");
+    }
     input.setAttribute("aria-invalid", "true");
     input.setAttribute("aria-describedby", errorArea.id);
     firstInvalidInput ??= input;

@@ -79,14 +79,31 @@ async function fillRegularResult(
   home: string,
   away: string,
 ): Promise<void> {
-  const row = page.locator(`#tournament-results-input tr[data-match-id="${matchId}"]`);
-  const regular = row.locator("td").nth(4).locator("input");
+  const row = page.locator(`#tournament-results-input [data-match-id="${matchId}"]`).first();
+  const regular = row.locator('[data-field="regular-score"] input');
   await regular.nth(0).fill(home);
   await regular.nth(1).fill(away);
   await regular.nth(1).press("Tab");
   await expect(
-    page.locator(`#tournament-results-input tr[data-match-id="${matchId}"]`),
-  ).toContainText("保存済み");
+    page.locator(`#tournament-results-input [data-match-id="${matchId}"]`).first(),
+  ).toContainText("保存済");
+}
+
+async function setTournamentResultWidth(page: Page, width: number): Promise<void> {
+  await page.locator("#day2-result-content").evaluate((element, nextWidth) => {
+    element.style.width = `${String(nextWidth)}px`;
+    element.style.padding = "0";
+  }, width);
+  await expect(page.locator("#tournament-results-input")).toHaveAttribute(
+    "data-responsive-presentation",
+    width < 900 ? "cards" : "table",
+  );
+}
+
+function tournamentResultEntry(page: Page, matchId: string) {
+  return page.locator(
+    `#tournament-results-input .result-input-entry[data-match-id="${matchId}"]`,
+  );
 }
 
 test("2日目結果を依存順に入力し、PKを経て総合最終順位を保存・印刷できる", async ({
@@ -122,9 +139,7 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     "時間",
     "コート",
     "対戦",
-    "通常得点",
-    "PK",
-    "保存状態",
+    "結果",
   ]);
   const scheduledSemifinal = page.locator(
     '#day2-schedule-view tr[data-match-id="PT-1-SF1"]',
@@ -132,7 +147,7 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   const resultSemifinal = page.locator(
     '#tournament-results-input tr[data-match-id="PT-1-SF1"]',
   );
-  await expect(resultSemifinal.locator("td").nth(0)).toHaveText(
+  await expect(resultSemifinal.locator("td").nth(0).locator(".match-display-number")).toHaveText(
     await scheduledSemifinal.locator("td").nth(0).innerText(),
   );
   await expect(resultSemifinal.locator("td").nth(1)).toHaveText(
@@ -147,24 +162,25 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
 
   const finalRow = page.locator('#tournament-results-input tr[data-match-id="PT-1-FINAL"]');
   await expect(finalRow).toContainText("前提試合の結果待ち");
-  await expect(finalRow.locator("input").first()).toHaveAttribute("aria-label", /前提試合待ち/u);
+  await expect(finalRow.locator("input")).toHaveCount(0);
+  await expect(finalRow.locator('[data-field="waiting-message"]')).toHaveText("—");
 
   await fillRegularResult(page, "PT-1-SF1", "1", "0");
   const semifinalTwo = page.locator(
     '#tournament-results-input tr[data-match-id="PT-1-SF2"]',
   );
-  const regular = semifinalTwo.locator("td").nth(4).locator("input");
+  const regular = semifinalTwo.locator('[data-field="regular-score"] input');
   await regular.nth(0).fill("1");
   await regular.nth(1).fill("1");
   await regular.nth(1).press("Tab");
-  const penalty = semifinalTwo.locator("td").nth(5).locator("input");
+  const penalty = semifinalTwo.locator('[data-field="penalty-score"] input');
   await expect(penalty.nth(0)).toBeVisible();
   await penalty.nth(0).fill("4");
   await penalty.nth(1).fill("3");
   await penalty.nth(1).press("Tab");
   await expect(
     page.locator('#tournament-results-input tr[data-match-id="PT-1-SF2"]'),
-  ).toContainText("保存済み");
+  ).toContainText("保存済");
 
   await expect(finalRow).toContainText("青空FC 対 赤松FC");
   const upperBracket = page.locator(
@@ -335,9 +351,8 @@ test("最終順位APIの得点診断を専用欄へ示し、保存結果を保�
   });
   await openApp(page);
   await importDocument(page, structuredClone(issue75EightTeamDocument));
-  const row = page.locator(
-    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
-  );
+  await setTournamentResultWidth(page, 899);
+  const row = tournamentResultEntry(page, "PT-1-RANK-1-4-M1");
   const score = row.locator("input.score-input").first();
   await page.locator("#confirm-tournament-results").click();
 
@@ -350,6 +365,184 @@ test("最終順位APIの得点診断を専用欄へ示し、保存結果を保�
     "得点は0以上の整数",
   );
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
+});
+
+test("順位決定トーナメントは899px以下をカード、900px以上を5列表にし、境界時だけ再描画する", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockExternalServices(page);
+  await openApp(page);
+  const fixtureDocument = tournamentResultsFixture() as unknown as {
+    tournament: { input: { teams: Array<{ name: string }> } };
+  };
+  for (const [index, team] of fixtureDocument.tournament.input.teams.entries()) {
+    team.name = index % 2 === 0 ? `地域サッカー${String(index + 1)}組` : `Football${String(index + 1)}`;
+  }
+  await importDocument(page, fixtureDocument);
+
+  for (const width of [375, 768, 899, 900, 1002, 1280]) {
+    await setTournamentResultWidth(page, width);
+    const section = page.locator("#tournament-results-input");
+    if (width < 900) {
+      await expect(section.getByRole("list", { name: "2日目の試合結果入力" })).toBeVisible();
+      await expect(section.locator("table")).toHaveCount(0);
+    } else {
+      await expect(section.getByRole("table", { name: "2日目の試合結果入力" })).toBeVisible();
+      await expect(section.getByRole("columnheader")).toHaveCount(5);
+    }
+    const overflow = await section.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(overflow.scrollWidth, `${String(width)}pxの結果入力領域`).toBeLessThanOrEqual(
+      overflow.clientWidth,
+    );
+  }
+
+  await setTournamentResultWidth(page, 900);
+  await page.locator("#tournament-results-input").evaluate((element) => {
+    element.dataset.renderIdentity = "same-presentation";
+  });
+  await setTournamentResultWidth(page, 1002);
+  await page.waitForTimeout(50);
+  await expect(page.locator("#tournament-results-input")).toHaveAttribute(
+    "data-render-identity",
+    "same-presentation",
+  );
+  await setTournamentResultWidth(page, 899);
+  await expect(page.locator("#tournament-results-input")).not.toHaveAttribute(
+    "data-render-identity",
+    "same-presentation",
+  );
+
+  const focused = tournamentResultEntry(page, "PT-1-SF1")
+    .locator('input[data-score-field="regularHome"]');
+  await focused.fill("12");
+  await focused.evaluate((input: HTMLInputElement) => input.setSelectionRange(1, 2));
+  const scrollY = await page.evaluate(() => {
+    window.scrollTo(0, 300);
+    return window.scrollY;
+  });
+  await setTournamentResultWidth(page, 900);
+  await expect(focused).toBeFocused();
+  await expect.poll(() => focused.evaluate((input: HTMLInputElement) => [
+    input.selectionStart,
+    input.selectionEnd,
+  ])).toEqual([1, 2]);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollY);
+});
+
+test("順位決定トーナメントのカードは待機・PK・状態・Tab順・エラー関連付けを保つ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, tournamentResultsFixture());
+  await setTournamentResultWidth(page, 899);
+
+  const section = page.locator("#tournament-results-input");
+  await expect(section.getByRole("list", { name: "2日目の試合結果入力" })).toBeVisible();
+  await expect(section.getByRole("group", { name: "試合結果" }).first()).toBeVisible();
+  await expect(section.locator('[data-state="empty"]').first()).toHaveText("未入力");
+
+  const waiting = section.locator('.result-input-entry:has([data-state="waiting"])');
+  await expect(waiting.first()).toBeVisible();
+  for (const entry of await waiting.all()) {
+    await expect(entry.locator("input")).toHaveCount(0);
+    expect((await entry.textContent())?.match(/前提試合の結果待ち/gu)).toHaveLength(1);
+    await expect(entry.locator('[data-field="waiting-message"]')).toHaveText("—");
+    await expect(entry.locator('[data-state="waiting"]')).toHaveAttribute(
+      "aria-label",
+      "前提試合待ち",
+    );
+  }
+
+  await fillRegularResult(page, "PT-1-SF1", "2", "0");
+  const saved = tournamentResultEntry(page, "PT-1-SF1");
+  await expect(saved.locator('[data-state="saved"]')).toHaveAttribute("aria-label", "保存済み");
+  await expect(saved.locator('input[data-score-field="penaltyHome"]')).toBeHidden();
+
+  const edited = tournamentResultEntry(page, "PT-1-SF2");
+  await edited.locator('input[data-score-field="regularHome"]').fill("1");
+  await expect(edited.locator('[data-state="editing"]')).toHaveText("入力中");
+
+  const invalid = tournamentResultEntry(page, "PT-2-SF1");
+  const invalidHome = invalid.locator('input[data-score-field="regularHome"]');
+  await invalidHome.fill("-1");
+  await invalid.locator('input[data-score-field="regularAway"]').fill("0");
+  await expect(invalid.locator('[data-state="invalid"]')).toHaveText("要確認");
+  await expect(invalidHome).toHaveAttribute("aria-invalid", "true");
+  const describedBy = await invalidHome.getAttribute("aria-describedby");
+  expect(describedBy).toBeTruthy();
+  await expect(page.locator(`#${describedBy!}`)).toBeVisible();
+  await expect(page.locator(`#${describedBy!}`)).not.toBeEmpty();
+
+  const tied = tournamentResultEntry(page, "PT-2-SF2");
+  const regularHome = tied.locator('input[data-score-field="regularHome"]');
+  const regularAway = tied.locator('input[data-score-field="regularAway"]');
+  await regularHome.fill("1");
+  await regularAway.fill("1");
+  const visibleFields = tied.locator("input:visible");
+  await expect(visibleFields).toHaveCount(4);
+  expect(await visibleFields.evaluateAll((inputs) =>
+    inputs.map((input) => (input as HTMLInputElement).dataset.scoreField)
+  )).toEqual(["regularHome", "regularAway", "penaltyHome", "penaltyAway"]);
+  await expect(regularHome).toHaveAttribute("aria-label", /対.+通常得点/u);
+  await expect(tied.locator('input[data-score-field="penaltyHome"]')).toHaveAttribute(
+    "aria-label",
+    /対.+PK得点/u,
+  );
+  await regularHome.focus();
+  for (const field of ["regularAway", "penaltyHome", "penaltyAway"]) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() =>
+      (document.activeElement as HTMLInputElement | null)?.dataset.scoreField
+    )).toBe(field);
+  }
+
+  const controls = section.locator("input:visible, button:visible");
+  for (const control of await controls.all()) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+  }
+  const contrastRatios = await section.locator(".tournament-result-state-label").evaluateAll(
+    (labels) => {
+      const rgb = (value: string): [number, number, number] => {
+        const values = value.match(/[\d.]+/gu)?.map(Number) ?? [];
+        return [values[0] ?? 0, values[1] ?? 0, values[2] ?? 0];
+      };
+      const luminance = (color: [number, number, number]): number => {
+        const linear = color.map((value) => {
+          const channel = value / 255;
+          return channel <= 0.04045
+            ? channel / 12.92
+            : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+      };
+      return labels.map((label) => {
+        const foreground = luminance(rgb(getComputedStyle(label).color));
+        let backgroundNode: Element | null = label;
+        let background: [number, number, number] = [255, 255, 255];
+        while (backgroundNode !== null) {
+          const color = getComputedStyle(backgroundNode).backgroundColor;
+          if (color !== "rgba(0, 0, 0, 0)") {
+            background = rgb(color);
+            break;
+          }
+          backgroundNode = backgroundNode.parentElement;
+        }
+        const backgroundLuminance = luminance(background);
+        return (Math.max(foreground, backgroundLuminance) + 0.05) /
+          (Math.min(foreground, backgroundLuminance) + 0.05);
+      });
+    },
+  );
+  for (const ratio of contrastRatios) expect(ratio).toBeGreaterThanOrEqual(4.5);
 });
 
 test("通常得点の部分入力を端末内だけで復元し、取消しまで行っても行レイアウトを保つ", async ({
@@ -373,7 +566,8 @@ test("通常得点の部分入力を端末内だけで復元し、取消しま�
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
   const whileInputting = await row.boundingBox();
   expect(whileInputting).not.toBeNull();
-  expect(Math.abs(whileInputting!.height - before!.height)).toBeLessThan(1);
+  expect(Math.abs(whileInputting!.width - before!.width)).toBeLessThan(1);
+  await expect(row).toBeVisible();
 
   await page.waitForTimeout(50);
   await page.reload();
@@ -402,7 +596,7 @@ test("通常得点の部分入力を端末内だけで復元し、取消しま�
   await expect(
     restoredRow.locator('input[data-score-field="regularHome"]'),
   ).toHaveValue("0");
-  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("保存済み");
+  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("保存済");
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
 });
 
@@ -438,7 +632,7 @@ test("PKの部分入力と保存済み結果の変更をtransactionalに扱い�
     "PK戦は勝敗が決まるまで",
   );
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
-  await expect(descendant.locator(".tournament-result-state-label")).toHaveText("保存済み");
+  await expect(descendant.locator(".tournament-result-state-label")).toHaveText("保存済");
   await reloadedParent.getByRole("button", { name: "変更を取り消す" }).click();
 
   const reloadedDescendant = page.locator(
@@ -455,7 +649,13 @@ test("PKの部分入力と保存済み結果の変更をtransactionalに扱い�
   });
 
   await expect(page.locator("#tournament-results-progress")).toContainText("6 / 8試合");
-  await expect(regularHome).toBeFocused();
+  await expect.poll(() => page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    return {
+      field: active?.dataset.scoreField,
+      matchId: active?.closest<HTMLElement>("[data-match-id]")?.dataset.matchId,
+    };
+  })).toEqual({ field: "regularHome", matchId: "PT-1-RANK-1-4-M1" });
   await expect.poll(() =>
     regularHome.evaluate((input: HTMLInputElement) => input.selectionStart)
   ).toBe(1);
@@ -488,7 +688,7 @@ test("有効な変更を確定した直後に再読込みしても正式結果�
   await expect(
     restoredParent.locator('input[data-score-field="regularHome"]'),
   ).toHaveValue("2");
-  await expect(restoredParent.locator(".tournament-result-state-label")).toHaveText("保存済み");
+  await expect(restoredParent.locator(".tournament-result-state-label")).toHaveText("保存済");
   await expect(page.locator("#tournament-results-progress")).toContainText("6 / 8試合");
   await expect(
     page.locator('#tournament-results-input tr[data-match-id="PT-1-RANK-1-2-M1"]')

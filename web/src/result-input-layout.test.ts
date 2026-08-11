@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  observeResultInputPresentation,
   renderIntegratedResultInputTable,
   renderResultInputCards,
-  observeResultInputPresentation,
   resultInputPresentationForWidth,
   type ResultInputRenderRow,
 } from "./result-input-layout";
+import { restoreResultInputFocus } from "./result-input-engine";
+import { restoreTournamentScoreFocus } from "./tournament-results-input";
 
 function row(ready = true): ResultInputRenderRow {
   const regularFields = document.createElement("span");
@@ -41,7 +43,11 @@ function row(ready = true): ResultInputRenderRow {
 }
 
 describe("共通結果入力layout", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
 
   it("900pxを境界にカードと5列表を切り替える", () => {
     expect(resultInputPresentationForWidth(899, 900)).toBe("cards");
@@ -71,25 +77,70 @@ describe("共通結果入力layout", () => {
     expect(section.querySelector("input")).toBeNull();
   });
 
-  it("非表示panelの0px通知では表示形式を変更しない", () => {
+  it("ResizeObserverはborder-boxの900px境界を越えたときだけ表示を変更する", () => {
     let callback: ResizeObserverCallback | undefined;
-    class ResizeObserverMock {
-      constructor(received: ResizeObserverCallback) {
-        callback = received;
+    class FakeResizeObserver {
+      constructor(next: ResizeObserverCallback) {
+        callback = next;
       }
-
+      disconnect(): void {}
       observe(): void {}
       unobserve(): void {}
-      disconnect(): void {}
     }
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-    const root = document.createElement("section");
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const root = document.createElement("div");
     const onChange = vi.fn();
     observeResultInputPresentation(root, "table", onChange);
+    const notify = (width: number): void => {
+      callback?.([{
+        borderBoxSize: [{ inlineSize: width }],
+        contentRect: { width: width - 32 },
+      } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    };
 
-    callback!([{ contentRect: { width: 0 } } as ResizeObserverEntry], {} as ResizeObserver);
+    notify(1002);
+    notify(900);
     expect(onChange).not.toHaveBeenCalled();
-    callback!([{ contentRect: { width: 899 } } as ResizeObserverEntry], {} as ResizeObserver);
-    expect(onChange).toHaveBeenCalledWith("cards");
+    notify(0);
+    expect(onChange).not.toHaveBeenCalled();
+    notify(899);
+    notify(768);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith("cards");
+    notify(900);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenLastCalledWith("table");
+  });
+
+  it("同じ試合IDを持つ表示行が先にあっても入力へフォーカスとキャレットを戻す", () => {
+    const scheduleRow = document.createElement("div");
+    scheduleRow.dataset.matchId = "M-1";
+    const resultRow = document.createElement("div");
+    resultRow.dataset.matchId = "M-1";
+    const input = document.createElement("input");
+    input.dataset.scoreField = "regularHome";
+    input.value = "12";
+    resultRow.append(input);
+    document.body.append(scheduleRow, resultRow);
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const snapshot = {
+      matchId: "M-1",
+      scoreField: "regularHome",
+      selectionStart: 1,
+      selectionEnd: 2,
+      scrollX: 10,
+      scrollY: 20,
+    };
+
+    restoreResultInputFocus(snapshot);
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 2]);
+    expect(scrollTo).toHaveBeenLastCalledWith(10, 20);
+
+    scheduleRow.focus();
+    restoreTournamentScoreFocus(snapshot);
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 2]);
+    expect(scrollTo).toHaveBeenLastCalledWith(10, 20);
   });
 });
