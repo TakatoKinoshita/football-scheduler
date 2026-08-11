@@ -467,6 +467,7 @@ function buildEditor(
   const commitDraft = (): void => {
     if (!ready) return;
     const currentDraft = recordDraft();
+    if (match.result !== undefined && host.drafts.get(matchId) === undefined) return;
     const evaluation = evaluateTournamentResultDraft(currentDraft);
     if (evaluation.status !== "ready") return;
     const next: JsonObject = {

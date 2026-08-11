@@ -913,6 +913,16 @@ function clearTournamentResultDrafts(): void {
   });
 }
 
+function clearAllResultDrafts(): void {
+  leagueResultDrafts.reset();
+  tournamentResultDrafts.reset();
+  sameRankResultDrafts.reset();
+  void storage.clearAllResultDrafts().catch(() => {
+    tournamentResultsStatus.textContent =
+      "入力途中の得点を消去できませんでした。画面を再読み込みしてください。";
+  });
+}
+
 async function restoreTournamentResultDrafts(): Promise<void> {
   const plan = asObject(documentState.tournament.result?.tournament_plan);
   if (plan === undefined) {
@@ -3348,7 +3358,7 @@ function updateDraft(invalidateResult = false): void {
       },
     };
   }
-  if (invalidateResult) clearTournamentResultDrafts();
+  if (invalidateResult) clearAllResultDrafts();
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   updateReview();
@@ -3658,7 +3668,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       }
       autosave.cancel();
       documentState = mode.document;
-      clearTournamentResultDrafts();
+      clearAllResultDrafts();
       legacyCompatibility = mode.legacyCompatibility;
       organizerCapacityTouched = inferOrganizerCapacityTouched();
       currentStep = restoredWizardStep(documentState);
@@ -3691,7 +3701,7 @@ requiredElement<HTMLButtonElement>("#convert-legacy-copy").addEventListener("cli
   ) return;
   autosave.cancel();
   documentState = convertLegacyToEditableDocument(documentState);
-  clearTournamentResultDrafts();
+  clearAllResultDrafts();
   legacyCompatibility = false;
   organizerCapacityTouched = inferOrganizerCapacityTouched();
   currentStep = 1;
@@ -3716,7 +3726,7 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
     }
     const mode = normalizeDocument(previous);
     documentState = mode.document;
-    clearTournamentResultDrafts();
+    clearAllResultDrafts();
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
@@ -3736,7 +3746,7 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
   autosave.cancel();
   void storage.deleteCurrent().then(() => {
     documentState = createTournamentDocument();
-    clearTournamentResultDrafts();
+    clearAllResultDrafts();
     legacyCompatibility = false;
     organizerCapacityTouched = false;
     currentStep = 1;
@@ -3936,7 +3946,7 @@ generateButton.addEventListener("click", () => {
       autosave.cancel();
       return storage.confirm(validatedDocument).then(() => {
         documentState = validatedDocument;
-        clearTournamentResultDrafts();
+        clearAllResultDrafts();
         generationStatus.textContent =
           "1日目と2日目の日程を生成し、独立検証に合格した結果をこの端末へ保存しました。";
         currentStep = 3;
