@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>2日目結果入力レイアウト比較</title>
+  </head>
+  <body data-preview-ready="false">
+    <header class="preview-header">
+      <p class="eyebrow">ローカル比較専用</p>
+      <h1>2日目結果入力レイアウト</h1>
+      <p>固定fixtureとメモリ内保存を使い、本番APIや端末内データへ接続せずに比較します。</p>
+    </header>
+    <main class="preview-main">
+      <form id="preview-controls" class="preview-controls" aria-label="プレビュー設定">
+        <label>
+          <span>レイアウト</span>
+          <select id="preview-layout" name="layout"></select>
+        </label>
+        <label>
+          <span>状態サンプル</span>
+          <select id="preview-scenario" name="scenario"></select>
+        </label>
+        <label>
+          <span>表示幅</span>
+          <select id="preview-width" name="width">
+            <option value="375">375 px</option>
+            <option value="768">768 px</option>
+            <option value="899">899 px（カード上限）</option>
+            <option value="900">900 px（テーブル下限）</option>
+            <option value="1002">1002 px</option>
+            <option value="1280">1280 px</option>
+          </select>
+        </label>
+        <label>
+          <span>カード切替幅</span>
+          <input id="preview-card-breakpoint" name="card-breakpoint" type="number" min="320" max="1600" step="1" />
+        </label>
+        <output id="preview-status" role="status" aria-live="polite"></output>
+      </form>
+
+      <section id="preview-capture" class="preview-capture" aria-labelledby="preview-heading">
+        <div class="preview-summary">
+          <p class="eyebrow">比較対象</p>
+          <h2 id="preview-heading">生成中…</h2>
+          <p id="preview-description"></p>
+          <p id="preview-save-status" class="muted" aria-live="polite"></p>
+        </div>
+        <div id="preview-output"></div>
+        <p id="preview-announcement" class="visually-hidden" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+    <script type="module" src="/src/tournament-results-preview.ts"></script>
+  </body>
+</html>

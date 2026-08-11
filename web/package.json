@@ -4,14 +4,17 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/check-preview-isolation.mjs",
     "build:functions": "wrangler pages functions build functions --outdir .wrangler-build",
     "dev": "vite",
     "lint": "tsc -b --pretty false",
     "preview": "vite preview",
     "preview:brackets": "node scripts/render-tournament-bracket-previews.mjs",
+    "preview:results": "node scripts/render-tournament-results-previews.mjs",
+    "check:preview-isolation": "node scripts/check-preview-isolation.mjs",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:preview": "playwright test --config playwright.preview.config.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260804.1",
