@@ -146,11 +146,12 @@ export function restoreResultInputFocus(
   root: ParentNode = document,
 ): void {
   if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
-  const entry = [...root.querySelectorAll<HTMLElement>("[data-match-id]")]
-    .find((candidate) => candidate.dataset.matchId === snapshot.matchId);
-  const input = entry?.querySelector<HTMLInputElement>(
-    `input[data-score-field="${snapshot.scoreField}"]`,
-  );
+  const input = [...root.querySelectorAll<HTMLElement>("[data-match-id]")]
+    .filter((candidate) => candidate.dataset.matchId === snapshot.matchId)
+    .map((candidate) => candidate.querySelector<HTMLInputElement>(
+      `input[data-score-field="${snapshot.scoreField}"]`,
+    ))
+    .find((candidate) => candidate !== null);
   if (input === undefined || input === null) return;
   input.focus({ preventScroll: true });
   if (snapshot.selectionStart !== null && snapshot.selectionEnd !== null) {

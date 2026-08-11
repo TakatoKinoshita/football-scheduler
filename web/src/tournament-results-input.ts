@@ -182,13 +182,12 @@ export function restoreTournamentScoreFocus(
   root: ParentNode = document,
 ): void {
   if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
-  const entry = [...root.querySelectorAll<HTMLElement>(
-    "[data-match-id]",
-  )]
-    .find((candidate) => candidate.dataset.matchId === snapshot.matchId);
-  const replacement = entry?.querySelector<HTMLInputElement>(
-    `input[data-score-field="${snapshot.scoreField}"]`,
-  );
+  const replacement = [...root.querySelectorAll<HTMLElement>("[data-match-id]")]
+    .filter((candidate) => candidate.dataset.matchId === snapshot.matchId)
+    .map((candidate) => candidate.querySelector<HTMLInputElement>(
+      `input[data-score-field="${snapshot.scoreField}"]`,
+    ))
+    .find((candidate) => candidate !== null);
   if (replacement === undefined || replacement === null) return;
   replacement.focus({ preventScroll: true });
   if (snapshot.selectionStart !== null && snapshot.selectionEnd !== null) {
