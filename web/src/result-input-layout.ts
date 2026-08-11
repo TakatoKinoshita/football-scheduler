@@ -240,6 +240,7 @@ export function observeResultInputPresentation(
   if (typeof ResizeObserver === "undefined") return;
   const observer = new ResizeObserver((entries) => {
     const width = entries.at(-1)?.contentRect.width ?? root.getBoundingClientRect().width;
+    if (width <= 0) return;
     const next = resultInputPresentationForWidth(width);
     const current = observedPresentations.get(root);
     if (current === undefined || current.presentation === next) return;

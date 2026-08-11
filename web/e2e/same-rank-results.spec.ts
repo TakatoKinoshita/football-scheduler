@@ -96,7 +96,7 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
     .getByRole("table", { name: "同順位リーグの試合結果入力" })
     .locator("thead th")
     .allTextContents();
-  expect(headers).toEqual(["試合", "時間", "コート", "対戦", "得点", "保存状態"]);
+  expect(headers).toEqual(["試合", "時間", "コート", "対戦", "結果"]);
   await expect(
     page.locator('[data-testid="turnstile-widget-mock"][data-action="calculate_same_rank_results"]'),
   ).toBeVisible();
@@ -110,8 +110,11 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
       for (const input of inputs) (input as HTMLInputElement).value = "1";
       inputs.at(-1)!.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await expect(page.locator(`#same-rank-results-input tr[data-match-id="${matchId}"]`))
-      .toContainText("保存済み");
+    await expect(
+      page.locator(
+        `#same-rank-results-input tr[data-match-id="${matchId}"] .tournament-result-state-label`,
+      ),
+    ).toHaveAccessibleName("保存済み");
   }
 
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
@@ -119,6 +122,165 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   await expect(page.locator("#same-rank-standings-view")).toBeVisible();
   await expect(page.getByRole("table", { name: "同順位リーグの総合最終順位" }).locator("tbody tr"))
     .toHaveCount(16);
+
+  const firstRow = page.locator(`#same-rank-results-input tr[data-match-id="${matchIds[0]}"]`);
+  const regularHome = firstRow.locator('input[data-score-field="regularHome"]');
+  await regularHome.fill("01");
+  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#same-rank-standings-view")).toBeVisible();
+  await regularHome.press("Tab");
+  await expect(firstRow.locator(".tournament-result-state-label"))
+    .toHaveAccessibleName("保存済み");
+  await expect(regularHome).toHaveValue("1");
+  await expect(page.locator("#same-rank-standings-view")).toBeVisible();
+
+  await regularHome.fill("2");
+  const scrollBefore = await regularHome.evaluate((input: HTMLInputElement) => {
+    window.scrollTo(0, input.getBoundingClientRect().top + window.scrollY - 120);
+    input.focus();
+    input.setSelectionRange(1, 1);
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return window.scrollY;
+  });
+  await expect(regularHome).toBeFocused();
+  await expect.poll(() =>
+    regularHome.evaluate((input: HTMLInputElement) => input.selectionStart)
+  ).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+  await expect(page.locator("#same-rank-standings-view")).toHaveCount(0);
+  await expect(page.locator("#tournament-results-status")).toContainText(
+    "以前の総合最終順位を取り消しました",
+  );
+});
+
+test("同順位リーグ結果入力は狭幅カードと広幅5列表を切り替え、ラベル・Tab順・44pxを保つ", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 899, height: 900 });
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, sameRankWebFixture(16));
+
+  const section = page.locator("#same-rank-results-input");
+  await expect(section).toHaveAttribute("data-responsive-presentation", "cards");
+  await expect(section.getByRole("table", { name: "同順位リーグの試合結果入力" }))
+    .toHaveCount(0);
+  const firstCard = section.locator(".result-input-card").first();
+  const inputs = firstCard.locator("input.score-input");
+  await expect(inputs).toHaveCount(2);
+  await expect(inputs.nth(0)).toHaveAttribute("aria-label", /通常得点$/);
+  await expect(inputs.nth(1)).toHaveAttribute("aria-label", /通常得点$/);
+  const targetSizes = await inputs.evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    })
+  );
+  for (const size of targetSizes) {
+    expect(size.width).toBeGreaterThanOrEqual(44);
+    expect(size.height).toBeGreaterThanOrEqual(44);
+  }
+  await inputs.nth(0).focus();
+  await inputs.nth(0).press("Tab");
+  await expect(inputs.nth(1)).toBeFocused();
+
+  await inputs.nth(0).fill("12");
+  await inputs.nth(0).evaluate((input: HTMLInputElement) => {
+    input.focus();
+    input.setSelectionRange(1, 1);
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(section).toHaveAttribute("data-responsive-presentation", "table");
+  const table = section.getByRole("table", { name: "同順位リーグの試合結果入力" });
+  await expect(table.locator("thead th")).toHaveCount(5);
+  const restored = table.locator('input[data-score-field="regularHome"]').first();
+  await expect(restored).toHaveValue("12");
+});
+
+test("同順位リーグの部分draftを再読込み後も復元する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, sameRankWebFixture(16));
+
+  const firstRow = page.locator("#same-rank-results-input .result-input-entry").first();
+  await firstRow.locator('input[data-score-field="regularHome"]').fill("3");
+  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#tournament-results-progress")).toContainText("0 / 24試合");
+  await page.waitForTimeout(50);
+  await page.reload();
+
+  const restoredRow = page.locator("#same-rank-results-input .result-input-entry").first();
+  await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("3");
+  await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("");
+  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#tournament-results-progress")).toContainText("0 / 24試合");
+});
+
+test("同順位リーグの正式結果保存に失敗しても以前の引き分けとdraftをatomicに保持する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, sameRankWebFixture(16));
+
+  const firstRow = page.locator("#same-rank-results-input .result-input-entry").first();
+  const matchId = await firstRow.getAttribute("data-match-id");
+  expect(matchId).not.toBeNull();
+  const regularHome = firstRow.locator('input[data-score-field="regularHome"]');
+  const regularAway = firstRow.locator('input[data-score-field="regularAway"]');
+  await regularHome.fill("1");
+  await regularAway.fill("1");
+  await regularAway.press("Tab");
+  await expect(firstRow.locator(".tournament-result-state-label"))
+    .toHaveAccessibleName("保存済み");
+
+  await page.evaluate((targetMatchId) => {
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey): IDBRequest {
+      const stored = value as { key?: unknown; document?: {
+        tournament?: { result?: { same_rank_league_results?: Array<{
+          match_id?: unknown;
+          regular_score_home?: unknown;
+        }> } };
+      } };
+      const targetResult = stored.document?.tournament?.result?.same_rank_league_results?.find(
+        (result) => result.match_id === targetMatchId,
+      );
+      if (
+        this.name === "documents" &&
+        stored.key === "draft" &&
+        targetResult?.regular_score_home === 2
+      ) {
+        throw new DOMException("test quota", "QuotaExceededError");
+      }
+      return key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+    };
+  }, matchId);
+
+  await regularHome.fill("2");
+  await regularHome.press("Tab");
+  await expect(page.locator("#tournament-results-status")).toContainText(
+    "入力途中の変更と以前の結果は保持されています",
+  );
+  await expect(regularHome).toHaveValue("2");
+  await expect(regularAway).toHaveValue("1");
+  await expect(firstRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await expect(page.locator("#tournament-results-progress")).toContainText("1 / 24試合");
+  await page.reload();
+
+  const restoredRow = page.locator(
+    `#same-rank-results-input .result-input-entry[data-match-id="${matchId!}"]`,
+  );
+  await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("2");
+  await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("1");
+  await expect(restoredRow.locator(".tournament-result-state-label")).toHaveText("入力中");
+  await restoredRow.getByRole("button", { name: "変更を取り消す" }).click();
+  await expect(restoredRow.locator('input[data-score-field="regularHome"]')).toHaveValue("1");
+  await expect(restoredRow.locator('input[data-score-field="regularAway"]')).toHaveValue("1");
+  await expect(restoredRow.locator(".tournament-result-state-label"))
+    .toHaveAccessibleName("保存済み");
 });
 
 test("17チーム4ブロックの1チーム群と2種類の警告を再表示する", async ({ page }) => {

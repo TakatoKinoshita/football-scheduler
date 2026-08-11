@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   renderIntegratedResultInputTable,
   renderResultInputCards,
+  observeResultInputPresentation,
   resultInputPresentationForWidth,
   type ResultInputRenderRow,
 } from "./result-input-layout";
@@ -40,6 +41,8 @@ function row(ready = true): ResultInputRenderRow {
 }
 
 describe("共通結果入力layout", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("900pxを境界にカードと5列表を切り替える", () => {
     expect(resultInputPresentationForWidth(899, 900)).toBe("cards");
     expect(resultInputPresentationForWidth(900, 900)).toBe("table");
@@ -66,5 +69,27 @@ describe("共通結果入力layout", () => {
     expect(section.textContent).toContain("前提試合の結果待ち");
     expect(section.textContent).toContain("—");
     expect(section.querySelector("input")).toBeNull();
+  });
+
+  it("非表示panelの0px通知では表示形式を変更しない", () => {
+    let callback: ResizeObserverCallback | undefined;
+    class ResizeObserverMock {
+      constructor(received: ResizeObserverCallback) {
+        callback = received;
+      }
+
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    const root = document.createElement("section");
+    const onChange = vi.fn();
+    observeResultInputPresentation(root, "table", onChange);
+
+    callback!([{ contentRect: { width: 0 } } as ResizeObserverEntry], {} as ResizeObserver);
+    expect(onChange).not.toHaveBeenCalled();
+    callback!([{ contentRect: { width: 899 } } as ResizeObserverEntry], {} as ResizeObserver);
+    expect(onChange).toHaveBeenCalledWith("cards");
   });
 });
