@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { renderResultInput, type ResultInputHostAdapter } from "./result-input-engine";
+import {
+  renderResultInput,
+  restoreResultInputFocus,
+  type ResultInputHostAdapter,
+} from "./result-input-engine";
 import { ResultDraftController } from "./tournament-result-drafts";
 
 function host(controller: ResultDraftController): ResultInputHostAdapter {
@@ -132,5 +136,30 @@ describe("共通結果入力engine", () => {
     expect(content.textContent).toContain("待機中");
     expect(content.textContent).toContain("前提試合の結果待ち");
     expect(content.textContent).toContain("—");
+  });
+
+  it("同じ試合IDの日程badgeが先にあっても結果入力欄へfocusを復元する", () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const scheduleBadge = document.createElement("span");
+    scheduleBadge.dataset.matchId = "LG-1";
+    const entry = document.createElement("div");
+    entry.dataset.matchId = "LG-1";
+    const input = document.createElement("input");
+    input.dataset.scoreField = "regularAway";
+    entry.append(input);
+    document.body.append(scheduleBadge, entry);
+
+    restoreResultInputFocus({
+      matchId: "LG-1",
+      scoreField: "regularAway",
+      selectionStart: 0,
+      selectionEnd: 0,
+      scrollX: 0,
+      scrollY: 0,
+    });
+
+    expect(document.activeElement).toBe(input);
+    scrollTo.mockRestore();
+    document.body.replaceChildren();
   });
 });
