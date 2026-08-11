@@ -186,6 +186,10 @@ uv run python scripts/write_tournament_bracket_preview_fixtures.py --check
 本番画面、API、Turnstile、IndexedDBへ接続せず、2日目の結果入力を固定fixtureで比較できる。
 Web依存関係を準備した後、`web`ディレクトリで次を実行する。
 
+比較で採用したレスポンシブ表示は本番の3形式へ反映済みで、899px以下はカード、900px以上は
+状態統合5列表を使用する。1日目リーグと同順位リーグを含め、部分入力は端末内draftへ保存し、
+両側の得点が揃った`change`時だけ正式結果をatomicに保存する。
+
 ```console
 cd web
 npm run preview:results

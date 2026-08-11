@@ -141,6 +141,7 @@ function renderPreview(focus?: ScoreFocusSnapshot): void {
 
   const host: TournamentResultsInputHost = {
     drafts,
+    currentResults: () => results,
     persistDrafts: () => undefined,
     commitResults: async (nextResults) => {
       results = structuredClone(nextResults) as JsonObject[];

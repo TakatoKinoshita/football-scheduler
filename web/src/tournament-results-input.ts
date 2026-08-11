@@ -1,6 +1,5 @@
 import {
   evaluateTournamentResultDraft,
-  tournamentPlanFingerprint,
   type TournamentResultDraft,
   type TournamentResultDraftController,
   type TournamentResultDraftUiState,
@@ -11,6 +10,13 @@ import {
   tournamentMatchDescendants,
   type TournamentMatchProgress,
 } from "./tournament-results";
+import {
+  renderIntegratedResultInputTable,
+  renderResultInputCards,
+  type ResultInputEditorView,
+  type ResultInputPresentation,
+  type ResultInputRenderRow,
+} from "./result-input-layout";
 import type { JsonObject } from "./types";
 
 export type TournamentResultsLayoutId =
@@ -45,7 +51,8 @@ export interface ScoreFocusSnapshot {
 
 export interface TournamentResultsInputHost {
   drafts: TournamentResultDraftController;
-  persistDrafts: () => void;
+  currentResults: () => readonly JsonObject[];
+  persistDrafts: () => void | Promise<void>;
   commitResults: (
     results: JsonObject[],
     draftState: TournamentResultDraftUiState | undefined,
@@ -56,25 +63,40 @@ export interface TournamentResultsInputHost {
   rerender: (focus: ScoreFocusSnapshot) => void;
 }
 
-export interface TournamentResultEditorView {
-  regularFields: HTMLElement;
-  penaltyFields: HTMLElement;
-  stateLabel: HTMLElement;
-  errorArea: HTMLElement;
-  cancelDraft: HTMLButtonElement;
-  inputs: readonly HTMLInputElement[];
+interface TournamentResultCommitQueue {
+  tail: Promise<void>;
+  latestRequest: number;
+  failed: boolean;
 }
 
-export interface TournamentResultsRenderRow {
+const tournamentResultCommitQueues = new WeakMap<
+  TournamentResultDraftController,
+  TournamentResultCommitQueue
+>();
+
+function commitQueue(controller: TournamentResultDraftController): TournamentResultCommitQueue {
+  const current = tournamentResultCommitQueues.get(controller);
+  if (current !== undefined) return current;
+  const created = { tail: Promise.resolve(), latestRequest: 0, failed: false };
+  tournamentResultCommitQueues.set(controller, created);
+  return created;
+}
+
+function sameDraft(
+  left: TournamentResultDraft | undefined,
+  right: TournamentResultDraft,
+): left is TournamentResultDraft {
+  return left !== undefined &&
+    left.regularHome === right.regularHome &&
+    left.regularAway === right.regularAway &&
+    left.penaltyHome === right.penaltyHome &&
+    left.penaltyAway === right.penaltyAway;
+}
+
+export type TournamentResultEditorView = ResultInputEditorView;
+
+export interface TournamentResultsRenderRow extends ResultInputRenderRow {
   match: TournamentMatchProgress;
-  matchId: string;
-  displayNumber: string;
-  timeLabel: string;
-  courtName: string;
-  ready: boolean;
-  homeName: string;
-  awayName: string;
-  editor: TournamentResultEditorView;
 }
 
 export interface TournamentResultsLayoutStrategy {
@@ -139,11 +161,11 @@ function scoreValue(input: HTMLInputElement): number | null | undefined {
 
 function stateName(state: TournamentResultEntryState): string {
   switch (state) {
-    case "waiting": return "前提試合待ち";
+    case "waiting": return "待機中";
     case "empty": return "未入力";
     case "editing": return "入力中";
     case "invalid": return "要確認";
-    case "saved": return "保存済み";
+    case "saved": return "保存済";
   }
 }
 
@@ -154,12 +176,15 @@ function setState(
 ): void {
   stateLabel.dataset.state = state;
   stateLabel.textContent = state === "invalid" ? invalidStateLabel : stateName(state);
+  if (state === "saved") stateLabel.setAttribute("aria-label", "保存済み");
+  else if (state === "waiting") stateLabel.setAttribute("aria-label", "前提試合待ち");
+  else stateLabel.removeAttribute("aria-label");
 }
 
 export function captureTournamentScoreFocus(): ScoreFocusSnapshot {
   const active = document.activeElement;
   const entry = active instanceof HTMLInputElement
-    ? active.closest<HTMLElement>(".tournament-result-entry[data-match-id]")
+    ? active.closest<HTMLElement>("[data-match-id]")
     : null;
   return {
     matchId: entry?.dataset.matchId,
@@ -190,12 +215,10 @@ export function restoreTournamentScoreFocus(
   root: ParentNode = document,
 ): void {
   if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
-  const entry = [...root.querySelectorAll<HTMLElement>(
-    ".tournament-result-entry[data-match-id]",
-  )]
-    .find((candidate) => candidate.dataset.matchId === snapshot.matchId);
-  const replacement = entry?.querySelector<HTMLInputElement>(
+  const replacement = [...root.querySelectorAll<HTMLInputElement>(
     `input[data-score-field="${snapshot.scoreField}"]`,
+  )].find((candidate) =>
+    candidate.closest<HTMLElement>("[data-match-id]")?.dataset.matchId === snapshot.matchId
   );
   if (replacement === undefined || replacement === null) return;
   replacement.focus({ preventScroll: true });
@@ -281,6 +304,24 @@ export const productionCurrentTournamentResultsLayout: TournamentResultsLayoutSt
   render: productionTableLayout,
 };
 
+export function responsiveTournamentResultsLayout(
+  presentation: ResultInputPresentation,
+): TournamentResultsLayoutStrategy {
+  return {
+    id: "responsive-cards",
+    invalidStateLabel: "要確認",
+    renderWaitingInputs: false,
+    render: (section, rows) => {
+      section.classList.add("result-input-root");
+      if (presentation === "cards") {
+        renderResultInputCards(section, rows, "2日目の試合結果入力");
+      } else {
+        renderIntegratedResultInputTable(section, rows, "2日目の試合結果入力");
+      }
+    },
+  };
+}
+
 function buildEditor(
   match: TournamentMatchProgress,
   ready: boolean,
@@ -288,9 +329,29 @@ function buildEditor(
   awayName: string,
   options: RenderTournamentResultsInputOptions,
 ): TournamentResultEditorView {
-  const { host, layout, plan, results } = options;
+  const { host, layout, plan } = options;
   const matchId = match.matchId;
   const draft = host.drafts.get(matchId);
+  if (!ready && !layout.renderWaitingInputs) {
+    const stateLabel = document.createElement("span");
+    stateLabel.className = "tournament-result-state-label";
+    setState(stateLabel, "waiting", layout.invalidStateLabel);
+    stateLabel.setAttribute("aria-label", "前提試合待ち");
+    const errorArea = document.createElement("span");
+    errorArea.className = "tournament-result-error";
+    const cancelDraft = document.createElement("button");
+    cancelDraft.type = "button";
+    cancelDraft.className = "text-button tournament-result-cancel";
+    cancelDraft.hidden = true;
+    return {
+      regularFields: document.createElement("span"),
+      penaltyFields: document.createElement("span"),
+      stateLabel,
+      errorArea,
+      cancelDraft,
+      inputs: [],
+    };
+  }
   const regularHome = scoreInput(
     `${homeName} 対 ${awayName}・${homeName}の通常得点`,
     draft?.regularHome ??
@@ -426,7 +487,7 @@ function buildEditor(
     );
     if (changed) host.drafts.set(matchId, currentDraft);
     else host.drafts.delete(matchId);
-    host.persistDrafts();
+    void host.persistDrafts();
     renderDraftState(changed ? currentDraft : undefined);
     host.refreshCompletion();
     return currentDraft;
@@ -435,44 +496,82 @@ function buildEditor(
   renderDraftState(draft);
   for (const input of inputs) input.addEventListener("input", recordDraft);
 
-  const commitDraft = (): void => {
+  const commitDraft = (event: Event): void => {
     if (!ready) return;
+    const changedInput = event.currentTarget as HTMLInputElement;
+    const capturedFocus = captureTournamentScoreFocus();
+    const focusSnapshot = capturedFocus.matchId === undefined || capturedFocus.scoreField === undefined
+      ? {
+          matchId,
+          scoreField: changedInput.dataset.scoreField,
+          selectionStart: changedInput.selectionStart,
+          selectionEnd: changedInput.selectionEnd,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }
+      : capturedFocus;
     const currentDraft = recordDraft();
+    if (match.result !== undefined && host.drafts.get(matchId) === undefined) return;
     const evaluation = evaluateTournamentResultDraft(currentDraft);
     if (evaluation.status !== "ready") return;
-    const next: JsonObject = {
-      match_id: matchId,
-      home_team_id: match.homeTeamId!,
-      away_team_id: match.awayTeamId!,
-      regular_score_home: evaluation.regularHome,
-      regular_score_away: evaluation.regularAway,
-      ...(evaluation.penaltyRequired
-        ? {
-            penalty_score_home: evaluation.penaltyHome,
-            penalty_score_away: evaluation.penaltyAway,
-          }
-        : {}),
-    };
-    const changed = applyTournamentResultChange(plan, results, matchId, next);
-    const fingerprint = host.drafts.planFingerprint ?? tournamentPlanFingerprint(plan);
-    const previousDraftState = host.drafts.snapshot();
-    const focusSnapshot = captureTournamentScoreFocus();
-    const removedDraftIds = [
-      matchId,
-      ...(changed.winnerChanged ? tournamentMatchDescendants(plan, matchId) : []),
-    ];
-    const nextDraftState = host.drafts.snapshotWithout(removedDraftIds);
+    const queue = commitQueue(host.drafts);
+    const request = ++queue.latestRequest;
     host.setSaveStatus("保存しています…");
     for (const input of inputs) input.disabled = true;
-    void host.commitResults(changed.results, nextDraftState).then(() => {
-      host.drafts.activate(fingerprint, nextDraftState?.drafts ?? {});
-      host.setSaveStatus("この端末に保存済み");
+    const operation = queue.tail.then(async () => {
+      const queuedDraft = host.drafts.get(matchId);
+      if (!sameDraft(queuedDraft, currentDraft)) return;
+      const queuedEvaluation = evaluateTournamentResultDraft(queuedDraft);
+      if (queuedEvaluation.status !== "ready") return;
+      const next: JsonObject = {
+        match_id: matchId,
+        home_team_id: match.homeTeamId!,
+        away_team_id: match.awayTeamId!,
+        regular_score_home: queuedEvaluation.regularHome,
+        regular_score_away: queuedEvaluation.regularAway,
+        ...(queuedEvaluation.penaltyRequired
+          ? {
+              penalty_score_home: queuedEvaluation.penaltyHome,
+              penalty_score_away: queuedEvaluation.penaltyAway,
+            }
+          : {}),
+      };
+      const changed = applyTournamentResultChange(
+        plan,
+        host.currentResults(),
+        matchId,
+        next,
+      );
+      const removedDraftIds = [
+        matchId,
+        ...(changed.winnerChanged ? tournamentMatchDescendants(plan, matchId) : []),
+      ];
+      const nextDraftState = host.drafts.snapshotWithout(removedDraftIds);
+      await host.commitResults(changed.results, nextDraftState);
+      host.drafts.deleteMany(removedDraftIds);
       host.announce(changed.removedDescendantCount > 0
         ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
         : "2日目の試合結果をこの端末へ保存しました。");
+    });
+    queue.tail = operation.then(() => undefined, () => {
+      queue.failed = true;
+    });
+    void operation.then(() => {
+      if (request !== queue.latestRequest) return;
+      if (queue.failed) {
+        host.setSaveStatus("保存できませんでした");
+        host.announce(
+          "試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。",
+        );
+      } else {
+        host.setSaveStatus("この端末に保存済み");
+      }
+      host.refreshCompletion();
       host.rerender(focusSnapshot);
+      tournamentResultCommitQueues.delete(host.drafts);
     }).catch(() => {
-      host.drafts.activate(fingerprint, previousDraftState?.drafts ?? {});
+      queue.failed = true;
+      if (request !== queue.latestRequest) return;
       host.setSaveStatus("保存できませんでした");
       host.announce(
         "2日目の試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。",
@@ -480,6 +579,8 @@ function buildEditor(
       for (const input of inputs) input.disabled = false;
       renderDraftState(host.drafts.get(matchId));
       host.refreshCompletion();
+      host.rerender(focusSnapshot);
+      tournamentResultCommitQueues.delete(host.drafts);
     });
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);
@@ -487,7 +588,7 @@ function buildEditor(
   cancelDraft.addEventListener("click", () => {
     if (match.result === undefined) return;
     host.drafts.delete(matchId);
-    host.persistDrafts();
+    void host.persistDrafts();
     host.announce("入力途中の変更を取り消し、保存済みの結果へ戻しました。");
     host.rerender(scoreFocusForMatch(matchId));
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  evaluateResultDraft,
   evaluateTournamentResultDraft,
   TournamentResultDraftController,
   tournamentPlanFingerprint,
@@ -16,6 +17,19 @@ const draft = (values: Partial<TournamentResultDraft> = {}): TournamentResultDra
 });
 
 describe("トーナメント結果draft", () => {
+  it("リーグでは同点を確定可能、トーナメントではPK入力中として扱う", () => {
+    const tied = draft({ regularHome: "2", regularAway: "2" });
+    expect(evaluateResultDraft(tied, "league")).toEqual({
+      status: "ready",
+      penaltyRequired: false,
+      regularHome: 2,
+      regularAway: 2,
+    });
+    expect(evaluateResultDraft(tied, "placement-tournament")).toEqual({
+      status: "inputting",
+      penaltyRequired: true,
+    });
+  });
   it("通常得点またはPKの片側だけなら入力中として扱う", () => {
     expect(evaluateTournamentResultDraft(draft({ regularHome: "1" }))).toEqual({
       status: "inputting",

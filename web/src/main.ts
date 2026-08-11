@@ -65,15 +65,29 @@ import {
   TournamentStorage,
 } from "./storage";
 import {
+  ResultDraftController,
   TournamentResultDraftController,
+  resultInputFingerprint,
   tournamentPlanFingerprint,
 } from "./tournament-result-drafts";
 import {
-  productionCurrentTournamentResultsLayout,
+  responsiveTournamentResultsLayout,
   renderTournamentResultsInput as renderSharedTournamentResultsInput,
   restoreTournamentScoreFocus,
   type ScoreFocusSnapshot,
 } from "./tournament-results-input";
+import {
+  renderResultInput as renderSharedResultInput,
+  restoreResultInputFocus,
+  type ResultInputFocusSnapshot,
+  type ResultInputRowModel,
+  type SavedResultInputValue,
+} from "./result-input-engine";
+import {
+  observeResultInputPresentation,
+  resultInputPresentationForWidth,
+  type ResultInputPresentation,
+} from "./result-input-layout";
 import {
   buildTournamentBracketModel,
   TournamentBracketError,
@@ -686,6 +700,8 @@ let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let tournamentResultsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 const tournamentResultDrafts = new TournamentResultDraftController();
+const leagueResultDrafts = new ResultDraftController();
+const sameRankResultDrafts = new ResultDraftController();
 
 const nameInput = requiredElement<HTMLInputElement>("#tournament-name");
 const teamsInput = requiredElement<HTMLTextAreaElement>("#teams");
@@ -836,6 +852,39 @@ function tournamentResults(): JsonObject[] {
   return asObjectArray(documentState.tournament.result?.tournament_results);
 }
 
+function activateLeagueResultDraftPlan(): string {
+  const fingerprint = resultInputFingerprint("day1-league", resultMatches());
+  if (leagueResultDrafts.planFingerprint !== fingerprint) {
+    leagueResultDrafts.activate(fingerprint);
+    void storage.clearResultDrafts("day1-league");
+  }
+  return fingerprint;
+}
+
+function activateSameRankResultDraftPlan(plan: JsonObject): string {
+  const fingerprint = resultInputFingerprint("same-rank-league", plan);
+  if (sameRankResultDrafts.planFingerprint !== fingerprint) {
+    sameRankResultDrafts.activate(fingerprint);
+    void storage.clearResultDrafts("same-rank-league");
+  }
+  return fingerprint;
+}
+
+function persistResultDrafts(
+  scope: "day1-league" | "same-rank-league",
+  controller: ResultDraftController,
+  status: HTMLElement,
+): void {
+  const state = controller.snapshot();
+  const operation = state === undefined
+    ? storage.clearResultDrafts(scope)
+    : storage.saveResultDrafts(scope, state);
+  void operation.catch(() => {
+    status.textContent =
+      "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
+  });
+}
+
 function activateTournamentResultDraftPlan(plan: JsonObject): string {
   const fingerprint = tournamentPlanFingerprint(plan);
   if (tournamentResultDrafts.planFingerprint !== fingerprint) {
@@ -845,12 +894,12 @@ function activateTournamentResultDraftPlan(plan: JsonObject): string {
   return fingerprint;
 }
 
-function persistTournamentResultDrafts(): void {
+function persistTournamentResultDrafts(): Promise<void> {
   const state = tournamentResultDrafts.snapshot();
   const operation = state === undefined
     ? storage.clearTournamentResultDrafts()
     : storage.saveTournamentResultDrafts(state);
-  void operation.catch(() => {
+  return operation.catch(() => {
     tournamentResultsStatus.textContent =
       "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
   });
@@ -859,6 +908,16 @@ function persistTournamentResultDrafts(): void {
 function clearTournamentResultDrafts(): void {
   tournamentResultDrafts.reset();
   void storage.clearTournamentResultDrafts().catch(() => {
+    tournamentResultsStatus.textContent =
+      "入力途中の得点を消去できませんでした。画面を再読み込みしてください。";
+  });
+}
+
+function clearAllResultDrafts(): void {
+  leagueResultDrafts.reset();
+  tournamentResultDrafts.reset();
+  sameRankResultDrafts.reset();
+  void storage.clearAllResultDrafts().catch(() => {
     tournamentResultsStatus.textContent =
       "入力途中の得点を消去できませんでした。画面を再読み込みしてください。";
   });
@@ -875,13 +934,36 @@ async function restoreTournamentResultDrafts(): Promise<void> {
   tournamentResultDrafts.activate(fingerprint, restored ?? {});
 }
 
+async function restoreAllResultDrafts(): Promise<void> {
+  const matches = resultMatches();
+  if (matches.length > 0) {
+    const fingerprint = resultInputFingerprint("day1-league", matches);
+    const restored = await storage.loadResultDrafts("day1-league", fingerprint);
+    leagueResultDrafts.activate(fingerprint, restored ?? {});
+  } else {
+    leagueResultDrafts.reset();
+  }
+  const sameRankPlan = asObject(documentState.tournament.result?.same_rank_plan);
+  if (sameRankPlan !== undefined) {
+    const fingerprint = resultInputFingerprint("same-rank-league", sameRankPlan);
+    const restored = await storage.loadResultDrafts("same-rank-league", fingerprint);
+    sameRankResultDrafts.activate(fingerprint, restored ?? {});
+  } else {
+    sameRankResultDrafts.reset();
+  }
+  await restoreTournamentResultDrafts();
+}
+
 function sameRankResults(): JsonObject[] {
   return asObjectArray(documentState.tournament.result?.same_rank_league_results);
 }
 
-function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boolean {
+function withLeagueResults(
+  results: JsonObject[],
+  standings?: JsonObject,
+): { document: TournamentDocument; invalidated: boolean } | undefined {
   const result = asObject(documentState.tournament.result);
-  if (result === undefined) return false;
+  if (result === undefined) return undefined;
   const hadStandings = asObject(result.league_standings) !== undefined;
   const existingStandings = asObject(result.league_standings);
   const existingDay2 = asObject(result.day2_schedule);
@@ -896,7 +978,6 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
     sameRankParticipantResolution(existingSameRankPlan) === "resolved";
   const nextResult: JsonObject = { ...result, league_results: results };
   if (standings === undefined) {
-    clearTournamentResultDrafts();
     delete nextResult.league_standings;
     delete nextResult.tournament_results;
     delete nextResult.final_standings;
@@ -936,14 +1017,28 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
         : bindDay2ScheduleParticipants(existingDay2, standings);
     }
   }
-  documentState = {
+  return {
+    document: {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: {
       ...documentState.tournament,
       result: nextResult,
     },
+    },
+    invalidated: hadStandings || hadResolvedTournament || hadResolvedSameRank || hadResolvedDay2,
   };
+}
+
+function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boolean {
+  const changed = withLeagueResults(results, standings);
+  if (changed === undefined) return false;
+  documentState = changed.document;
+  if (standings === undefined) {
+    clearTournamentResultDrafts();
+    sameRankResultDrafts.reset();
+    void storage.clearResultDrafts("same-rank-league");
+  }
   saveState.textContent = "保存しています…";
   autosave.schedule(
     documentState,
@@ -956,7 +1051,7 @@ function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boole
         "試合結果を保存できませんでした。端末の空き容量を確認してください。";
     },
   );
-  return hadStandings || hadResolvedTournament || hadResolvedSameRank || hadResolvedDay2;
+  return changed.invalidated;
 }
 
 function parseDay2Breaks(): JsonObject[] | undefined {
@@ -1102,26 +1197,16 @@ function saveDay2Settings(): void {
   refreshGenerateEnabled();
 }
 
-function saveSameRankResults(results: JsonObject[]): void {
+function withSameRankResults(results: JsonObject[]): TournamentDocument | undefined {
   const result = asObject(documentState.tournament.result);
-  if (result === undefined) return;
+  if (result === undefined) return undefined;
   const nextResult: JsonObject = { ...result, same_rank_league_results: results };
   delete nextResult.same_rank_standings;
-  documentState = {
+  return {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: { ...documentState.tournament, result: nextResult },
   };
-  saveState.textContent = "保存しています…";
-  autosave.schedule(
-    documentState,
-    () => { saveState.textContent = "この端末に保存済み"; },
-    () => {
-      saveState.textContent = "保存できませんでした";
-      tournamentResultsStatus.textContent =
-        "同順位リーグの結果を保存できませんでした。ファイルへ保存してください。";
-    },
-  );
 }
 
 async function saveSameRankStandings(standings: JsonObject): Promise<void> {
@@ -1574,128 +1659,89 @@ function renderResult(): void {
     const enteredCount = leagueMatches.filter((match) =>
       resultsByMatch.has(String(match.id)),
     ).length;
-    const leagueResultsHeading = appendTextElement(content, "h3", "リーグ結果入力");
-    leagueResultsHeading.id = "league-results-heading";
-    appendTextElement(
-      content,
-      "p",
-      `入力済み ${enteredCount} / ${leagueMatches.length}試合。得点を入力すると、この端末へ自動保存します。`,
-      "muted",
-    );
-    const resultTable = window.document.createElement("table");
-    resultTable.setAttribute("aria-label", "1日目の試合結果入力");
-    const resultHead = window.document.createElement("thead");
-    const resultHeading = window.document.createElement("tr");
-    for (const heading of ["試合", "時間", "コート", "対戦", "得点", "保存状態"]) {
-      appendTextElement(resultHeading, "th", heading);
-    }
-    resultHead.append(resultHeading);
-    resultTable.append(resultHead);
-    const resultBody = window.document.createElement("tbody");
-    for (const match of leagueMatches) {
+    activateLeagueResultDraftPlan();
+    const matchesById = new Map(leagueMatches.map((match) => [String(match.id), match]));
+    const resultRows: ResultInputRowModel[] = leagueMatches.map((match) => {
       const matchId = String(match.id);
       const current = resultsByMatch.get(matchId);
       const scheduledRow = schedulePresentation.timeRows.find((item) => item.matchId === matchId);
-      const row = window.document.createElement("tr");
-      row.dataset.matchId = matchId;
-      const numberCell = window.document.createElement("td");
-      appendMatchDisplayNumber(
-        numberCell,
-        matchId,
-        schedulePresentation.displayNumberByMatchId.get(matchId) ?? matchId,
-      );
-      row.append(numberCell);
-      appendTextElement(
-        row,
-        "td",
-        scheduledRow === undefined
-          ? "未配置"
-          : scheduledRow.timeLabel,
-      );
-      appendTextElement(row, "td", scheduledRow?.courtName ?? "未配置");
       const home = exactTeamId(match, "home");
       const away = exactTeamId(match, "away");
       const homeName = teamNames.get(home ?? "") ?? "名称未設定";
       const awayName = teamNames.get(away ?? "") ?? "名称未設定";
-      appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
-      const scoreCell = window.document.createElement("td");
-      const homeScore = window.document.createElement("input");
-      const awayScore = window.document.createElement("input");
-      for (const [input, teamName] of [
-        [homeScore, homeName],
-        [awayScore, awayName],
-      ] as const) {
-        input.type = "number";
-        input.min = "0";
-        input.step = "1";
-        input.inputMode = "numeric";
-        input.className = "score-input";
-        input.setAttribute("aria-label", `${homeName} 対 ${awayName}・${teamName}の得点`);
-      }
-      homeScore.value = typeof current?.home_score === "number" ? String(current.home_score) : "";
-      awayScore.value = typeof current?.away_score === "number" ? String(current.away_score) : "";
-      scoreCell.append(homeScore, window.document.createTextNode(" - "), awayScore);
-      row.append(scoreCell);
-      const saved = appendTextElement(
-        row,
-        "td",
-        current === undefined ? "未入力" : "保存済み",
-        "muted",
-      );
-      const save = () => {
-        const homeValue = inputNumber(homeScore);
-        const awayValue = inputNumber(awayScore);
-        const validHome =
-          homeValue === null || (Number.isInteger(homeValue) && homeValue >= 0);
-        const validAway =
-          awayValue === null || (Number.isInteger(awayValue) && awayValue >= 0);
-        homeScore.toggleAttribute("aria-invalid", !validHome);
-        awayScore.toggleAttribute("aria-invalid", !validAway);
-        if (!validHome || !validAway) {
-          saved.textContent = "0以上の整数を入力";
-          saved.className = "field-error";
-          standingsButton.disabled = true;
-          return;
-        }
-        const next = leagueResults().filter((value) => value.match_id !== matchId);
-        if (homeValue !== null && awayValue !== null) {
-          next.push({ match_id: matchId, home_score: homeValue, away_score: awayValue });
-        }
-        const invalidated = saveLeagueResults(next);
-        saved.textContent =
-          homeValue !== null && awayValue !== null ? "保存済み" : "未入力";
-        saved.className = "muted";
-        refreshLeagueResultsProgress(leagueMatches.length);
-        if (invalidated) {
-          document.querySelector("#league-standings-view")?.remove();
-          const updatedResult = asObject(documentState.tournament.result);
-          if (updatedResult !== undefined) {
-            renderDay2Preparation(
-              updatedResult,
-              day2Content,
-              day2Summary,
-              undefined,
-              asObject(updatedResult.tournament_plan) ?? asObject(updatedResult.same_rank_plan),
-              teamNames,
-              courtNames,
-            );
-          }
-          standingsStatusOwner = "calculation";
-          standingsStatus.textContent =
-            "得点を変更したため、確定順位を取り消しました。2日目は順位枠の仮トーナメントへ戻しました。";
-          day2Summary.textContent =
-            "得点が変更されました。仮トーナメントと仮日程を保持し、確定チーム名だけを外しました。";
-        }
+      return {
+        matchId,
+        displayNumber: schedulePresentation.displayNumberByMatchId.get(matchId) ?? matchId,
+        timeLabel: scheduledRow?.timeLabel ?? "未配置",
+        courtName: scheduledRow?.courtName ?? "未配置",
+        ready: home !== undefined && away !== undefined,
+        homeName,
+        awayName,
+        penaltySupported: false,
+        ...(typeof current?.home_score === "number" && typeof current.away_score === "number"
+          ? { savedResult: { regularHome: current.home_score, regularAway: current.away_score } }
+          : {}),
       };
-      homeScore.addEventListener("input", save);
-      awayScore.addEventListener("input", save);
-      resultBody.append(row);
-    }
-    resultTable.append(resultBody);
-    const resultWrapper = window.document.createElement("div");
-    resultWrapper.className = "table-wrap";
-    resultWrapper.append(resultTable);
-    content.append(resultWrapper);
+    });
+    const resultPresentation = currentResultInputPresentation(content);
+    const resultSection = renderSharedResultInput({
+      content,
+      sectionId: "league-results-input",
+      heading: "リーグ結果入力",
+      description: `入力済み ${enteredCount} / ${leagueMatches.length}試合。入力途中の得点もこの端末へ保存します。`,
+      ariaLabel: "1日目の試合結果入力",
+      rows: resultRows,
+      rule: "league",
+      presentation: resultPresentation,
+      host: {
+        drafts: leagueResultDrafts,
+        persistDrafts: () => persistResultDrafts("day1-league", leagueResultDrafts, standingsStatus),
+        commitResult: async (row, value, draftState) => {
+          const match = matchesById.get(row.matchId);
+          if (match === undefined) throw new Error("対象の試合が見つかりません。");
+          const currentResult = resultsByMatch.get(row.matchId);
+          const changed = currentResult?.home_score !== value.regularHome ||
+            currentResult.away_score !== value.regularAway;
+          const nextResults = leagueResults().filter((item) => item.match_id !== row.matchId);
+          nextResults.push({
+            match_id: row.matchId,
+            home_score: value.regularHome,
+            away_score: value.regularAway,
+          });
+          const update = changed ? withLeagueResults(nextResults) : {
+            document: documentState,
+            invalidated: false,
+          };
+          if (update === undefined) throw new Error("1日目の結果を保存できません。");
+          autosave.cancel();
+          await storage.commitResultDrafts(
+            "day1-league",
+            update.document,
+            draftState,
+            changed ? ["placement-tournament", "same-rank-league"] : [],
+          );
+          documentState = update.document;
+          if (changed) {
+            tournamentResultDrafts.reset();
+            sameRankResultDrafts.reset();
+          }
+          return {
+            announcement: update.invalidated
+              ? "結果を保存し、確定順位と影響する2日目の結果を取り消しました。"
+              : "1日目の試合結果をこの端末へ保存しました。",
+          };
+        },
+        setSaveStatus: (message) => { saveState.textContent = message; },
+        announce: (message) => {
+          standingsStatusOwner = "calculation";
+          standingsStatus.textContent = message;
+        },
+        refreshCompletion: () => refreshLeagueResultsProgress(leagueMatches.length),
+        rerender: renderResultPreservingResultInputFocus,
+      },
+    });
+    resultSection.querySelector("h3")!.id = "league-results-heading";
+    observeResultInputRoot(content, resultPresentation);
     refreshLeagueResultsProgress(leagueMatches.length);
     setupStandingsTurnstile();
     content.append(standingsConfirmation);
@@ -2316,6 +2362,7 @@ function renderSameRankResultsInput(
   plan: JsonObject,
   teamNames: ReadonlyMap<string, string>,
 ): void {
+  activateSameRankResultDraftPlan(plan);
   const presentation = buildWebSchedulePresentation("day2", schedule);
   const order = new Map(presentation.timeRows.map((row, index) => [row.matchId, index]));
   const savedById = new Map(
@@ -2328,23 +2375,7 @@ function renderSameRankResultsInput(
       (order.get(String(left.id)) ?? Number.MAX_SAFE_INTEGER) -
       (order.get(String(right.id)) ?? Number.MAX_SAFE_INTEGER),
   );
-  const section = window.document.createElement("section");
-  section.id = "same-rank-results-input";
-  appendTextElement(section, "h3", "同順位リーグ結果入力");
-  appendTextElement(section, "p", "引き分けを認めます。PK戦は入力しません。", "muted");
-  const wrapper = window.document.createElement("div");
-  wrapper.className = "table-wrap";
-  const table = window.document.createElement("table");
-  table.setAttribute("aria-label", "同順位リーグの試合結果入力");
-  const head = window.document.createElement("thead");
-  const heading = window.document.createElement("tr");
-  for (const label of ["試合", "時間", "コート", "対戦", "得点", "保存状態"]) {
-    appendTextElement(heading, "th", label);
-  }
-  head.append(heading);
-  table.append(head);
-  const body = window.document.createElement("tbody");
-  for (const match of matches) {
+  const resultRows: ResultInputRowModel[] = matches.map((match) => {
     const matchId = String(match.id);
     const homeTeam = asObject(match.home_team);
     const awayTeam = asObject(match.away_team);
@@ -2354,60 +2385,83 @@ function renderSameRankResultsInput(
     const awayName = teamNames.get(awayId) ?? awayId;
     const saved = savedById.get(matchId);
     const presentationRow = presentation.timeRows.find((item) => item.matchId === matchId);
-    const row = window.document.createElement("tr");
-    row.dataset.matchId = matchId;
-    const number = window.document.createElement("td");
-    appendMatchDisplayNumber(number, matchId, presentation.displayNumberByMatchId.get(matchId) ?? matchId);
-    row.append(number);
-    appendTextElement(row, "td", presentationRow?.timeLabel ?? "未配置");
-    appendTextElement(row, "td", presentationRow?.courtName ?? "未配置");
-    appendTextElement(row, "td", `${homeName} 対 ${awayName}`);
-    const homeScore = tournamentScoreInput(
-      `${homeName}の得点`,
-      saved === undefined ? "" : String(saved.regular_score_home),
-      false,
-    );
-    const awayScore = tournamentScoreInput(
-      `${awayName}の得点`,
-      saved === undefined ? "" : String(saved.regular_score_away),
-      false,
-    );
-    const scoreCell = window.document.createElement("td");
-    scoreCell.append(homeScore, window.document.createTextNode(" - "), awayScore);
-    row.append(scoreCell);
-    const state = appendTextElement(row, "td", saved === undefined ? "未入力" : "保存済み", "muted");
-    const save = (): void => {
-      const home = scoreValue(homeScore);
-      const away = scoreValue(awayScore);
-      if (home === undefined || away === undefined) {
-        state.textContent = "0以上の整数で入力してください";
-        state.className = "field-error";
-        return;
-      }
-      const next = sameRankResults().filter((result) => result.match_id !== matchId);
-      if (home !== null && away !== null) {
-        next.push({
-          match_id: matchId,
+    return {
+      matchId,
+      displayNumber: presentation.displayNumberByMatchId.get(matchId) ?? matchId,
+      timeLabel: presentationRow?.timeLabel ?? "未配置",
+      courtName: presentationRow?.courtName ?? "未配置",
+      ready: true,
+      homeName,
+      awayName,
+      penaltySupported: false,
+      ...(typeof saved?.regular_score_home === "number" &&
+      typeof saved.regular_score_away === "number"
+        ? {
+            savedResult: {
+              regularHome: saved.regular_score_home,
+              regularAway: saved.regular_score_away,
+            },
+          }
+        : {}),
+    };
+  });
+  const matchById = new Map(matches.map((match) => [String(match.id), match]));
+  const resultPresentation = currentResultInputPresentation(content);
+  renderSharedResultInput({
+    content,
+    sectionId: "same-rank-results-input",
+    heading: "同順位リーグ結果入力",
+    description: "引き分けを認めます。PK戦は入力しません。入力途中の得点もこの端末へ保存します。",
+    ariaLabel: "同順位リーグの試合結果入力",
+    rows: resultRows,
+    rule: "league",
+    presentation: resultPresentation,
+    host: {
+      drafts: sameRankResultDrafts,
+      persistDrafts: () => persistResultDrafts(
+        "same-rank-league",
+        sameRankResultDrafts,
+        tournamentResultsStatus,
+      ),
+      commitResult: async (row, value, draftState) => {
+        const match = matchById.get(row.matchId);
+        const homeTeam = asObject(match?.home_team);
+        const awayTeam = asObject(match?.away_team);
+        const homeId = String(homeTeam?.team_id ?? "");
+        const awayId = String(awayTeam?.team_id ?? "");
+        if (match === undefined || homeId.length === 0 || awayId.length === 0) {
+          throw new Error("対象の試合が見つかりません。");
+        }
+        const current = savedById.get(row.matchId);
+        const changed = current?.regular_score_home !== value.regularHome ||
+          current?.regular_score_away !== value.regularAway;
+        const hadStandings = asObject(documentState.tournament.result?.same_rank_standings) !== undefined;
+        const nextResults = sameRankResults().filter((item) => item.match_id !== row.matchId);
+        nextResults.push({
+          match_id: row.matchId,
           home_team_id: homeId,
           away_team_id: awayId,
-          regular_score_home: home,
-          regular_score_away: away,
+          regular_score_home: value.regularHome,
+          regular_score_away: value.regularAway,
         });
-      }
-      saveSameRankResults(next);
-      tournamentResultsStatus.textContent = home === null || away === null
-        ? "同順位リーグの試合結果を取り消しました。"
-        : "同順位リーグの試合結果をこの端末へ保存しました。";
-      renderResult();
-    };
-    homeScore.addEventListener("change", save);
-    awayScore.addEventListener("change", save);
-    body.append(row);
-  }
-  table.append(body);
-  wrapper.append(table);
-  section.append(wrapper);
-  content.append(section);
+        const nextDocument = changed ? withSameRankResults(nextResults) : documentState;
+        if (nextDocument === undefined) throw new Error("同順位リーグの結果を保存できません。");
+        autosave.cancel();
+        await storage.commitResultDrafts("same-rank-league", nextDocument, draftState);
+        documentState = nextDocument;
+        return {
+          announcement: changed && hadStandings
+            ? "結果を保存し、以前の総合最終順位を取り消しました。"
+            : "同順位リーグの試合結果をこの端末へ保存しました。",
+        };
+      },
+      setSaveStatus: (message) => { saveState.textContent = message; },
+      announce: (message) => { tournamentResultsStatus.textContent = message; },
+      refreshCompletion: refreshTournamentResultsEnabled,
+      rerender: renderResultPreservingResultInputFocus,
+    },
+  });
+  observeResultInputRoot(content, resultPresentation);
   tournamentResultsConfirmation.hidden = false;
   setupTournamentResultsTurnstile();
   refreshTournamentResultsEnabled();
@@ -2494,28 +2548,6 @@ function renderSameRankSchedule(
   section.append(routes);
   content.append(section);
   if (!provisional) renderSameRankResultsInput(content, schedule, plan, teamNames);
-}
-
-function tournamentScoreInput(
-  label: string,
-  value: string,
-  disabled: boolean,
-): HTMLInputElement {
-  const input = window.document.createElement("input");
-  input.type = "text";
-  input.inputMode = "numeric";
-  input.pattern = "[0-9]*";
-  input.className = "score-input";
-  input.setAttribute("aria-label", label);
-  input.value = value;
-  input.disabled = disabled;
-  return input;
-}
-
-function scoreValue(input: HTMLInputElement): number | null | undefined {
-  if (input.value.trim() === "") return null;
-  const value = Number(input.value);
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function renderFinalStandings(
@@ -2606,10 +2638,61 @@ function renderFinalStandings(
 }
 
 function renderResultPreservingScoreFocus(snapshot: ScoreFocusSnapshot): void {
+  const retry = (): void => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLInputElement && active.dataset.scoreField !== undefined)) {
+      restoreTournamentScoreFocus(snapshot);
+    }
+  };
   window.setTimeout(() => {
     renderResult();
     restoreTournamentScoreFocus(snapshot);
+    window.requestAnimationFrame(retry);
+    window.setTimeout(retry, 50);
   }, 0);
+}
+
+function renderResultPreservingResultInputFocus(snapshot: ResultInputFocusSnapshot): void {
+  const retry = (): void => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLInputElement && active.dataset.scoreField !== undefined)) {
+      restoreResultInputFocus(snapshot);
+    }
+  };
+  window.setTimeout(() => {
+    renderResult();
+    restoreResultInputFocus(snapshot);
+    window.requestAnimationFrame(retry);
+    window.setTimeout(retry, 50);
+  }, 0);
+}
+
+function currentResultInputPresentation(root: HTMLElement): ResultInputPresentation {
+  const width = root.getBoundingClientRect().width || root.clientWidth || window.innerWidth;
+  return resultInputPresentationForWidth(width);
+}
+
+function observeResultInputRoot(
+  root: HTMLElement,
+  presentation: ResultInputPresentation,
+): void {
+  observeResultInputPresentation(root, presentation, () => {
+    const active = document.activeElement;
+    const snapshot = active instanceof HTMLInputElement
+      ? {
+          matchId: active.closest<HTMLElement>("[data-match-id]")?.dataset.matchId,
+          scoreField: active.dataset.scoreField,
+          selectionStart: active.selectionStart,
+          selectionEnd: active.selectionEnd,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }
+      : undefined;
+    window.setTimeout(() => {
+      renderResult();
+      if (snapshot !== undefined) restoreResultInputFocus(snapshot);
+    }, 0);
+  });
 }
 
 function renderTournamentResultsInput(
@@ -2620,6 +2703,7 @@ function renderTournamentResultsInput(
 ): void {
   activateTournamentResultDraftPlan(plan);
   const presentation = buildWebSchedulePresentation("day2", schedule);
+  const resultPresentation = currentResultInputPresentation(content);
   renderSharedTournamentResultsInput({
     content,
     plan,
@@ -2632,9 +2716,10 @@ function renderTournamentResultsInput(
       courtName: row.courtName,
     })),
     teamNames,
-    layout: productionCurrentTournamentResultsLayout,
+    layout: responsiveTournamentResultsLayout(resultPresentation),
     host: {
       drafts: tournamentResultDrafts,
+      currentResults: tournamentResults,
       persistDrafts: persistTournamentResultDrafts,
       commitResults: async (results, draftState) => {
         const nextDocument = withTournamentResults(results);
@@ -2655,6 +2740,7 @@ function renderTournamentResultsInput(
       rerender: renderResultPreservingScoreFocus,
     },
   });
+  observeResultInputRoot(content, resultPresentation);
 
   tournamentResultsConfirmation.hidden = false;
   setupTournamentResultsTurnstile();
@@ -2805,7 +2891,7 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
     const matchId = typeof issue.match_id === "string" ? issue.match_id : undefined;
     const inputIndex = inputIndexByField.get(String(issue.score_field));
     if (matchId === undefined || inputIndex === undefined) continue;
-    const row = [...resultsSection.querySelectorAll<HTMLTableRowElement>("tr[data-match-id]")]
+    const row = [...resultsSection.querySelectorAll<HTMLElement>(".result-input-entry[data-match-id]")]
       .find((candidate) => candidate.dataset.matchId === matchId);
     const input = row?.querySelectorAll<HTMLInputElement>("input.score-input").item(inputIndex);
     const errorArea = row?.querySelector<HTMLElement>(".tournament-result-error");
@@ -2819,7 +2905,11 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
     errorArea.textContent = typeof issue.message === "string"
       ? issue.message
       : "得点は0以上の整数で入力してください。";
-    if (stateLabel !== undefined && stateLabel !== null) stateLabel.textContent = "要確認";
+    if (stateLabel !== undefined && stateLabel !== null) {
+      stateLabel.dataset.state = "invalid";
+      stateLabel.textContent = "要確認";
+      stateLabel.removeAttribute("aria-label");
+    }
     input.setAttribute("aria-invalid", "true");
     input.setAttribute("aria-describedby", errorArea.id);
     firstInvalidInput ??= input;
@@ -3251,7 +3341,7 @@ function updateDraft(invalidateResult = false): void {
       },
     };
   }
-  if (invalidateResult) clearTournamentResultDrafts();
+  if (invalidateResult) clearAllResultDrafts();
   requiredElement<HTMLElement>("#team-count").textContent = `${lines(teamsInput.value).length} / 32チーム`;
   requiredElement<HTMLElement>("#court-count").textContent = `${lines(courtsInput.value).length} / 16コート`;
   updateReview();
@@ -3561,7 +3651,7 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       }
       autosave.cancel();
       documentState = mode.document;
-      clearTournamentResultDrafts();
+      clearAllResultDrafts();
       legacyCompatibility = mode.legacyCompatibility;
       organizerCapacityTouched = inferOrganizerCapacityTouched();
       currentStep = restoredWizardStep(documentState);
@@ -3594,7 +3684,7 @@ requiredElement<HTMLButtonElement>("#convert-legacy-copy").addEventListener("cli
   ) return;
   autosave.cancel();
   documentState = convertLegacyToEditableDocument(documentState);
-  clearTournamentResultDrafts();
+  clearAllResultDrafts();
   legacyCompatibility = false;
   organizerCapacityTouched = inferOrganizerCapacityTouched();
   currentStep = 1;
@@ -3619,7 +3709,7 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
     }
     const mode = normalizeDocument(previous);
     documentState = mode.document;
-    clearTournamentResultDrafts();
+    clearAllResultDrafts();
     legacyCompatibility = mode.legacyCompatibility;
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
@@ -3639,7 +3729,7 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
   autosave.cancel();
   void storage.deleteCurrent().then(() => {
     documentState = createTournamentDocument();
-    clearTournamentResultDrafts();
+    clearAllResultDrafts();
     legacyCompatibility = false;
     organizerCapacityTouched = false;
     currentStep = 1;
@@ -3839,7 +3929,7 @@ generateButton.addEventListener("click", () => {
       autosave.cancel();
       return storage.confirm(validatedDocument).then(() => {
         documentState = validatedDocument;
-        clearTournamentResultDrafts();
+        clearAllResultDrafts();
         generationStatus.textContent =
           "1日目と2日目の日程を生成し、独立検証に合格した結果をこの端末へ保存しました。";
         currentStep = 3;
@@ -4207,7 +4297,7 @@ void storage
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
     try {
-      await restoreTournamentResultDrafts();
+      await restoreAllResultDrafts();
     } catch {
       tournamentResultDrafts.reset();
       backupStatus.textContent =
