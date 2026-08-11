@@ -268,14 +268,18 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator("#day2-schedule-view .legacy-schedule-warning")).toHaveCount(0);
 });
 
-test("現行日程は内部の決勝配置値を隠し、利用者向けの注意だけを印刷にも載せる", async ({ page }) => {
+test("最適性未証明の診断は利用者画面と印刷に表示しない", async ({ page }) => {
   const fixture = structuredClone(scheduleViewTournamentFixture());
   const result = fixture.tournament.result as Record<string, unknown>;
   const schedule = result.day2_schedule as Record<string, unknown>;
+  const diagnosticMessage =
+    "実行可能な2日目日程は見つかりましたが、下位の改善目標をすべて証明できませんでした。";
   schedule.diagnostics = [{
     code: "OPTIMALITY_NOT_PROVEN",
-    message: "コート数と主催者審判能力の範囲では、第2順位帯の決勝は第4セクションが最も遅い配置です。",
-    details: { reason_codes: ["court_capacity"] },
+    message: diagnosticMessage,
+    details: {
+      unproven_objectives: ["maximum_team_wait_sections", "court_usage_difference"],
+    },
   }];
 
   await mockExternalServices(page);
@@ -284,11 +288,11 @@ test("現行日程は内部の決勝配置値を隠し、利用者向けの注�
 
   const day2View = page.locator("#day2-schedule-view");
   await expect(day2View).not.toContainText("決勝配置：");
-  await expect(day2View).toContainText("第2順位帯の決勝は第4セクションが最も遅い配置");
+  await expect(day2View).not.toContainText(diagnosticMessage);
   await expect(day2View.locator(".legacy-schedule-warning")).toHaveCount(0);
 
   await page.emulateMedia({ media: "print" });
-  await expect(day2View.getByText(/第2順位帯の決勝は第4セクションが最も遅い配置/)).toBeVisible();
+  await expect(day2View).not.toContainText(diagnosticMessage);
 });
 
 test("決勝が最終でない新しいAPI応答を保存しない", async ({ page }) => {

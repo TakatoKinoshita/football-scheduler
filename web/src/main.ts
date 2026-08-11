@@ -2112,16 +2112,8 @@ function renderDay2Schedule(
       "notice",
     );
   }
-  for (const diagnostic of asObjectArray(schedule.diagnostics)) {
-    if (diagnostic.code === "OPTIMALITY_NOT_PROVEN") {
-      appendTextElement(
-        section,
-        "p",
-        String(diagnostic.message ?? "決勝配置を含む最適化の一部は未証明です。"),
-        "notice",
-      );
-    }
-  }
+  // 最適性の証明状況は日程の有効性に影響しない開発者向け監査情報のため、
+  // diagnostics / metrics には保持するが、通常画面や印刷には表示しない。
   const rankedTeams = new Map(
     asObjectArray(standings?.standings)
       .filter(
