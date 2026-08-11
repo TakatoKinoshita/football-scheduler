@@ -11,6 +11,13 @@ import {
   tournamentMatchDescendants,
   type TournamentMatchProgress,
 } from "./tournament-results";
+import {
+  renderIntegratedResultInputTable,
+  renderResultInputCards,
+  type ResultInputEditorView,
+  type ResultInputPresentation,
+  type ResultInputRenderRow,
+} from "./result-input-layout";
 import type { JsonObject } from "./types";
 
 export type TournamentResultsLayoutId =
@@ -56,25 +63,10 @@ export interface TournamentResultsInputHost {
   rerender: (focus: ScoreFocusSnapshot) => void;
 }
 
-export interface TournamentResultEditorView {
-  regularFields: HTMLElement;
-  penaltyFields: HTMLElement;
-  stateLabel: HTMLElement;
-  errorArea: HTMLElement;
-  cancelDraft: HTMLButtonElement;
-  inputs: readonly HTMLInputElement[];
-}
+export type TournamentResultEditorView = ResultInputEditorView;
 
-export interface TournamentResultsRenderRow {
+export interface TournamentResultsRenderRow extends ResultInputRenderRow {
   match: TournamentMatchProgress;
-  matchId: string;
-  displayNumber: string;
-  timeLabel: string;
-  courtName: string;
-  ready: boolean;
-  homeName: string;
-  awayName: string;
-  editor: TournamentResultEditorView;
 }
 
 export interface TournamentResultsLayoutStrategy {
@@ -139,11 +131,11 @@ function scoreValue(input: HTMLInputElement): number | null | undefined {
 
 function stateName(state: TournamentResultEntryState): string {
   switch (state) {
-    case "waiting": return "前提試合待ち";
+    case "waiting": return "待機中";
     case "empty": return "未入力";
     case "editing": return "入力中";
     case "invalid": return "要確認";
-    case "saved": return "保存済み";
+    case "saved": return "保存済";
   }
 }
 
@@ -159,7 +151,7 @@ function setState(
 export function captureTournamentScoreFocus(): ScoreFocusSnapshot {
   const active = document.activeElement;
   const entry = active instanceof HTMLInputElement
-    ? active.closest<HTMLElement>(".tournament-result-entry[data-match-id]")
+    ? active.closest<HTMLElement>("[data-match-id]")
     : null;
   return {
     matchId: entry?.dataset.matchId,
@@ -191,7 +183,7 @@ export function restoreTournamentScoreFocus(
 ): void {
   if (snapshot.matchId === undefined || snapshot.scoreField === undefined) return;
   const entry = [...root.querySelectorAll<HTMLElement>(
-    ".tournament-result-entry[data-match-id]",
+    "[data-match-id]",
   )]
     .find((candidate) => candidate.dataset.matchId === snapshot.matchId);
   const replacement = entry?.querySelector<HTMLInputElement>(
@@ -281,6 +273,24 @@ export const productionCurrentTournamentResultsLayout: TournamentResultsLayoutSt
   render: productionTableLayout,
 };
 
+export function responsiveTournamentResultsLayout(
+  presentation: ResultInputPresentation,
+): TournamentResultsLayoutStrategy {
+  return {
+    id: "responsive-cards",
+    invalidStateLabel: "要確認",
+    renderWaitingInputs: false,
+    render: (section, rows) => {
+      section.classList.add("result-input-root");
+      if (presentation === "cards") {
+        renderResultInputCards(section, rows, "2日目の試合結果入力");
+      } else {
+        renderIntegratedResultInputTable(section, rows, "2日目の試合結果入力");
+      }
+    },
+  };
+}
+
 function buildEditor(
   match: TournamentMatchProgress,
   ready: boolean,
@@ -291,6 +301,26 @@ function buildEditor(
   const { host, layout, plan, results } = options;
   const matchId = match.matchId;
   const draft = host.drafts.get(matchId);
+  if (!ready && !layout.renderWaitingInputs) {
+    const stateLabel = document.createElement("span");
+    stateLabel.className = "tournament-result-state-label";
+    setState(stateLabel, "waiting", layout.invalidStateLabel);
+    stateLabel.setAttribute("aria-label", "前提試合待ち");
+    const errorArea = document.createElement("span");
+    errorArea.className = "tournament-result-error";
+    const cancelDraft = document.createElement("button");
+    cancelDraft.type = "button";
+    cancelDraft.className = "text-button tournament-result-cancel";
+    cancelDraft.hidden = true;
+    return {
+      regularFields: document.createElement("span"),
+      penaltyFields: document.createElement("span"),
+      stateLabel,
+      errorArea,
+      cancelDraft,
+      inputs: [],
+    };
+  }
   const regularHome = scoreInput(
     `${homeName} 対 ${awayName}・${homeName}の通常得点`,
     draft?.regularHome ??

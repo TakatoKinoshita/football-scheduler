@@ -4,6 +4,10 @@ import {
   type TournamentResultsLayoutStrategy,
   type TournamentResultsRenderRow,
 } from "./tournament-results-input";
+import {
+  renderIntegratedResultInputTable,
+  renderResultInputCards,
+} from "./result-input-layout";
 
 export const TOURNAMENT_RESULTS_CARD_BREAKPOINT_DEFAULT = 899;
 
@@ -231,19 +235,6 @@ function integratedStatusTableLayout(
   }
 }
 
-function quietIntegratedStatusTableLayout(
-  section: HTMLElement,
-  rows: readonly TournamentResultsRenderRow[],
-): void {
-  integratedStatusTableLayout(section, rows);
-  section.dataset.resultsPreviewLayout = "responsive-cards-quiet-table";
-  for (const state of section.querySelectorAll<HTMLElement>(
-    ".tournament-result-state-label",
-  )) {
-    state.classList.add("results-preview-state-label--visually-hidden");
-  }
-}
-
 function appendCardMetadata(
   article: HTMLElement,
   row: TournamentResultsRenderRow,
@@ -316,6 +307,44 @@ function cardsLayout(
   section.append(list);
 }
 
+function applySharedLayoutPreviewAliases(section: HTMLElement): void {
+  section.querySelector(".result-input-table-wrap")?.classList.add("results-preview-table-wrap");
+  section.querySelector(".result-input-table")?.classList.add(
+    "results-preview-table",
+    "results-preview-table--integrated",
+  );
+  for (const entry of section.querySelectorAll<HTMLElement>(".result-input-entry")) {
+    entry.classList.add("tournament-result-entry", "results-preview-entry");
+  }
+  for (const card of section.querySelectorAll<HTMLElement>(".result-input-card")) {
+    card.classList.add("results-preview-card");
+  }
+  section.querySelector(".result-input-card-list")?.classList.add("results-preview-card-list");
+  for (const element of section.querySelectorAll<HTMLElement>("[class*='result-input-']")) {
+    for (const className of [...element.classList]) {
+      if (className.startsWith("result-input-")) {
+        element.classList.add(className.replace("result-input-", "results-preview-"));
+      }
+    }
+  }
+}
+
+function sharedIntegratedLayout(
+  section: HTMLElement,
+  rows: readonly TournamentResultsRenderRow[],
+): void {
+  renderIntegratedResultInputTable(section, rows, "2日目の試合結果入力・状態統合表");
+  applySharedLayoutPreviewAliases(section);
+}
+
+function sharedCardsLayout(
+  section: HTMLElement,
+  rows: readonly TournamentResultsRenderRow[],
+): void {
+  renderResultInputCards(section, rows, "2日目の試合結果入力");
+  applySharedLayoutPreviewAliases(section);
+}
+
 export const compactTableTournamentResultsLayout: TournamentResultsLayoutStrategy = {
   id: "compact-table",
   invalidStateLabel: "要確認",
@@ -379,14 +408,19 @@ export function tournamentResultsPreviewLayout(
     ...layout,
     render: useCards
       ? (section, rows) => {
-          cardsLayout(section, rows);
+          sharedCardsLayout(section, rows);
+          section.dataset.responsivePresentation = "cards";
           section.dataset.resultsPreviewLayout = layoutId;
         }
       : (section, rows) => {
           if (layoutId === "responsive-cards-quiet-table") {
-            quietIntegratedStatusTableLayout(section, rows);
+            sharedIntegratedLayout(section, rows);
+            section.dataset.resultsPreviewLayout = "responsive-cards-quiet-table";
+            for (const state of section.querySelectorAll<HTMLElement>(
+              ".tournament-result-state-label",
+            )) state.classList.add("results-preview-state-label--visually-hidden");
           } else {
-            integratedStatusTableLayout(section, rows);
+            sharedIntegratedLayout(section, rows);
             section.dataset.resultsPreviewLayout = layoutId;
           }
           section.dataset.responsivePresentation = "table";

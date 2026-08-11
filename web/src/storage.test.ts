@@ -135,6 +135,48 @@ describe("ブラウザ内保存", () => {
     expect(await storage.loadTournamentResultDrafts("plan-two")).toBeUndefined();
   });
 
+  it("3形式のdraft keyを相互に干渉せず保存する", async () => {
+    const day1 = resultDraftState("day1-plan");
+    const tournament = resultDraftState("tournament-plan");
+    const sameRank = resultDraftState("same-rank-plan");
+    await storage.saveResultDrafts("day1-league", day1);
+    await storage.saveResultDrafts("placement-tournament", tournament);
+    await storage.saveResultDrafts("same-rank-league", sameRank);
+
+    expect(await storage.loadResultDrafts("day1-league", "day1-plan"))
+      .toEqual(day1.drafts);
+    expect(await storage.loadTournamentResultDrafts("tournament-plan"))
+      .toEqual(tournament.drafts);
+    expect(await storage.loadResultDrafts("same-rank-league", "same-rank-plan"))
+      .toEqual(sameRank.drafts);
+
+    await storage.clearResultDrafts("day1-league");
+    expect(await storage.loadResultDrafts("day1-league", "day1-plan")).toBeUndefined();
+    expect(await storage.loadTournamentResultDrafts("tournament-plan"))
+      .toEqual(tournament.drafts);
+  });
+
+  it("正式結果と対象draftをatomicに保存し、指定した後続scopeだけを消す", async () => {
+    await storage.saveResultDrafts("day1-league", resultDraftState("day1-plan"));
+    await storage.saveResultDrafts("placement-tournament", resultDraftState("tournament-plan"));
+    await storage.saveResultDrafts("same-rank-league", resultDraftState("same-rank-plan"));
+    const document = createTournamentDocument();
+    document.tournament.name = "結果更新後";
+
+    await storage.commitResultDrafts(
+      "day1-league",
+      document,
+      undefined,
+      ["placement-tournament", "same-rank-league"],
+    );
+
+    expect((await storage.loadLatest())?.tournament.name).toBe("結果更新後");
+    expect(await storage.loadResultDrafts("day1-league", "day1-plan")).toBeUndefined();
+    expect(await storage.loadTournamentResultDrafts("tournament-plan")).toBeUndefined();
+    expect(await storage.loadResultDrafts("same-rank-league", "same-rank-plan"))
+      .toBeUndefined();
+  });
+
   it("正式結果と入力途中状態を同じtransactionで更新する", async () => {
     const before = createTournamentDocument();
     before.tournament.name = "更新前";

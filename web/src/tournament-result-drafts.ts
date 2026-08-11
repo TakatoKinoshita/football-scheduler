@@ -1,20 +1,20 @@
 import type { JsonObject } from "./types";
 
-export interface TournamentResultDraft {
+export interface ResultDraft {
   regularHome: string;
   regularAway: string;
   penaltyHome: string;
   penaltyAway: string;
 }
 
-export type TournamentResultDrafts = Record<string, TournamentResultDraft>;
+export type ResultDrafts = Record<string, ResultDraft>;
 
-export interface TournamentResultDraftUiState {
+export interface ResultDraftUiState {
   planFingerprint: string;
-  drafts: TournamentResultDrafts;
+  drafts: ResultDrafts;
 }
 
-export type TournamentResultDraftEvaluation =
+export type ResultDraftEvaluation =
   | { status: "inputting"; penaltyRequired: boolean }
   | { status: "invalid"; penaltyRequired: boolean; message: string }
   | {
@@ -32,9 +32,12 @@ function score(value: string): number | null | undefined {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-export function evaluateTournamentResultDraft(
-  draft: TournamentResultDraft,
-): TournamentResultDraftEvaluation {
+export type ResultDraftRule = "league" | "placement-tournament";
+
+export function evaluateResultDraft(
+  draft: ResultDraft,
+  rule: ResultDraftRule,
+): ResultDraftEvaluation {
   const regularHome = score(draft.regularHome);
   const regularAway = score(draft.regularAway);
   if (regularHome === null || regularAway === null) {
@@ -47,7 +50,7 @@ export function evaluateTournamentResultDraft(
       message: "通常得点は0以上の整数で入力してください。",
     };
   }
-  if (regularHome !== regularAway) {
+  if (regularHome !== regularAway || rule === "league") {
     return { status: "ready", penaltyRequired: false, regularHome, regularAway };
   }
   const penaltyHome = score(draft.penaltyHome);
@@ -79,6 +82,10 @@ export function evaluateTournamentResultDraft(
   };
 }
 
+export function evaluateTournamentResultDraft(draft: ResultDraft): ResultDraftEvaluation {
+  return evaluateResultDraft(draft, "placement-tournament");
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -102,15 +109,25 @@ export function tournamentPlanFingerprint(plan: JsonObject): string {
   return `placement-plan-v1:${String(canonical.length)}:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-function cloneDraft(draft: TournamentResultDraft): TournamentResultDraft {
+export function resultInputFingerprint(scope: string, value: unknown): string {
+  const canonical = canonicalJson(value);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= canonical.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${scope}-v1:${String(canonical.length)}:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function cloneDraft(draft: ResultDraft): ResultDraft {
   return { ...draft };
 }
 
-export class TournamentResultDraftController {
+export class ResultDraftController {
   private fingerprint?: string;
-  private readonly drafts = new Map<string, TournamentResultDraft>();
+  private readonly drafts = new Map<string, ResultDraft>();
 
-  activate(planFingerprint: string, restored: TournamentResultDrafts = {}): void {
+  activate(planFingerprint: string, restored: ResultDrafts = {}): void {
     this.fingerprint = planFingerprint;
     this.drafts.clear();
     for (const [matchId, draft] of Object.entries(restored)) {
@@ -127,14 +144,14 @@ export class TournamentResultDraftController {
     return this.fingerprint;
   }
 
-  get(matchId: string): TournamentResultDraft | undefined {
+  get(matchId: string): ResultDraft | undefined {
     const draft = this.drafts.get(matchId);
     return draft === undefined ? undefined : cloneDraft(draft);
   }
 
-  set(matchId: string, draft: TournamentResultDraft): void {
+  set(matchId: string, draft: ResultDraft): void {
     if (this.fingerprint === undefined) {
-      throw new Error("トーナメント計画を設定してから入力途中の結果を保存してください。");
+      throw new Error("結果入力の対象を設定してから入力途中の結果を保存してください。");
     }
     this.drafts.set(matchId, cloneDraft(draft));
   }
@@ -151,7 +168,7 @@ export class TournamentResultDraftController {
     return this.drafts.size > 0;
   }
 
-  snapshot(): TournamentResultDraftUiState | undefined {
+  snapshot(): ResultDraftUiState | undefined {
     if (this.fingerprint === undefined || this.drafts.size === 0) return undefined;
     return {
       planFingerprint: this.fingerprint,
@@ -161,7 +178,7 @@ export class TournamentResultDraftController {
     };
   }
 
-  snapshotWithout(matchIds: Iterable<string>): TournamentResultDraftUiState | undefined {
+  snapshotWithout(matchIds: Iterable<string>): ResultDraftUiState | undefined {
     if (this.fingerprint === undefined) return undefined;
     const omitted = new Set(matchIds);
     const drafts = Object.fromEntries(
@@ -174,3 +191,9 @@ export class TournamentResultDraftController {
       : { planFingerprint: this.fingerprint, drafts };
   }
 }
+
+export type TournamentResultDraft = ResultDraft;
+export type TournamentResultDrafts = ResultDrafts;
+export type TournamentResultDraftUiState = ResultDraftUiState;
+export type TournamentResultDraftEvaluation = ResultDraftEvaluation;
+export { ResultDraftController as TournamentResultDraftController };

@@ -1,5 +1,7 @@
 import { cloneDocument, type TournamentDocument } from "./types";
 import type {
+  ResultDrafts,
+  ResultDraftUiState,
   TournamentResultDrafts,
   TournamentResultDraftUiState,
 } from "./tournament-result-drafts";
@@ -9,6 +11,13 @@ const DATABASE_VERSION = 2;
 const STORE_NAME = "documents";
 const UI_STATE_STORE_NAME = "ui-state";
 const TOURNAMENT_RESULT_DRAFTS_KEY = "tournament-result-drafts";
+const RESULT_DRAFT_KEYS = {
+  "day1-league": "league-result-drafts",
+  "placement-tournament": TOURNAMENT_RESULT_DRAFTS_KEY,
+  "same-rank-league": "same-rank-result-drafts",
+} as const;
+
+export type ResultDraftScope = keyof typeof RESULT_DRAFT_KEYS;
 
 type StorageKey = "draft" | "confirmed" | "previous";
 
@@ -17,8 +26,8 @@ interface StoredDocument {
   document: TournamentDocument;
 }
 
-interface StoredTournamentResultDrafts extends TournamentResultDraftUiState {
-  key: typeof TOURNAMENT_RESULT_DRAFTS_KEY;
+interface StoredResultDrafts extends ResultDraftUiState {
+  key: (typeof RESULT_DRAFT_KEYS)[ResultDraftScope];
 }
 
 export class StorageUpgradeBlockedError extends Error {
@@ -114,7 +123,7 @@ export class TournamentStorage {
 
   async replaceImported(document: TournamentDocument): Promise<void> {
     await this.confirm(document);
-    await this.clearTournamentResultDrafts();
+    await this.clearAllResultDrafts();
   }
 
   async deleteCurrent(): Promise<void> {
@@ -129,18 +138,20 @@ export class TournamentStorage {
     }
     store.delete("draft");
     store.delete("confirmed");
-    transaction.objectStore(UI_STATE_STORE_NAME).delete(TOURNAMENT_RESULT_DRAFTS_KEY);
+    const uiStateStore = transaction.objectStore(UI_STATE_STORE_NAME);
+    for (const key of Object.values(RESULT_DRAFT_KEYS)) uiStateStore.delete(key);
     await transactionDone(transaction);
   }
 
-  async loadTournamentResultDrafts(
+  async loadResultDrafts(
+    scope: ResultDraftScope,
     planFingerprint: string,
-  ): Promise<TournamentResultDrafts | undefined> {
+  ): Promise<ResultDrafts | undefined> {
     const database = await this.database();
     const transaction = database.transaction(UI_STATE_STORE_NAME, "readonly");
     const value = await requestResult(
-      transaction.objectStore(UI_STATE_STORE_NAME).get(TOURNAMENT_RESULT_DRAFTS_KEY) as
-        IDBRequest<StoredTournamentResultDrafts | undefined>,
+      transaction.objectStore(UI_STATE_STORE_NAME).get(RESULT_DRAFT_KEYS[scope]) as
+        IDBRequest<StoredResultDrafts | undefined>,
     );
     await transactionDone(transaction);
     return value?.planFingerprint === planFingerprint
@@ -148,20 +159,22 @@ export class TournamentStorage {
       : undefined;
   }
 
-  async saveTournamentResultDrafts(state: TournamentResultDraftUiState): Promise<void> {
+  async saveResultDrafts(scope: ResultDraftScope, state: ResultDraftUiState): Promise<void> {
     const database = await this.database();
     const transaction = database.transaction(UI_STATE_STORE_NAME, "readwrite");
     transaction.objectStore(UI_STATE_STORE_NAME).put({
-      key: TOURNAMENT_RESULT_DRAFTS_KEY,
+      key: RESULT_DRAFT_KEYS[scope],
       planFingerprint: state.planFingerprint,
       drafts: structuredClone(state.drafts),
-    } satisfies StoredTournamentResultDrafts);
+    } satisfies StoredResultDrafts);
     await transactionDone(transaction);
   }
 
-  async commitTournamentResults(
+  async commitResultDrafts(
+    scope: ResultDraftScope,
     document: TournamentDocument,
-    draftState: TournamentResultDraftUiState | undefined,
+    draftState: ResultDraftUiState | undefined,
+    clearScopes: readonly ResultDraftScope[] = [],
   ): Promise<void> {
     const database = await this.database();
     const transaction = database.transaction([STORE_NAME, UI_STATE_STORE_NAME], "readwrite");
@@ -171,22 +184,54 @@ export class TournamentStorage {
     } satisfies StoredDocument);
     const uiStateStore = transaction.objectStore(UI_STATE_STORE_NAME);
     if (draftState === undefined) {
-      uiStateStore.delete(TOURNAMENT_RESULT_DRAFTS_KEY);
+      uiStateStore.delete(RESULT_DRAFT_KEYS[scope]);
     } else {
       uiStateStore.put({
-        key: TOURNAMENT_RESULT_DRAFTS_KEY,
+        key: RESULT_DRAFT_KEYS[scope],
         planFingerprint: draftState.planFingerprint,
         drafts: structuredClone(draftState.drafts),
-      } satisfies StoredTournamentResultDrafts);
+      } satisfies StoredResultDrafts);
+    }
+    for (const clearScope of clearScopes) {
+      if (clearScope !== scope) uiStateStore.delete(RESULT_DRAFT_KEYS[clearScope]);
     }
     await transactionDone(transaction);
   }
 
-  async clearTournamentResultDrafts(): Promise<void> {
+  async clearResultDrafts(scope: ResultDraftScope): Promise<void> {
     const database = await this.database();
     const transaction = database.transaction(UI_STATE_STORE_NAME, "readwrite");
-    transaction.objectStore(UI_STATE_STORE_NAME).delete(TOURNAMENT_RESULT_DRAFTS_KEY);
+    transaction.objectStore(UI_STATE_STORE_NAME).delete(RESULT_DRAFT_KEYS[scope]);
     await transactionDone(transaction);
+  }
+
+  async clearAllResultDrafts(): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction(UI_STATE_STORE_NAME, "readwrite");
+    const store = transaction.objectStore(UI_STATE_STORE_NAME);
+    for (const key of Object.values(RESULT_DRAFT_KEYS)) store.delete(key);
+    await transactionDone(transaction);
+  }
+
+  async loadTournamentResultDrafts(
+    planFingerprint: string,
+  ): Promise<TournamentResultDrafts | undefined> {
+    return this.loadResultDrafts("placement-tournament", planFingerprint);
+  }
+
+  async saveTournamentResultDrafts(state: TournamentResultDraftUiState): Promise<void> {
+    await this.saveResultDrafts("placement-tournament", state);
+  }
+
+  async commitTournamentResults(
+    document: TournamentDocument,
+    draftState: TournamentResultDraftUiState | undefined,
+  ): Promise<void> {
+    await this.commitResultDrafts("placement-tournament", document, draftState);
+  }
+
+  async clearTournamentResultDrafts(): Promise<void> {
+    await this.clearResultDrafts("placement-tournament");
   }
 
   async restorePrevious(): Promise<TournamentDocument | undefined> {
