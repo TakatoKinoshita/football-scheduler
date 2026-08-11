@@ -2638,16 +2638,32 @@ function renderFinalStandings(
 }
 
 function renderResultPreservingScoreFocus(snapshot: ScoreFocusSnapshot): void {
+  const retry = (): void => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLInputElement && active.dataset.scoreField !== undefined)) {
+      restoreTournamentScoreFocus(snapshot);
+    }
+  };
   window.setTimeout(() => {
     renderResult();
     restoreTournamentScoreFocus(snapshot);
+    window.requestAnimationFrame(retry);
+    window.setTimeout(retry, 50);
   }, 0);
 }
 
 function renderResultPreservingResultInputFocus(snapshot: ResultInputFocusSnapshot): void {
+  const retry = (): void => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLInputElement && active.dataset.scoreField !== undefined)) {
+      restoreResultInputFocus(snapshot);
+    }
+  };
   window.setTimeout(() => {
     renderResult();
     restoreResultInputFocus(snapshot);
+    window.requestAnimationFrame(retry);
+    window.setTimeout(retry, 50);
   }, 0);
 }
 

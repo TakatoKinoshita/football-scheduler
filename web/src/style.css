@@ -396,8 +396,8 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   body[data-print-scope="bracket"] .tournament-bracket-sheet:last-of-type { break-after: auto; }
   body[data-print-scope="bracket"] .tournament-bracket figcaption { font-size: 14pt; }
   .score-input { min-height: 0; padding: .1rem; border: 0; background: white; }
-  .result-input-card-list { display: table-row-group; }
-  .result-input-card { break-inside: avoid; }
+  .result-input-card-list { display: block; }
+  .result-input-card-list > li, .result-input-card { break-inside: avoid; }
 }
 
 @media (max-width: 420px) {

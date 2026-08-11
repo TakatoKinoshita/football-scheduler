@@ -66,6 +66,7 @@ export interface TournamentResultsInputHost {
 interface TournamentResultCommitQueue {
   tail: Promise<void>;
   latestRequest: number;
+  failed: boolean;
 }
 
 const tournamentResultCommitQueues = new WeakMap<
@@ -76,7 +77,7 @@ const tournamentResultCommitQueues = new WeakMap<
 function commitQueue(controller: TournamentResultDraftController): TournamentResultCommitQueue {
   const current = tournamentResultCommitQueues.get(controller);
   if (current !== undefined) return current;
-  const created = { tail: Promise.resolve(), latestRequest: 0 };
+  const created = { tail: Promise.resolve(), latestRequest: 0, failed: false };
   tournamentResultCommitQueues.set(controller, created);
   return created;
 }
@@ -328,7 +329,7 @@ function buildEditor(
   awayName: string,
   options: RenderTournamentResultsInputOptions,
 ): TournamentResultEditorView {
-  const { host, layout, plan, results } = options;
+  const { host, layout, plan } = options;
   const matchId = match.matchId;
   const draft = host.drafts.get(matchId);
   if (!ready && !layout.renderWaitingInputs) {
@@ -495,13 +496,24 @@ function buildEditor(
   renderDraftState(draft);
   for (const input of inputs) input.addEventListener("input", recordDraft);
 
-  const commitDraft = (): void => {
+  const commitDraft = (event: Event): void => {
     if (!ready) return;
+    const changedInput = event.currentTarget as HTMLInputElement;
+    const capturedFocus = captureTournamentScoreFocus();
+    const focusSnapshot = capturedFocus.matchId === undefined || capturedFocus.scoreField === undefined
+      ? {
+          matchId,
+          scoreField: changedInput.dataset.scoreField,
+          selectionStart: changedInput.selectionStart,
+          selectionEnd: changedInput.selectionEnd,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }
+      : capturedFocus;
     const currentDraft = recordDraft();
     if (match.result !== undefined && host.drafts.get(matchId) === undefined) return;
     const evaluation = evaluateTournamentResultDraft(currentDraft);
     if (evaluation.status !== "ready") return;
-    const focusSnapshot = captureTournamentScoreFocus();
     const queue = commitQueue(host.drafts);
     const request = ++queue.latestRequest;
     host.setSaveStatus("保存しています…");
@@ -537,18 +549,28 @@ function buildEditor(
       const nextDraftState = host.drafts.snapshotWithout(removedDraftIds);
       await host.commitResults(changed.results, nextDraftState);
       host.drafts.deleteMany(removedDraftIds);
-      await host.persistDrafts();
       host.announce(changed.removedDescendantCount > 0
         ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
         : "2日目の試合結果をこの端末へ保存しました。");
     });
-    queue.tail = operation.then(() => undefined, () => undefined);
+    queue.tail = operation.then(() => undefined, () => {
+      queue.failed = true;
+    });
     void operation.then(() => {
       if (request !== queue.latestRequest) return;
-      host.setSaveStatus("この端末に保存済み");
+      if (queue.failed) {
+        host.setSaveStatus("保存できませんでした");
+        host.announce(
+          "試合結果を保存できませんでした。入力途中の変更と以前の結果は保持されています。",
+        );
+      } else {
+        host.setSaveStatus("この端末に保存済み");
+      }
       host.refreshCompletion();
       host.rerender(focusSnapshot);
+      tournamentResultCommitQueues.delete(host.drafts);
     }).catch(() => {
+      queue.failed = true;
       if (request !== queue.latestRequest) return;
       host.setSaveStatus("保存できませんでした");
       host.announce(
@@ -558,6 +580,7 @@ function buildEditor(
       renderDraftState(host.drafts.get(matchId));
       host.refreshCompletion();
       host.rerender(focusSnapshot);
+      tournamentResultCommitQueues.delete(host.drafts);
     });
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);

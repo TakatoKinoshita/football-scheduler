@@ -74,6 +74,7 @@ export interface RenderResultInputOptions {
 interface ResultCommitQueueState {
   tail: Promise<void>;
   pendingCount: number;
+  pendingSignatures: Set<string>;
   failed: boolean;
   focus: ResultInputFocusSnapshot;
 }
@@ -88,18 +89,31 @@ function enqueueResultCommit(
   inputs: readonly HTMLInputElement[],
   host: ResultInputHostAdapter,
 ): void {
+  const signature = JSON.stringify([
+    row.matchId,
+    value.regularHome,
+    value.regularAway,
+    value.penaltyHome ?? null,
+    value.penaltyAway ?? null,
+  ]);
   let queue = resultCommitQueues.get(host.drafts);
   if (queue === undefined) {
     queue = {
       tail: Promise.resolve(),
       pendingCount: 0,
+      pendingSignatures: new Set(),
       failed: false,
       focus,
     };
     resultCommitQueues.set(host.drafts, queue);
   }
   const state = queue;
+  if (state.pendingSignatures.has(signature)) {
+    state.focus = focus;
+    return;
+  }
   state.pendingCount += 1;
+  state.pendingSignatures.add(signature);
   state.focus = focus;
   host.setSaveStatus("保存しています…");
   for (const input of inputs) input.disabled = true;
@@ -125,6 +139,7 @@ function enqueueResultCommit(
 
   state.tail = state.tail.then(run, run).then(() => {
     state.pendingCount -= 1;
+    state.pendingSignatures.delete(signature);
     if (state.pendingCount > 0) return;
     if (state.failed) {
       host.setSaveStatus("保存できませんでした");
@@ -354,8 +369,21 @@ function editorForRow(
   updatePenaltyVisibility();
   renderDraftState(restored);
   for (const input of inputs) input.addEventListener("input", recordDraft);
-  const commitDraft = (): void => {
+  const commitDraft = (event: Event): void => {
+    const changedInput = event.currentTarget as HTMLInputElement;
+    const capturedFocus = captureResultInputFocus();
+    const focus = capturedFocus.matchId === undefined || capturedFocus.scoreField === undefined
+      ? {
+          matchId: row.matchId,
+          scoreField: changedInput.dataset.scoreField,
+          selectionStart: changedInput.selectionStart,
+          selectionEnd: changedInput.selectionEnd,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }
+      : capturedFocus;
     const draft = recordDraft();
+    if (saved !== undefined && host.drafts.get(row.matchId) === undefined) return;
     const evaluation = evaluateResultDraft(draft, rule);
     if (evaluation.status !== "ready") return;
     const value: SavedResultInputValue = {
@@ -366,7 +394,6 @@ function editorForRow(
     };
     const fingerprint = host.drafts.planFingerprint;
     if (fingerprint === undefined) return;
-    const focus = captureResultInputFocus();
     enqueueResultCommit(row, value, fingerprint, focus, inputs, host);
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);

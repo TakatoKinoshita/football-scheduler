@@ -115,6 +115,7 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
         `#same-rank-results-input tr[data-match-id="${matchId}"] .tournament-result-state-label`,
       ),
     ).toHaveAccessibleName("保存済み");
+    await expect(row.locator("input").first()).toBeEnabled();
   }
 
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
@@ -134,7 +135,10 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   await expect(regularHome).toHaveValue("1");
   await expect(page.locator("#same-rank-standings-view")).toBeVisible();
 
+  await expect(regularHome).toBeEnabled();
   await regularHome.fill("2");
+  await regularHome.focus();
+  await expect(regularHome).toBeFocused();
   const scrollBefore = await regularHome.evaluate((input: HTMLInputElement) => {
     window.scrollTo(0, input.getBoundingClientRect().top + window.scrollY - 120);
     input.focus();
@@ -156,20 +160,32 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
 test("同順位リーグ結果入力は狭幅カードと広幅5列表を切り替え、ラベル・Tab順・44pxを保つ", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 899, height: 900 });
+  await page.setViewportSize({ width: 1600, height: 900 });
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, sameRankWebFixture(16));
 
   const section = page.locator("#same-rank-results-input");
+  const content = page.locator("#day2-result-content");
+  for (const width of [375, 768, 899, 900, 1002, 1280]) {
+    await content.evaluate((element, nextWidth) => {
+      element.style.width = `${String(nextWidth)}px`;
+      element.style.padding = "0";
+    }, width);
+    await expect(section).toHaveAttribute(
+      "data-responsive-presentation",
+      width < 900 ? "cards" : "table",
+    );
+  }
+  await content.evaluate((element) => { element.style.width = "899px"; });
   await expect(section).toHaveAttribute("data-responsive-presentation", "cards");
   await expect(section.getByRole("table", { name: "同順位リーグの試合結果入力" }))
     .toHaveCount(0);
   const firstCard = section.locator(".result-input-card").first();
   const inputs = firstCard.locator("input.score-input");
   await expect(inputs).toHaveCount(2);
-  await expect(inputs.nth(0)).toHaveAttribute("aria-label", /通常得点$/);
-  await expect(inputs.nth(1)).toHaveAttribute("aria-label", /通常得点$/);
+  await expect(inputs.nth(0)).toHaveAttribute("aria-label", /の得点$/);
+  await expect(inputs.nth(1)).toHaveAttribute("aria-label", /の得点$/);
   const targetSizes = await inputs.evaluateAll((elements) =>
     elements.map((element) => {
       const rect = element.getBoundingClientRect();
@@ -189,7 +205,7 @@ test("同順位リーグ結果入力は狭幅カードと広幅5列表を切り�
     input.focus();
     input.setSelectionRange(1, 1);
   });
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await content.evaluate((element) => { element.style.width = "1280px"; });
   await expect(section).toHaveAttribute("data-responsive-presentation", "table");
   const table = section.getByRole("table", { name: "同順位リーグの試合結果入力" });
   await expect(table.locator("thead th")).toHaveCount(5);
@@ -421,6 +437,7 @@ test("仮の同順位リーグは1日目順位確定後も対戦ID・配置・�
       (inputs[0] as HTMLInputElement).value = "1";
       (inputs[1] as HTMLInputElement).value = "0";
       inputs[1]!.dispatchEvent(new Event("input", { bubbles: true }));
+      inputs[1]!.dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();

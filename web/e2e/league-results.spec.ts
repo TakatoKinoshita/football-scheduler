@@ -53,12 +53,22 @@ async function openGeneratedLeague(page: import("@playwright/test").Page): Promi
 }
 
 async function enterAllSameRankLeagueResults(page: import("@playwright/test").Page): Promise<void> {
+  const rows = page.getByRole("table", { name: "1日目の試合結果入力" }).locator("tbody tr");
   await page.getByLabel("青空FC 対 みどりSC・青空FCの得点").fill("2");
   await page.getByLabel("青空FC 対 みどりSC・みどりSCの得点").fill("1");
+  await page.getByLabel("青空FC 対 みどりSC・みどりSCの得点").press("Tab");
+  await expect(rows.nth(0).locator(".tournament-result-state-label")).toHaveAccessibleName(
+    "保存済み",
+  );
+  await expect(rows.nth(0).locator("input").first()).toBeEnabled();
   await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・中央キッカーズの得点").fill("0");
   await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・海浜ユナイテッドの得点").fill("0");
   await page.getByLabel("中央キッカーズ 対 海浜ユナイテッド・海浜ユナイテッドの得点")
     .press("Tab");
+  await expect(rows.nth(1).locator(".tournament-result-state-label")).toHaveAccessibleName(
+    "保存済み",
+  );
+  await expect(rows.nth(1).locator("input").first()).toBeEnabled();
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
@@ -96,11 +106,14 @@ async function enterPlacementLeagueResults(
   const rows = page.getByRole("table", { name: "1日目の試合結果入力" }).locator("tbody tr");
   await expect(rows).toHaveCount(4);
   for (let index = 0; index < 4; index += 1) {
-    const inputs = rows.nth(index).locator("input");
+    const row = rows.nth(index);
+    const inputs = row.locator("input");
     await inputs.nth(0).fill("1");
     await inputs.nth(1).fill("0");
+    await inputs.nth(1).press("Tab");
+    await expect(row.locator(".tournament-result-state-label")).toHaveAccessibleName("保存済み");
+    await expect(row.locator("input").first()).toBeEnabled();
   }
-  await rows.nth(3).locator("input").nth(1).press("Tab");
   await expect(page.getByRole("button", { name: "順位を確定する" })).toBeEnabled();
 }
 
@@ -245,6 +258,48 @@ test("1日目の部分入力を正式結果と分けて復元し、change時だ�
   await expect(page.getByLabel(awayLabel)).toHaveValue("7");
 });
 
+test("1日目結果入力は375〜899pxをカード、900px以上を5列表で表示する", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await openGeneratedLeague(page);
+  const content = page.locator("#result-content");
+  const section = page.locator("#league-results-input");
+  for (const width of [375, 768, 899, 900, 1002, 1280]) {
+    await content.evaluate((element, nextWidth) => {
+      element.style.width = `${String(nextWidth)}px`;
+      element.style.padding = "0";
+    }, width);
+    await expect(section).toHaveAttribute(
+      "data-responsive-presentation",
+      width < 900 ? "cards" : "table",
+    );
+    if (width < 900) {
+      await expect(section.getByRole("list", { name: "1日目の試合結果入力" })).toBeVisible();
+      await expect(section.locator("table")).toHaveCount(0);
+    } else {
+      await expect(section.getByRole("table", { name: "1日目の試合結果入力" })).toBeVisible();
+      await expect(section.getByRole("columnheader")).toHaveCount(5);
+    }
+  }
+
+  await content.evaluate((element) => { element.style.width = "375px"; });
+  await expect(section).toHaveAttribute("data-responsive-presentation", "cards");
+  const firstCard = section.locator(".result-input-card").first();
+  const inputs = firstCard.locator("input.score-input");
+  await expect(inputs).toHaveCount(2);
+  await expect(inputs.nth(0)).toHaveAttribute("aria-label", /対.+の得点$/u);
+  await inputs.nth(0).focus();
+  await inputs.nth(0).press("Tab");
+  await expect(inputs.nth(1)).toBeFocused();
+  for (const input of await inputs.all()) {
+    const box = await input.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+});
+
 test("順位確定時に仮トーナメントと仮日程の構造を保ったままチーム名を反映する", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);
@@ -277,7 +332,9 @@ test("順位確定時に仮トーナメントと仮日程の構造を保った�
   await page.locator("#tab-day2").click();
   await expect(page.locator("#tournament-plan-view")).toContainText("【仮】");
   await expect(page.locator("#day2-schedule-view")).toContainText("【仮】2日目の日程・審判");
-  await expect(page.locator("#day2-result-summary")).toContainText("仮トーナメントと仮日程を保持");
+  await expect(page.locator("#day2-result-summary")).toContainText(
+    "仮トーナメントと仮日程を作成済み",
+  );
 });
 
 test("順位API失敗時も得点を保持して結果画面内に説明する", async ({ page }) => {

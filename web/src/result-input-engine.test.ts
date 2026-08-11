@@ -167,6 +167,39 @@ describe("共通結果入力engine", () => {
     content.remove();
   });
 
+  it("同じ試合・同じ得点のchangeが保存中に重なっても正式保存を重複させない", async () => {
+    const controller = new ResultDraftController();
+    controller.activate("league-plan");
+    const adapter = host(controller);
+    let complete!: (value: ResultInputCommitOutcome) => void;
+    adapter.commitResult = vi.fn(() => new Promise<ResultInputCommitOutcome>((resolve) => {
+      complete = resolve;
+    }));
+    const content = document.createElement("div");
+    renderResultInput({
+      content,
+      sectionId: "league-results",
+      heading: "リーグ結果入力",
+      description: "",
+      ariaLabel: "リーグ結果入力",
+      rows: [leagueRow("LG-1", 1)],
+      rule: "league",
+      presentation: "table",
+      host: adapter,
+    });
+
+    enterCompleteResult(content, "LG-1");
+    const away = content.querySelector<HTMLInputElement>(
+      '[data-match-id="LG-1"] input[data-score-field="regularAway"]',
+    )!;
+    inputEvent(away, "change");
+
+    await vi.waitFor(() => expect(adapter.commitResult).toHaveBeenCalledTimes(1));
+    complete({ announcement: "保存しました。" });
+    await vi.waitFor(() => expect(adapter.rerender).toHaveBeenCalledTimes(1));
+    expect(adapter.commitResult).toHaveBeenCalledTimes(1);
+  });
+
   it("先行保存が失敗してもqueueを続け、失敗draftと最後のfocusを保持する", async () => {
     const controller = new ResultDraftController();
     controller.activate("league-plan");

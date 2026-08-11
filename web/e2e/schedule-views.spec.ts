@@ -56,7 +56,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
     "day1-blocks-view",
     "day1-schedule-heading",
     "day1-team-schedules-view",
-    "league-results-heading",
+    "league-results-input",
   ].map((id) => Array.from(document.querySelector("#result-content")!.children)
     .indexOf(document.getElementById(id)!)));
   expect(majorSectionOrder.every((index) => index >= 0)).toBe(true);
@@ -66,7 +66,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
     .getByRole("table", { name: "1日目の試合結果入力" })
     .locator("thead th")
     .allTextContents();
-  expect(leagueResultHeaders).toEqual(["試合", "時間", "コート", "対戦", "得点", "保存状態"]);
+  expect(leagueResultHeaders).toEqual(["試合", "時間", "コート", "対戦", "結果"]);
 
   const toggle = page.locator("#day1-schedule-view-toggle");
   await expect(toggle.getByLabel("時間順")).toBeChecked();
@@ -88,7 +88,7 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await expect(page.locator("#result-content .match-display-number")).toHaveCount(8);
   const scheduledMatch = courtA.locator('tbody tr[data-match-id="LG-A-M1"]');
   const resultMatch = page.locator('table[aria-label="1日目の試合結果入力"] tr[data-match-id="LG-A-M1"]');
-  await expect(resultMatch.locator("td").nth(0)).toHaveText(
+  await expect(resultMatch.locator(".match-display-number")).toHaveText(
     await scheduledMatch.locator("td").nth(0).innerText(),
   );
   await expect(resultMatch.locator("td").nth(1)).toHaveText(
@@ -189,8 +189,14 @@ test("表示切替後もリーグ得点入力を一組だけ保存し、確定�
   await expect(awayScore).toHaveCount(1);
 
   await homeScore.fill("3");
-  await expect(page.locator("#standings-status")).toContainText("確定順位を取り消しました");
-  await expect(page.getByText("確定順位を取り消しました", { exact: false })).toHaveCount(1);
+  await expect(page.locator("#standings-status")).not.toContainText("確定順位を取り消しました");
+  await homeScore.press("Tab");
+  await expect(page.locator("#standings-status")).toContainText(
+    "確定順位と影響する2日目の結果を取り消しました",
+  );
+  await expect(
+    page.getByText("確定順位と影響する2日目の結果を取り消しました", { exact: false }),
+  ).toHaveCount(1);
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
   await expect(homeScore).toHaveValue("3");
   await expect(awayScore).toHaveValue("1");
