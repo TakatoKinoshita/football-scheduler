@@ -69,6 +69,7 @@ import {
   TournamentResultDraftController,
   resultInputFingerprint,
   tournamentPlanFingerprint,
+  type ResultDraftUiState,
 } from "./tournament-result-drafts";
 import {
   responsiveTournamentResultsLayout,
@@ -872,17 +873,11 @@ function activateSameRankResultDraftPlan(plan: JsonObject): string {
 
 function persistResultDrafts(
   scope: "day1-league" | "same-rank-league",
-  controller: ResultDraftController,
-  status: HTMLElement,
-): void {
-  const state = controller.snapshot();
-  const operation = state === undefined
+  state: ResultDraftUiState | undefined,
+): Promise<void> {
+  return state === undefined
     ? storage.clearResultDrafts(scope)
     : storage.saveResultDrafts(scope, state);
-  void operation.catch(() => {
-    status.textContent =
-      "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
-  });
 }
 
 function activateTournamentResultDraftPlan(plan: JsonObject): string {
@@ -894,15 +889,12 @@ function activateTournamentResultDraftPlan(plan: JsonObject): string {
   return fingerprint;
 }
 
-function persistTournamentResultDrafts(): Promise<void> {
-  const state = tournamentResultDrafts.snapshot();
-  const operation = state === undefined
+function persistTournamentResultDrafts(
+  state: ResultDraftUiState | undefined,
+): Promise<void> {
+  return state === undefined
     ? storage.clearTournamentResultDrafts()
     : storage.saveTournamentResultDrafts(state);
-  return operation.catch(() => {
-    tournamentResultsStatus.textContent =
-      "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。";
-  });
 }
 
 function clearTournamentResultDrafts(): void {
@@ -1695,7 +1687,7 @@ function renderResult(): void {
       presentation: resultPresentation,
       host: {
         drafts: leagueResultDrafts,
-        persistDrafts: () => persistResultDrafts("day1-league", leagueResultDrafts, standingsStatus),
+        persistDrafts: (state) => persistResultDrafts("day1-league", state),
         commitResult: async (row, value, draftState) => {
           const match = matchesById.get(row.matchId);
           if (match === undefined) throw new Error("対象の試合が見つかりません。");
@@ -2418,11 +2410,7 @@ function renderSameRankResultsInput(
     presentation: resultPresentation,
     host: {
       drafts: sameRankResultDrafts,
-      persistDrafts: () => persistResultDrafts(
-        "same-rank-league",
-        sameRankResultDrafts,
-        tournamentResultsStatus,
-      ),
+      persistDrafts: (state) => persistResultDrafts("same-rank-league", state),
       commitResult: async (row, value, draftState) => {
         const match = matchById.get(row.matchId);
         const homeTeam = asObject(match?.home_team);

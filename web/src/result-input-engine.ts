@@ -12,6 +12,10 @@ import {
   type ResultInputPresentation,
   type ResultInputRenderRow,
 } from "./result-input-layout";
+import {
+  createResultInputStateControl,
+  type ResultInputEntryState,
+} from "./result-input-state-control";
 
 export interface SavedResultInputValue {
   regularHome: number;
@@ -47,7 +51,7 @@ export interface ResultInputCommitOutcome {
 
 export interface ResultInputHostAdapter {
   drafts: ResultDraftController;
-  persistDrafts: () => void;
+  persistDrafts: (state: ResultDraftUiState | undefined) => Promise<void>;
   commitResult: (
     row: ResultInputRowModel,
     value: SavedResultInputValue,
@@ -186,31 +190,6 @@ function parsedScore(input: HTMLInputElement): number | null | undefined {
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function stateLabel(state: "waiting" | "empty" | "editing" | "invalid" | "saved"): HTMLElement {
-  const label = document.createElement("span");
-  label.className = "tournament-result-state-label";
-  label.dataset.state = state;
-  label.textContent = {
-    waiting: "待機中",
-    empty: "未入力",
-    editing: "入力中",
-    invalid: "要確認",
-    saved: "保存済",
-  }[state];
-  if (state === "waiting") label.setAttribute("aria-label", "前提試合待ち");
-  if (state === "saved") label.setAttribute("aria-label", "保存済み");
-  return label;
-}
-
-function setState(label: HTMLElement, state: "waiting" | "empty" | "editing" | "invalid" | "saved"): void {
-  const replacement = stateLabel(state);
-  label.dataset.state = replacement.dataset.state;
-  label.textContent = replacement.textContent;
-  const accessibleName = replacement.getAttribute("aria-label");
-  if (accessibleName === null) label.removeAttribute("aria-label");
-  else label.setAttribute("aria-label", accessibleName);
-}
-
 export function captureResultInputFocus(): ResultInputFocusSnapshot {
   const active = document.activeElement;
   const entry = active instanceof HTMLInputElement
@@ -245,15 +224,11 @@ export function restoreResultInputFocus(
 }
 
 function emptyEditor(state: "waiting" | "empty"): ResultInputEditorView {
-  const cancelDraft = document.createElement("button");
-  cancelDraft.type = "button";
-  cancelDraft.hidden = true;
   return {
     regularFields: document.createElement("span"),
     penaltyFields: document.createElement("span"),
-    stateLabel: stateLabel(state),
+    stateControl: createResultInputStateControl(state),
     errorArea: document.createElement("span"),
-    cancelDraft,
     inputs: [],
   };
 }
@@ -297,16 +272,13 @@ function editorForRow(
     penaltyInputs.push(penaltyHome, penaltyAway);
   }
   const inputs = [regularHome, regularAway, ...penaltyInputs];
-  const label = stateLabel(restored === undefined ? (saved === undefined ? "empty" : "saved") : "editing");
+  const stateControl = createResultInputStateControl(
+    restored === undefined ? (saved === undefined ? "empty" : "saved") : "editing",
+  );
   const errorArea = document.createElement("span");
   errorArea.className = "tournament-result-error";
   errorArea.id = `result-input-error-${row.matchId}`;
   errorArea.setAttribute("aria-live", "polite");
-  const cancelDraft = document.createElement("button");
-  cancelDraft.type = "button";
-  cancelDraft.className = "text-button tournament-result-cancel";
-  cancelDraft.textContent = "変更を取り消す";
-  cancelDraft.hidden = saved === undefined;
   for (const input of inputs) input.setAttribute("aria-describedby", errorArea.id);
 
   const savedDraft: ResultDraft = {
@@ -336,11 +308,13 @@ function editorForRow(
     for (const input of inputs) input.removeAttribute("aria-invalid");
     errorArea.textContent = "";
     if (draft === undefined) {
-      setState(label, saved === undefined ? "empty" : "saved");
+      stateControl.setState(saved === undefined ? "empty" : "saved");
       return;
     }
     const evaluation = evaluateResultDraft(draft, rule);
-    setState(label, evaluation.status === "invalid" ? "invalid" : "editing");
+    stateControl.setState(
+      (evaluation.status === "invalid" ? "invalid" : "editing") satisfies ResultInputEntryState,
+    );
     if (evaluation.status !== "invalid") return;
     errorArea.textContent = evaluation.message;
     const regularError = evaluation.message.startsWith("通常得点");
@@ -360,7 +334,11 @@ function editorForRow(
       .some((key) => draft[key] !== savedDraft[key]);
     if (changed) host.drafts.set(row.matchId, draft);
     else host.drafts.delete(row.matchId);
-    host.persistDrafts();
+    void host.persistDrafts(host.drafts.snapshot()).catch(() => {
+      host.announce(
+        "入力途中の得点を保存できませんでした。正式に保存済みの結果は保持されています。",
+      );
+    });
     renderDraftState(changed ? draft : undefined);
     host.refreshCompletion();
     return draft;
@@ -397,20 +375,7 @@ function editorForRow(
     enqueueResultCommit(row, value, fingerprint, focus, inputs, host);
   };
   for (const input of inputs) input.addEventListener("change", commitDraft);
-  cancelDraft.addEventListener("click", () => {
-    host.drafts.delete(row.matchId);
-    host.persistDrafts();
-    host.announce("入力途中の変更を取り消し、保存済みの結果へ戻しました。");
-    host.rerender({
-      matchId: row.matchId,
-      scoreField: "regularHome",
-      selectionStart: null,
-      selectionEnd: null,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-    });
-  });
-  return { regularFields, penaltyFields, stateLabel: label, errorArea, cancelDraft, inputs };
+  return { regularFields, penaltyFields, stateControl, errorArea, inputs };
 }
 
 export function renderResultInput(options: RenderResultInputOptions): HTMLElement {

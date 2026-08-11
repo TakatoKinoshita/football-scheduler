@@ -1,11 +1,12 @@
+import type { ResultInputStateControl } from "./result-input-state-control";
+
 export type ResultInputPresentation = "table" | "cards";
 
 export interface ResultInputEditorView {
   regularFields: HTMLElement;
   penaltyFields: HTMLElement;
-  stateLabel: HTMLElement;
+  stateControl: ResultInputStateControl;
   errorArea: HTMLElement;
-  cancelDraft: HTMLButtonElement;
   inputs: readonly HTMLInputElement[];
 }
 
@@ -43,13 +44,11 @@ function appendDisplayNumber(parent: HTMLElement, row: ResultInputRenderRow): vo
 }
 
 function prepareStateLabel(row: ResultInputRenderRow): void {
-  if (row.editor.stateLabel.dataset.state === "saved") {
-    row.editor.stateLabel.textContent = "保存済";
-    row.editor.stateLabel.setAttribute("aria-label", "保存済み");
-  } else if (row.editor.stateLabel.dataset.state === "waiting") {
-    row.editor.stateLabel.textContent = "待機中";
-    row.editor.stateLabel.setAttribute("aria-label", "前提試合待ち");
-  }
+  const stateLabel = row.editor.stateControl.element.querySelector<HTMLElement>(
+    ".tournament-result-state-label",
+  );
+  if (stateLabel?.dataset.state === "saved") stateLabel.setAttribute("aria-label", "保存済み");
+  if (stateLabel?.dataset.state === "waiting") stateLabel.setAttribute("aria-label", "前提試合待ち");
 }
 
 function prepareScoreLine(
@@ -93,7 +92,7 @@ function appendScoreEditor(parent: HTMLElement, row: ResultInputRenderRow): void
 }
 
 function appendFeedback(parent: HTMLElement, row: ResultInputRenderRow): void {
-  parent.append(row.editor.errorArea, row.editor.cancelDraft);
+  parent.append(row.editor.errorArea);
 }
 
 export function renderIntegratedResultInputTable(
@@ -129,8 +128,11 @@ export function renderIntegratedResultInputTable(
     row.className = "result-input-entry";
     const match = document.createElement("td");
     match.dataset.field = "match";
-    appendDisplayNumber(match, item);
-    match.append(item.editor.stateLabel);
+    const summary = document.createElement("div");
+    summary.className = "result-input-match-summary";
+    appendDisplayNumber(summary, item);
+    summary.append(item.editor.stateControl.element);
+    match.append(summary);
     row.append(match);
     const time = appendTextElement(row, "td", item.timeLabel);
     time.dataset.field = "time";
@@ -189,7 +191,7 @@ export function renderResultInputCards(
     const heading = document.createElement("h4");
     heading.dataset.field = "match";
     appendDisplayNumber(heading, item);
-    header.append(heading, item.editor.stateLabel);
+    header.append(heading, item.editor.stateControl.element);
     article.append(header);
     appendCardMetadata(article, item);
     const teams = appendTextElement(

@@ -11,7 +11,7 @@ import { ResultDraftController } from "./tournament-result-drafts";
 function host(controller: ResultDraftController): ResultInputHostAdapter {
   return {
     drafts: controller,
-    persistDrafts: vi.fn(),
+    persistDrafts: vi.fn(async () => undefined),
     commitResult: vi.fn(async () => ({ announcement: "保存しました。" })),
     setSaveStatus: vi.fn(),
     announce: vi.fn(),

@@ -31,8 +31,8 @@ describe("順位決定トーナメント結果入力", () => {
     const host: TournamentResultsInputHost = {
       drafts,
       currentResults: () => currentResults,
-      persistDrafts: () => {
-        persistedDrafts.push(drafts.snapshot());
+      persistDrafts: async (state) => {
+        persistedDrafts.push(state);
       },
       commitResults: vi.fn((results) => new Promise<void>((resolve) => {
         pendingCommits.push({
@@ -101,7 +101,7 @@ describe("順位決定トーナメント結果入力", () => {
     const host: TournamentResultsInputHost = {
       drafts,
       currentResults: () => currentResults,
-      persistDrafts: () => undefined,
+      persistDrafts: async () => undefined,
       commitResults: vi.fn((results) => new Promise<void>((resolve, reject) => {
         settle.push({
           reject: () => reject(new Error("保存失敗")),

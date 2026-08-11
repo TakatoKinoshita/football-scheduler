@@ -173,6 +173,42 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   font-size: .78rem;
   line-height: 1.35;
 }
+.result-input-match-summary,
+.result-input-card > header {
+  min-height: 44px;
+}
+.result-input-match-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .35rem;
+  white-space: nowrap;
+}
+.result-input-state-control { display: inline-flex; flex: 0 0 auto; align-items: center; }
+.result-input-state-trigger {
+  min-width: 44px;
+  min-height: 44px !important;
+  margin: 0 !important;
+  cursor: pointer;
+  background: transparent;
+}
+.result-input-state-trigger-marker { margin-left: .25rem; font-size: .62rem; }
+.result-input-draft-popover {
+  position: fixed;
+  inset: auto;
+  z-index: 1000;
+  max-width: min(22rem, calc(100vw - 1rem));
+  margin: 0;
+  padding: .45rem;
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  background: white;
+  box-shadow: 0 8px 24px rgb(23 79 63 / 18%);
+}
+.result-input-draft-popover:not(:popover-open) { display: none; }
+.result-input-draft-action { min-width: 44px; min-height: 44px; }
+.result-input-state-trigger:focus-visible,
+.result-input-draft-action:focus-visible { outline: 4px solid #efb244; outline-offset: 2px; }
 .result-input-entry .tournament-result-state-label[data-state="saved"] { color: var(--result-input-saved); }
 .result-input-entry .tournament-result-state-label[data-state="editing"] { color: var(--result-input-editing); }
 .result-input-entry .tournament-result-state-label[data-state="invalid"] { color: var(--result-input-invalid); }
