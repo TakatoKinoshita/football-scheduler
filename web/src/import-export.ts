@@ -346,6 +346,28 @@ function validateFinalStageImportInput(input: JsonObject, teams: JsonObject[]): 
   const finalStage = objectValue(input.final_stage, "決勝方式を読み取れませんでした。");
   if (finalStage.format === "placement_tournament") {
     const tournamentCount = nonNegativeInteger(finalStage.tournament_count, "トーナメント数");
+    const tournamentNames = finalStage.tournament_names === undefined
+      ? undefined
+      : (() => {
+          if (!Array.isArray(finalStage.tournament_names) || finalStage.tournament_names.length > 4) {
+            throw new ImportValidationError(
+              "INVALID_DOCUMENT",
+              "トーナメント名の一覧を読み取れませんでした。",
+            );
+          }
+          return finalStage.tournament_names.map((name) => {
+            if (
+              typeof name !== "string" || name.trim() !== name || name.length === 0 ||
+              name.length > 200
+            ) {
+              throw new ImportValidationError(
+                "INVALID_DOCUMENT",
+                "トーナメント名は1文字以上200文字以内で入力してください。",
+              );
+            }
+            return name;
+          });
+        })();
     const allowedBlocks = new Map<string, readonly number[]>([
       ["8:2", [2, 4]],
       ["16:2", [2, 4, 8]],
@@ -356,7 +378,8 @@ function validateFinalStageImportInput(input: JsonObject, teams: JsonObject[]): 
     if (
       allowedBlocks === undefined || !allowedBlocks.includes(blockCount) ||
       teamCount % blockCount !== 0 || (teamCount / blockCount) % tournamentCount !== 0 ||
-      finalStage.uneven_policy !== undefined
+      finalStage.uneven_policy !== undefined ||
+      (tournamentNames !== undefined && tournamentNames.length !== tournamentCount)
     ) {
       throw new ImportValidationError("INVALID_DOCUMENT", "順位決定トーナメントの参加数、トーナメント数、ブロック数が非対応です。");
     }
@@ -370,6 +393,7 @@ function validateFinalStageImportInput(input: JsonObject, teams: JsonObject[]): 
       (policy !== "strict_same_rank" && policy !== "merge_bottom") ||
       (remainder === 0 && policy !== "strict_same_rank") ||
       finalStage.tournament_count !== undefined ||
+      finalStage.tournament_names !== undefined ||
       (remainder > 0 && policy === "merge_bottom" && blockCount + remainder > LIMITS.teams)
     ) {
       throw new ImportValidationError("INVALID_DOCUMENT", "同順位リーグの参加数、ブロック数、端数処理方針が不正です。");
@@ -1977,7 +2001,8 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
     if (result.same_rank_plan !== undefined) {
       validateSameRankState(result, input, teams, blocks, undefined);
     } else if (result.tournament_plan !== undefined) {
-      const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
+      const { oddSplitPolicy, tournamentCount, tournamentNames } =
+        tournamentPlanValidationContext(input);
       const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
       const tournamentPlan = objectValue(
         result.tournament_plan,
@@ -1990,6 +2015,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
         oddSplitPolicy,
         rankSets,
         tournamentCount,
+        tournamentNames,
       );
       validateDay2ScheduleResult(result, input, teams, tournamentPlan, undefined);
       validateTournamentResultsState(result, tournamentPlan);
@@ -2064,7 +2090,8 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
   if (result.same_rank_plan !== undefined) {
     validateSameRankState(result, input, teams, blocks, rows);
   } else if (result.tournament_plan !== undefined) {
-    const { oddSplitPolicy, tournamentCount } = tournamentPlanValidationContext(input);
+    const { oddSplitPolicy, tournamentCount, tournamentNames } =
+      tournamentPlanValidationContext(input);
     const rankSets = tournamentRankSets(blocks, oddSplitPolicy);
     const tournamentPlan = objectValue(
       result.tournament_plan,
@@ -2077,6 +2104,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
       oddSplitPolicy,
       rankSets,
       tournamentCount,
+      tournamentNames,
     );
     validateDay2ScheduleResult(result, input, teams, tournamentPlan, rows);
     validateTournamentResultsState(result, tournamentPlan);
@@ -2098,6 +2126,7 @@ function validateLeagueResult(result: JsonObject, teams: JsonObject[], input: Js
 function tournamentPlanValidationContext(input: JsonObject): {
   oddSplitPolicy: "upper" | "lower" | "alternate";
   tournamentCount?: number;
+  tournamentNames?: string[];
 } {
   if (input.schema_version === SCHEMA_VERSION) {
     const finalStage = objectValue(input.final_stage, "決勝方式を読み取れませんでした。");
@@ -2112,7 +2141,14 @@ function tournamentPlanValidationContext(input: JsonObject): {
         "順位決定トーナメントの設定を読み取れませんでした。",
       );
     }
-    return { oddSplitPolicy: "upper", tournamentCount: finalStage.tournament_count };
+    const tournamentNames = Array.isArray(finalStage.tournament_names)
+      ? finalStage.tournament_names.map((name) => String(name))
+      : undefined;
+    return {
+      oddSplitPolicy: "upper",
+      tournamentCount: finalStage.tournament_count,
+      ...(tournamentNames === undefined ? {} : { tournamentNames }),
+    };
   }
   const leagueSettings = objectValue(input.league, "リーグ設定を読み取れませんでした。");
   return { oddSplitPolicy: validateOddSplitPolicy(leagueSettings.odd_split_policy) };
@@ -2546,6 +2582,7 @@ function validateCurrentTournamentPlan(
   teamIds: Set<string>,
   validLeagueRanks: Set<string>,
   expectedTournamentCount: number | undefined,
+  expectedTournamentNames: readonly string[] | undefined,
 ): void {
   const teamCount = teamIds.size;
   const tournamentCount = expectedTournamentCount ?? 0;
@@ -2561,6 +2598,18 @@ function validateCurrentTournamentPlan(
   const participantCount = tournamentCount > 0 ? teamCount / tournamentCount : 0;
   const blockSize = blockCount > 0 ? teamCount / blockCount : 0;
   const rankBandWidth = tournamentCount > 0 ? blockSize / tournamentCount : 0;
+  let planTournamentNames: string[] | undefined;
+  if (plan.tournament_names !== undefined) {
+    if (
+      !Array.isArray(plan.tournament_names) || plan.tournament_names.length > 4 ||
+      plan.tournament_names.some((name) =>
+        typeof name !== "string" || name.trim() !== name || name.length === 0 || name.length > 200
+      )
+    ) {
+      throw new ImportValidationError("INVALID_DOCUMENT", "トーナメント名が不正です。");
+    }
+    planTournamentNames = plan.tournament_names as string[];
+  }
   if (
     plan.format !== "placement_tournament"
     || plan.tournament_count !== expectedTournamentCount
@@ -2572,6 +2621,11 @@ function validateCurrentTournamentPlan(
     || !Number.isInteger(participantCount)
     || !Number.isInteger(blockSize)
     || !Number.isInteger(rankBandWidth)
+    || (planTournamentNames !== undefined && planTournamentNames.length !== tournamentCount)
+    || (expectedTournamentNames !== undefined && planTournamentNames !== undefined && (
+      expectedTournamentNames.length !== tournamentCount ||
+      planTournamentNames.some((name, index) => name !== expectedTournamentNames[index])
+    ))
   ) {
     throw new ImportValidationError("INVALID_DOCUMENT", "順位決定トーナメントの構成が不正です。");
   }
@@ -2613,6 +2667,10 @@ function validateCurrentTournamentPlan(
       || poolInfo.poolIndex !== index + 1
       || typeof pool.display_name !== "string"
       || pool.display_name.length === 0
+      || (planTournamentNames !== undefined &&
+        pool.display_name !== planTournamentNames[index])
+      || (expectedTournamentNames !== undefined && planTournamentNames !== undefined &&
+        pool.display_name !== expectedTournamentNames[index])
       || pool.byes !== undefined
     ) {
       throw new ImportValidationError("INVALID_DOCUMENT", "順位帯の識別情報が不正です。");
@@ -2803,6 +2861,7 @@ function validateTournamentPlan(
   expectedPolicy: "upper" | "lower" | "alternate",
   rankSets: TournamentRankSets,
   expectedTournamentCount?: number,
+  expectedTournamentNames?: readonly string[],
 ): void {
   const currentPlan = plan.schema_version === SCHEMA_VERSION;
   if (currentPlan) {
@@ -2819,6 +2878,7 @@ function validateTournamentPlan(
       teamIds,
       rankSets.all,
       expectedTournamentCount,
+      expectedTournamentNames,
     );
     return;
   }

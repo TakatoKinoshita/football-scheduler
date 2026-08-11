@@ -99,6 +99,13 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
 
   await expect(page.locator("#same-rank-plan-view .same-rank-group-card")).toHaveCount(4);
   await expect(page.locator("#same-rank-plan-view .notice")).toHaveCount(0);
+  expect(await page.locator(
+    '#day2-schedule-view [data-schedule-view="court"] thead',
+  ).allTextContents()).toEqual(["試合時間対戦審判", "試合時間対戦審判"]);
+  const teamScheduleCards = page.locator("#day2-team-schedules-view .team-card");
+  await expect(teamScheduleCards).toHaveCount(16);
+  await expect(teamScheduleCards.first().locator("h5")).toHaveText("チーム1（Aブロック 1位）");
+  await expect(teamScheduleCards.first().locator("li")).toHaveCount(3);
   const headers = await page
     .getByRole("table", { name: "同順位リーグの試合結果入力" })
     .locator("thead th")

@@ -336,6 +336,7 @@ class TournamentPlan(ContractModel):
     status: Literal["COMPLETE"] = "COMPLETE"
     participant_resolution: ParticipantResolution = ParticipantResolution.RESOLVED
     tournament_count: Annotated[int, Field(gt=0)]
+    tournament_names: tuple[NonEmptyText, ...] = ()
     random_seed: int
     pools: tuple[TournamentPoolPlan, ...]
     seed_draws: tuple[SeedDrawRecord, ...]
@@ -345,6 +346,8 @@ class TournamentPlan(ContractModel):
     def validate_resolution(self) -> Self:
         if len(self.pools) != self.tournament_count:
             raise ValueError("トーナメント数と順位帯の数が一致しません")
+        if self.tournament_names and len(self.tournament_names) != self.tournament_count:
+            raise ValueError("トーナメント名の数がトーナメント数と一致しません")
         if [pool.pool_index for pool in self.pools] != list(range(1, self.tournament_count + 1)):
             raise ValueError("順位帯の順序が連続していません")
         if len({pool.pool_id for pool in self.pools}) != len(self.pools):
@@ -485,6 +488,9 @@ def validate_tournament_plan_invariants(
     band_width = block_size // tournament_count
     if len(plan.pools) != tournament_count:
         raise TournamentPlanInvariantError("pool_count_invalid")
+    tournament_names = plan.tournament_names or tuple(
+        f"第{index}順位決定トーナメント" for index in range(1, tournament_count + 1)
+    )
     for pool_index, pool in enumerate(plan.pools, 1):
         rank_start = (pool_index - 1) * band_width + 1
         rank_end = pool_index * band_width
@@ -495,7 +501,7 @@ def validate_tournament_plan_invariants(
         if (
             pool.pool_id != f"placement-{pool_index}"
             or pool.pool_index != pool_index
-            or pool.display_name != f"第{pool_index}順位決定トーナメント"
+            or pool.display_name != tournament_names[pool_index - 1]
             or pool.participant_count != participant_count
             or pool.pool_rank_range != (1, participant_count)
             or pool.overall_rank_range
@@ -544,6 +550,7 @@ def validate_tournament_plan_invariants(
             participant_count,
             pool.seeds,
             plan.random_seed,
+            pool.display_name,
         )
         if pool != regenerated_pool:
             raise TournamentPlanInvariantError(
@@ -817,6 +824,7 @@ def generate_tournament_plan(
         block_count=block_count,
     )
     tournament_count = data.final_stage.tournament_count
+    tournament_names = data.final_stage.resolved_tournament_names()
     participant_count = team_count // tournament_count
     block_size = team_count // block_count
     band_width = block_size // tournament_count
@@ -840,6 +848,7 @@ def generate_tournament_plan(
             participant_count,
             seeds,
             data.random_seed,
+            tournament_names[pool_index - 1],
         )
         pools.append(pool)
         draws.extend(pool_draws)
@@ -851,6 +860,7 @@ def generate_tournament_plan(
             else ParticipantResolution.PROVISIONAL
         ),
         tournament_count=tournament_count,
+        tournament_names=tournament_names,
         random_seed=data.random_seed,
         pools=tuple(pools),
         seed_draws=tuple(draws),
@@ -1005,6 +1015,7 @@ def _generate_pool(
     participant_count: int,
     seeds: tuple[TournamentSeed, ...],
     random_seed: int,
+    display_name: str,
 ) -> tuple[TournamentPoolPlan, tuple[TournamentWarning, ...]]:
     overall_rank_start = (pool_index - 1) * participant_count + 1
     overall_rank_end = pool_index * participant_count
@@ -1037,7 +1048,7 @@ def _generate_pool(
     plan = TournamentPoolPlan(
         pool_id=pool_id,
         pool_index=pool_index,
-        display_name=f"第{pool_index}順位決定トーナメント",
+        display_name=display_name,
         participant_count=len(seeds),
         pool_rank_range=(1, participant_count),
         overall_rank_range=(overall_rank_start, overall_rank_end),

@@ -251,7 +251,7 @@ test("2日目はコート別を既定にし、直前実試合の表示番号を�
   await expect(page.locator('#day2-schedule-view [data-schedule-view="time"]')).toBeVisible();
   expect(await page.locator(
     '#day2-schedule-view [data-schedule-view="time"] thead th',
-  ).allTextContents()).toEqual(["試合", "時間", "コート", "区分", "対戦", "審判"]);
+  ).allTextContents()).toEqual(["試合", "時間", "コート", "対戦", "審判"]);
   await expect(courtView).toBeHidden();
   await page.context().setOffline(true);
   await page.reload();

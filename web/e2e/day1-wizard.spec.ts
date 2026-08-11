@@ -206,6 +206,54 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
   expect(requests[0]).toHaveProperty("day2");
 });
 
+test("順位決定トーナメントごとの名前を既定表示し、変更後の名前で生成を要求する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("名称設定大会");
+  await page.locator("#teams").fill(
+    Array.from({ length: 8 }, (_, index) => `チーム${String(index + 1)}`).join("\n"),
+  );
+  await page.locator("#courts").fill("Aコート\nBコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
+  await page.locator("#block-count").selectOption("2");
+  await page.locator("#final-stage-format").selectOption("placement_tournament");
+  await page.locator("#tournament-count").selectOption("2");
+
+  await expect(page.locator("#tournament-names-field")).toBeVisible();
+  await expect(page.locator("#tournament-name-1")).toHaveValue("第1順位決定トーナメント");
+  await expect(page.locator("#tournament-name-2")).toHaveValue("第2順位決定トーナメント");
+  await page.locator("#tournament-name-1").fill("チャンピオンリーグ");
+  await page.locator("#tournament-name-2").fill("チャレンジリーグ");
+
+  await page.unroute(GENERATE_API);
+  let request: Record<string, unknown> | undefined;
+  await page.route(GENERATE_API, async (route) => {
+    request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "error",
+        diagnostics: [{ code: "TEST_STOP", message: "要求内容を確認しました。" }],
+      }),
+    });
+  });
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect.poll(() => request).toBeDefined();
+
+  expect(request).toMatchObject({
+    request_kind: "schedule_creation",
+    final_stage: {
+      format: "placement_tournament",
+      tournament_count: 2,
+      tournament_names: ["チャンピオンリーグ", "チャレンジリーグ"],
+    },
+  });
+});
+
 test("手動で各チームを均衡ブロックへ割り当て、その所属のまま生成する", async ({
   page,
 }) => {

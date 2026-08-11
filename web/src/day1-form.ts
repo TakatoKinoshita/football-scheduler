@@ -314,6 +314,30 @@ export function validateDay1LeagueDocument(
         message: "このチーム数とトーナメント数に対応するブロック数を選択してください。",
       });
     }
+    if (finalStage.tournament_names !== undefined && !Array.isArray(finalStage.tournament_names)) {
+      issues.push({
+        field: "tournament-name-1",
+        step: 2,
+        message: "トーナメント名を入力し直してください。",
+      });
+    } else if (Array.isArray(finalStage.tournament_names)) {
+      if (tournamentCount !== undefined && finalStage.tournament_names.length !== tournamentCount) {
+        issues.push({
+          field: "tournament-name-1",
+          step: 2,
+          message: "トーナメント数と同じ数の名前を入力してください。",
+        });
+      }
+      for (const [index, name] of finalStage.tournament_names.entries()) {
+        if (typeof name !== "string" || name.trim().length === 0 || name.length > 200) {
+          issues.push({
+            field: `tournament-name-${String(index + 1)}`,
+            step: 2,
+            message: "トーナメント名を1文字以上200文字以内で入力してください。",
+          });
+        }
+      }
+    }
   } else if (finalStage.format === "same_rank_league") {
     if (teamCount < 4 || teamCount > 32) {
       issues.push({
@@ -411,6 +435,7 @@ const API_FIELD_MAP: Array<
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
   ["league.manual_blocks", "manual-blocks", 2, "手動ブロック割当て"],
+  ["final_stage.tournament_names", "tournament-name-1", 2, "トーナメント名"],
   ["final_stage", "final-stage-format", 2, "2日目の決勝方式"],
   ["day.start_time", "start-time", 2, "開始時刻"],
   ["day.game_duration_minutes", "game-duration", 2, "試合時間"],

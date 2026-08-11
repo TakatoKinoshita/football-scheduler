@@ -116,6 +116,22 @@ def test_supported_placement_configurations_generate_ordered_pools(
     assert all("PRELIM" not in match.id for pool in plan.pools for match in pool.matches)
 
 
+def test_custom_tournament_names_are_preserved_in_generated_pools() -> None:
+    request = _request(8, 2, 2, resolved=False)
+    request["final_stage"]["tournament_names"] = [  # type: ignore[index]
+        "チャンピオンリーグ",
+        "チャレンジリーグ",
+    ]
+
+    plan = generate_tournament_plan(request)
+
+    assert plan.tournament_names == ("チャンピオンリーグ", "チャレンジリーグ")
+    assert [pool.display_name for pool in plan.pools] == [
+        "チャンピオンリーグ",
+        "チャレンジリーグ",
+    ]
+
+
 @pytest.mark.parametrize(
     ("team_count", "block_count", "tournament_count", "code"),
     [

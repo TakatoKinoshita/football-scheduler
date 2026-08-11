@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from football_scheduler.models import ContractModel
+from football_scheduler.models import ContractModel, NonEmptyText
 
 
 class FinalStageFormat(StrEnum):
@@ -24,6 +24,22 @@ class SameRankUnevenPolicy(StrEnum):
 class PlacementTournamentFinalStage(ContractModel):
     format: Literal[FinalStageFormat.PLACEMENT_TOURNAMENT] = FinalStageFormat.PLACEMENT_TOURNAMENT
     tournament_count: int
+    tournament_names: tuple[NonEmptyText, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_tournament_names(self) -> Self:
+        if self.tournament_names and len(self.tournament_names) != self.tournament_count:
+            raise ValueError("トーナメント名はトーナメント数と同じ数だけ指定してください")
+        if any(name.strip() != name or not name.strip() for name in self.tournament_names):
+            raise ValueError("トーナメント名の前後に空白を含めず、1文字以上で指定してください")
+        return self
+
+    def resolved_tournament_names(self) -> tuple[str, ...]:
+        if self.tournament_names:
+            return self.tournament_names
+        return tuple(
+            f"第{index}順位決定トーナメント" for index in range(1, self.tournament_count + 1)
+        )
 
 
 class SameRankLeagueFinalStage(ContractModel):
@@ -111,6 +127,25 @@ def _validate_placement_tournament(
             team_count=team_count,
             tournament_count=tournament_count if isinstance(tournament_count, int) else 0,
             allowed_tournament_counts=allowed_counts,
+        )
+    tournament_names = value.get("tournament_names")
+    if tournament_names is not None and (
+        not isinstance(tournament_names, (list, tuple))
+        or (
+            len(tournament_names) > 0
+            and (
+                len(tournament_names) != tournament_count
+                or any(
+                    not isinstance(name, str) or name.strip() != name or not name or len(name) > 200
+                    for name in tournament_names
+                )
+            )
+        )
+    ):
+        raise FinalStageConfigurationError(
+            "PLACEMENT_TOURNAMENT_NAMES_INVALID",
+            "各トーナメントの名前を1文字以上200文字以内で入力してください。",
+            tournament_count=tournament_count,
         )
     allowed_blocks = sorted(_PLACEMENT_BLOCK_COUNTS[(team_count, tournament_count)])
     if block_count not in allowed_blocks:
