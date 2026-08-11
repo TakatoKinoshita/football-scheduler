@@ -154,8 +154,11 @@ class StateControl implements ResultInputStateControl {
       if (open) {
         positionPopover(trigger, popover);
         actionButton.focus({ preventScroll: true });
-        window.addEventListener("resize", closeOnViewportChange, { once: true });
-        window.addEventListener("scroll", closeOnViewportChange, { once: true, capture: true });
+        window.requestAnimationFrame(() => {
+          if (trigger.getAttribute("aria-expanded") !== "true") return;
+          window.addEventListener("resize", closeOnViewportChange, { once: true });
+          window.addEventListener("scroll", closeOnViewportChange, { once: true, capture: true });
+        });
       } else {
         window.removeEventListener("resize", closeOnViewportChange);
         window.removeEventListener("scroll", closeOnViewportChange, { capture: true });
