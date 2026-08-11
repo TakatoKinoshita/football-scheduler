@@ -82,4 +82,26 @@ describe("結果入力の状態コントロール", () => {
     expect([...control.element.querySelectorAll<HTMLButtonElement>("button")]
       .every((button) => !button.disabled)).toBe(true);
   });
+
+  it("同じ表示内容の更新では開いているメニューを置き換えず、最新の操作を使う", () => {
+    const first = vi.fn(async () => undefined);
+    const latest = vi.fn(async () => undefined);
+    const control = createResultInputStateControl("editing");
+    const presentation = {
+      label: "入力をクリア",
+      accessibleName: "試合C③ チーム甲 対 チーム乙の入力をクリア",
+    };
+    control.setDraftAction({ ...presentation, onActivate: first });
+    const originalAction = control.element.querySelector<HTMLButtonElement>(
+      ".result-input-draft-action",
+    )!;
+
+    control.setState("editing");
+    control.setDraftAction({ ...presentation, onActivate: latest });
+
+    expect(control.element.querySelector(".result-input-draft-action")).toBe(originalAction);
+    originalAction.click();
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(1);
+  });
 });

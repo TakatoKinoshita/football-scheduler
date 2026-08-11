@@ -76,13 +76,19 @@ class StateControl implements ResultInputStateControl {
     state: ResultInputEntryState,
     invalidStateLabel = this.invalidStateLabel,
   ): void {
+    if (state === this.state && invalidStateLabel === this.invalidStateLabel) return;
     this.state = state;
     this.invalidStateLabel = invalidStateLabel;
     this.render();
   }
 
   setDraftAction(action: ResultInputDraftAction | undefined): void {
+    const samePresentation = action === undefined
+      ? this.action === undefined
+      : this.action?.label === action.label &&
+        this.action.accessibleName === action.accessibleName;
     this.action = action;
+    if (samePresentation) return;
     this.render();
   }
 
@@ -141,9 +147,9 @@ class StateControl implements ResultInputStateControl {
     actionButton.disabled = this.busy;
     popover.append(actionButton);
 
-    const closeOnViewportChange = (): void => {
+    const positionOnViewportChange = (): void => {
       try {
-        if (popover.matches(":popover-open")) popover.hidePopover();
+        if (popover.matches(":popover-open")) positionPopover(trigger, popover);
       } catch {
         // `:popover-open` is unavailable only in unsupported test/browser environments.
       }
@@ -154,21 +160,18 @@ class StateControl implements ResultInputStateControl {
       if (open) {
         positionPopover(trigger, popover);
         actionButton.focus({ preventScroll: true });
-        window.requestAnimationFrame(() => {
-          if (trigger.getAttribute("aria-expanded") !== "true") return;
-          window.addEventListener("resize", closeOnViewportChange, { once: true });
-          window.addEventListener("scroll", closeOnViewportChange, { once: true, capture: true });
-        });
+        window.addEventListener("resize", positionOnViewportChange);
+        window.addEventListener("scroll", positionOnViewportChange, { capture: true, passive: true });
       } else {
-        window.removeEventListener("resize", closeOnViewportChange);
-        window.removeEventListener("scroll", closeOnViewportChange, { capture: true });
-        if (trigger.isConnected && popover.contains(document.activeElement)) {
+        window.removeEventListener("resize", positionOnViewportChange);
+        window.removeEventListener("scroll", positionOnViewportChange, { capture: true });
+        if (trigger.isConnected) {
           trigger.focus({ preventScroll: true });
         }
       }
     });
     actionButton.addEventListener("click", () => {
-      void action.onActivate().catch(() => undefined);
+      void this.action?.onActivate().catch(() => undefined);
     });
 
     this.element.append(trigger, popover);
