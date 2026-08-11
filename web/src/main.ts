@@ -1209,22 +1209,6 @@ function withSameRankResults(results: JsonObject[]): TournamentDocument | undefi
   };
 }
 
-function saveSameRankResults(results: JsonObject[]): void {
-  const nextDocument = withSameRankResults(results);
-  if (nextDocument === undefined) return;
-  documentState = nextDocument;
-  saveState.textContent = "保存しています…";
-  autosave.schedule(
-    documentState,
-    () => { saveState.textContent = "この端末に保存済み"; },
-    () => {
-      saveState.textContent = "保存できませんでした";
-      tournamentResultsStatus.textContent =
-        "同順位リーグの結果を保存できませんでした。ファイルへ保存してください。";
-    },
-  );
-}
-
 async function saveSameRankStandings(standings: JsonObject): Promise<void> {
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return;
@@ -2564,28 +2548,6 @@ function renderSameRankSchedule(
   section.append(routes);
   content.append(section);
   if (!provisional) renderSameRankResultsInput(content, schedule, plan, teamNames);
-}
-
-function tournamentScoreInput(
-  label: string,
-  value: string,
-  disabled: boolean,
-): HTMLInputElement {
-  const input = window.document.createElement("input");
-  input.type = "text";
-  input.inputMode = "numeric";
-  input.pattern = "[0-9]*";
-  input.className = "score-input";
-  input.setAttribute("aria-label", label);
-  input.value = value;
-  input.disabled = disabled;
-  return input;
-}
-
-function scoreValue(input: HTMLInputElement): number | null | undefined {
-  if (input.value.trim() === "") return null;
-  const value = Number(input.value);
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function renderFinalStandings(
