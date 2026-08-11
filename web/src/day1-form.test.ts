@@ -52,6 +52,21 @@ describe("1日目リーグ入力", () => {
     expect(document.tournament.input).toHaveProperty("day2");
   });
 
+  it("順位決定トーナメントの名前をAPI要求へ保持する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.final_stage = {
+      format: "placement_tournament",
+      tournament_count: 2,
+      tournament_names: ["チャンピオンリーグ", "チャレンジリーグ"],
+    };
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).final_stage).toEqual({
+      format: "placement_tournament",
+      tournament_count: 2,
+      tournament_names: ["チャンピオンリーグ", "チャレンジリーグ"],
+    });
+  });
+
   it("自動方式では保存中の手動下書きをAPI要求から除外する", () => {
     const document = createTournamentDocument();
     document.tournament.input.league = {

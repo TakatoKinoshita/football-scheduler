@@ -25,6 +25,39 @@ def test_accepts_every_supported_placement_tournament_configuration(
     )
 
 
+def test_accepts_custom_names_for_each_placement_tournament() -> None:
+    validate_final_stage_input(
+        {
+            "format": "placement_tournament",
+            "tournament_count": 2,
+            "tournament_names": ["チャンピオンリーグ", "チャレンジリーグ"],
+        },
+        team_count=8,
+        block_count=2,
+    )
+
+
+@pytest.mark.parametrize(
+    "tournament_names",
+    [["1つだけ"], ["上位", ""], ["上位", " 下位"]],
+)
+def test_rejects_invalid_placement_tournament_names(
+    tournament_names: list[str],
+) -> None:
+    with pytest.raises(FinalStageConfigurationError) as error:
+        validate_final_stage_input(
+            {
+                "format": "placement_tournament",
+                "tournament_count": 2,
+                "tournament_names": tournament_names,
+            },
+            team_count=8,
+            block_count=2,
+        )
+
+    assert error.value.code == "PLACEMENT_TOURNAMENT_NAMES_INVALID"
+
+
 @pytest.mark.parametrize(
     ("value", "team_count", "block_count", "code"),
     [

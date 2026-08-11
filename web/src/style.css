@@ -85,6 +85,10 @@ textarea { resize: vertical; }
 .manual-block-team-row label { min-width: 0; overflow-wrap: anywhere; font-weight: 800; }
 .manual-block-team-row select { min-width: 0; }
 .manual-block-team-row .field-error { grid-column: 1 / -1; }
+.tournament-names { min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; }
+.tournament-names legend { padding: 0 .35rem; color: var(--green); font-weight: 800; }
+.tournament-names legend em { color: var(--danger); font-style: normal; font-size: .78rem; }
+.tournament-name-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .75rem; }
 .check-field { display: flex; align-items: flex-start; gap: .7rem; font-weight: 700; }
 .check-field input { flex: 0 0 auto; width: 1.4rem; min-height: 1.4rem; margin-top: .2rem; }
 .notice { margin-top: 1.2rem; padding: .9rem 1rem; background: #fff4d8; border-left: 5px solid #e2a125; border-radius: .25rem; }
@@ -327,7 +331,7 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   main { width: min(100% - 1rem, 1100px); margin-top: 1rem; }
   .steps { grid-template-columns: 1fr 1fr; }
   .settings-section { padding: 1rem; }
-  .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list { grid-template-columns: 1fr; }
+  .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list, .tournament-name-grid { grid-template-columns: 1fr; }
   .manual-block-team-row { grid-template-columns: 1fr; }
   .schedule-view-toggle label { flex: 1 1 8rem; }
   .field-wide { grid-column: auto; }

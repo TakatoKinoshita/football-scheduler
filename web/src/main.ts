@@ -318,6 +318,19 @@ root.innerHTML = `
           <small>参加チーム数に対応する数を選択してください。</small>
           <span id="tournament-count-error" class="field-error" role="alert"></span>
         </label>
+        <fieldset id="tournament-names-field" class="tournament-names field-wide" hidden>
+          <legend>トーナメント名 <em>必須</em></legend>
+          <small>組合せ表や2日目の結果に表示する名前です。</small>
+          <div class="tournament-name-grid">
+            ${[1, 2, 3, 4].map((index) => `
+              <label id="tournament-name-${String(index)}-field" class="field" for="tournament-name-${String(index)}" hidden>
+                <span>第${String(index)}トーナメント</span>
+                <input id="tournament-name-${String(index)}" maxlength="200" value="第${String(index)}順位決定トーナメント" />
+                <span id="tournament-name-${String(index)}-error" class="field-error" role="alert"></span>
+              </label>
+            `).join("")}
+          </div>
+        </fieldset>
         <label id="same-rank-uneven-policy-field" class="field" for="same-rank-uneven-policy" hidden>
           <span>端数ブロックの扱い <em>必須</em></span>
           <select id="same-rank-uneven-policy">
@@ -717,6 +730,10 @@ const manualBlockTeamList = requiredElement<HTMLElement>("#manual-block-team-lis
 const finalStageFormatInput = requiredElement<HTMLSelectElement>("#final-stage-format");
 const tournamentCountInput = requiredElement<HTMLSelectElement>("#tournament-count");
 const tournamentCountField = requiredElement<HTMLElement>("#tournament-count-field");
+const tournamentNamesField = requiredElement<HTMLFieldSetElement>("#tournament-names-field");
+const tournamentNameInputs = [1, 2, 3, 4].map((index) =>
+  requiredElement<HTMLInputElement>(`#tournament-name-${String(index)}`)
+);
 const sameRankUnevenPolicyInput = requiredElement<HTMLSelectElement>("#same-rank-uneven-policy");
 const sameRankUnevenPolicyField = requiredElement<HTMLElement>("#same-rank-uneven-policy-field");
 const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
@@ -2168,7 +2185,7 @@ function renderDay2Schedule(
   scheduleContainer.className = "schedule-view-content";
   const renderCurrentSchedule = (): void => {
     renderScheduleView(scheduleContainer, schedulePresentation, day2ScheduleViewMode, {
-      showPhase: true,
+      showPhase: false,
       details: day2Details,
     });
   };
@@ -2504,7 +2521,7 @@ function renderSameRankSchedule(
     scheduleContainer,
     presentation,
     day2ScheduleViewMode,
-    { showPhase: true, details },
+    { showPhase: false, details },
   );
   section.append(
     createScheduleViewToggle("day2", day2ScheduleViewMode, (mode) => {
@@ -2516,15 +2533,37 @@ function renderSameRankSchedule(
   );
   renderSchedule();
   const routes = createResultDisclosure("チーム別予定", "day2-team-schedules-view");
-  const list = window.document.createElement("ul");
+  const routeGrid = window.document.createElement("div");
+  routeGrid.className = "team-schedule-grid";
+  const routesByTeam = new Map<string, { label: string; routes: JsonObject[] }>();
   for (const route of asObjectArray(schedule.team_schedules)) {
-    appendTextElement(
-      list,
-      "li",
-      `${sameRankEntryLabel(route.rank_ref, route.team_id == null ? null : { type: "concrete_team", team_id: route.team_id }, teamNames)}：${day2SectionLabel(Number(route.section_no), schedule)}　${courtNames.get(String(route.court_id)) ?? String(route.court_id)}　${route.role === "referee" ? "審判" : "試合"}`,
-    );
+    const rankRef = asObject(route.rank_ref);
+    const rankLabel = sameRankEntryLabel(rankRef, null, teamNames);
+    const teamId = typeof route.team_id === "string" ? route.team_id : undefined;
+    const key = teamId ?? rankLabel;
+    const label = teamId === undefined
+      ? rankLabel
+      : `${teamNames.get(teamId) ?? teamId}（${rankLabel}）`;
+    const group = routesByTeam.get(key) ?? { label, routes: [] };
+    group.routes.push(route);
+    routesByTeam.set(key, group);
   }
-  routes.append(list);
+  for (const { label, routes: teamRoutes } of routesByTeam.values()) {
+    const card = window.document.createElement("section");
+    card.className = "team-card";
+    appendTextElement(card, "h5", label);
+    const list = window.document.createElement("ul");
+    for (const route of teamRoutes) {
+      appendTextElement(
+        list,
+        "li",
+        `${day2SectionLabel(Number(route.section_no), schedule)}　${courtNames.get(String(route.court_id)) ?? String(route.court_id)}　${route.role === "referee" ? "審判" : "試合"}`,
+      );
+    }
+    card.append(list);
+    routeGrid.append(card);
+  }
+  routes.append(routeGrid);
   section.append(routes);
   content.append(section);
   if (!provisional) renderSameRankResultsInput(content, schedule, plan, teamNames);
@@ -3066,6 +3105,7 @@ function setLegacyControlsDisabled(disabled: boolean): void {
     assignmentModeInput,
     finalStageFormatInput,
     tournamentCountInput,
+    ...tournamentNameInputs,
     sameRankUnevenPolicyInput,
     startTimeInput,
     gameDurationInput,
@@ -3113,6 +3153,15 @@ function renderFinalStageControls(): void {
     && !supportedCounts.includes(tournamentCountInput.value)
   ) {
     tournamentCountInput.value = "";
+  }
+  const tournamentCount = tournamentCountInput.value === ""
+    ? 0
+    : Number(tournamentCountInput.value);
+  tournamentNamesField.hidden = format !== "placement_tournament" || tournamentCount === 0;
+  for (const [index, input] of tournamentNameInputs.entries()) {
+    const field = requiredElement<HTMLElement>(`#tournament-name-${String(index + 1)}-field`);
+    field.hidden = tournamentNamesField.hidden || index >= tournamentCount;
+    input.required = !field.hidden;
   }
   const applicable =
     format === "same_rank_league" &&
@@ -3186,6 +3235,15 @@ function render(): void {
   tournamentCountInput.value = typeof finalStage?.tournament_count === "number"
     ? String(finalStage.tournament_count)
     : "";
+  const restoredTournamentNames = Array.isArray(finalStage?.tournament_names)
+    ? finalStage.tournament_names
+    : [];
+  for (const [index, input] of tournamentNameInputs.entries()) {
+    const restoredName = restoredTournamentNames[index];
+    input.value = typeof restoredName === "string"
+      ? restoredName
+      : `第${String(index + 1)}順位決定トーナメント`;
+  }
   const restoredBlockCount = typeof league?.block_count === "number" ? league.block_count : 0;
   const restoredUnevenPolicy = finalStage?.uneven_policy;
   const restoredUnevenApplicable =
@@ -3263,6 +3321,9 @@ function updateDraft(invalidateResult = false): void {
           format: "placement_tournament",
           tournament_count:
             tournamentCountInput.value === "" ? null : Number(tournamentCountInput.value),
+          tournament_names: tournamentNameInputs
+            .slice(0, tournamentCountInput.value === "" ? 0 : Number(tournamentCountInput.value))
+            .map((input) => input.value.trim()),
         }
       : finalStageFormatInput.value === "same_rank_league"
         ? {
@@ -3538,6 +3599,7 @@ for (const control of [
   assignmentModeInput,
   finalStageFormatInput,
   tournamentCountInput,
+  ...tournamentNameInputs,
   sameRankUnevenPolicyInput,
   startTimeInput,
   gameDurationInput,
