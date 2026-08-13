@@ -1752,8 +1752,8 @@ function renderResult(): void {
     resultSection.querySelector("h3")!.id = "league-results-heading";
     observeResultInputRoot(content, resultPresentation);
     refreshLeagueResultsProgress(leagueMatches.length);
-    setupStandingsTurnstile();
     content.append(standingsConfirmation);
+    setupVisibleTurnstile();
     const standings = asObject(result.league_standings);
     if (standings !== undefined) {
       renderLeagueStandings(content, standings, teamNames);
@@ -2460,7 +2460,7 @@ function renderSameRankResultsInput(
   });
   observeResultInputRoot(content, resultPresentation);
   tournamentResultsConfirmation.hidden = false;
-  setupTournamentResultsTurnstile();
+  setupVisibleTurnstile();
   refreshTournamentResultsEnabled();
   const standings = asObject(documentState.tournament.result?.same_rank_standings);
   if (standings !== undefined) renderSameRankStandings(content, standings, plan, teamNames);
@@ -2762,7 +2762,7 @@ function renderTournamentResultsInput(
   observeResultInputRoot(content, resultPresentation);
 
   tournamentResultsConfirmation.hidden = false;
-  setupTournamentResultsTurnstile();
+  setupVisibleTurnstile();
   refreshTournamentResultsEnabled();
   const finalStandings = asObject(documentState.tournament.result?.final_standings);
   if (finalStandings !== undefined) {
@@ -3208,7 +3208,7 @@ function renderStep(): void {
   refreshGenerateEnabled();
   if (currentStep === 3) document.body.dataset.printScope = "day1";
   if (currentStep === 4) document.body.dataset.printScope = "day2";
-  if (currentStep === 2) setupTurnstile();
+  setupVisibleTurnstile();
   if (window.scrollX !== scrollX || window.scrollY !== scrollY) {
     window.scrollTo({ left: scrollX, top: scrollY, behavior: "auto" });
   }
@@ -4092,16 +4092,61 @@ function updateConnectionStatus(): void {
     refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
   }
   if (!tournamentResultsConfirmation.hidden) refreshTournamentResultsEnabled();
+  setupVisibleTurnstile();
 }
 window.addEventListener("online", updateConnectionStatus);
 window.addEventListener("offline", updateConnectionStatus);
 updateConnectionStatus();
 
+function turnstileSurfaceIsVisible(container: HTMLElement, step: WizardStep): boolean {
+  const panel = container.closest<HTMLElement>("[data-panel]");
+  return navigator.onLine &&
+    currentStep === step &&
+    container.isConnected &&
+    panel !== null &&
+    !panel.hidden &&
+    container.closest<HTMLElement>("[hidden]") === null;
+}
+
+function setupVisibleTurnstile(): void {
+  if (!navigator.onLine) {
+    if (currentStep === 2 && !turnstileSetupStarted) {
+      const message = "安全確認を読み込めませんでした。通信状態を確認してください。";
+      requiredElement<HTMLElement>("#turnstile-widget").textContent = message;
+      requireTurnstileConfirmation(message);
+    } else if (
+      currentStep === 3 &&
+      !standingsConfirmation.hidden &&
+      !standingsTurnstileSetupStarted
+    ) {
+      const message = "安全確認を読み込めませんでした。入力はこの端末に保存されています。";
+      requiredElement<HTMLElement>("#standings-turnstile-widget").textContent = message;
+      standingsStatus.textContent = message;
+    } else if (
+      currentStep === 4 &&
+      !tournamentResultsConfirmation.hidden &&
+      !tournamentResultsTurnstileSetupStarted
+    ) {
+      const message = "安全確認を読み込めませんでした。入力結果はこの端末に保存されています。";
+      requiredElement<HTMLElement>("#tournament-results-turnstile-widget").textContent = message;
+      tournamentResultsStatus.textContent = message;
+    }
+    return;
+  }
+  if (currentStep === 2) {
+    setupTurnstile();
+  } else if (currentStep === 3 && !standingsConfirmation.hidden) {
+    setupStandingsTurnstile();
+  } else if (currentStep === 4 && !tournamentResultsConfirmation.hidden) {
+    setupTournamentResultsTurnstile();
+  }
+}
+
 function setupTurnstile(): void {
-  if (turnstileSetupStarted) return;
+  const container = requiredElement<HTMLElement>("#turnstile-widget");
+  if (!turnstileSurfaceIsVisible(container, 2) || turnstileSetupStarted) return;
   turnstileSetupStarted = true;
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const container = requiredElement<HTMLElement>("#turnstile-widget");
   generateButton.disabled = true;
   if (!siteKey) {
     container.textContent =
@@ -4111,8 +4156,13 @@ function setupTurnstile(): void {
     );
     return;
   }
+  container.textContent = "安全確認を読み込んでいます。";
   void loadTurnstileApi()
     .then((api) => {
+      if (!turnstileSurfaceIsVisible(container, 2)) {
+        turnstileSetupStarted = false;
+        return;
+      }
       try {
         container.replaceChildren();
         turnstileWidgetId = api.render(container, {
@@ -4143,18 +4193,20 @@ function setupTurnstile(): void {
           },
         });
       } catch {
+        turnstileSetupStarted = false;
         container.textContent =
-          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+          "安全確認を初期化できませんでした。このタブを開き直してください。";
         requireTurnstileConfirmation(
-          "安全確認を初期化できませんでした。画面を再読み込みしてください。",
+          "安全確認を初期化できませんでした。このタブを開き直してください。",
         );
       }
     })
     .catch((error: unknown) => {
+      turnstileSetupStarted = false;
       const message =
         error instanceof Error && error.message === "Turnstile API is unavailable"
-          ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-          : "安全確認を読み込めませんでした。通信状態を確認してください。";
+          ? "安全確認を初期化できませんでした。このタブを開き直してください。"
+          : "安全確認を読み込めませんでした。接続回復後に再試行します。";
       container.textContent = message;
       requireTurnstileConfirmation(message);
     });
@@ -4164,8 +4216,8 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
   const existing = turnstileApi();
   if (existing !== undefined) return Promise.resolve(existing);
   if (turnstileLoadPromise !== undefined) return turnstileLoadPromise;
-  turnstileLoadPromise = new Promise<TurnstileApi>((resolve, reject) => {
-    const script = window.document.createElement("script");
+  const script = window.document.createElement("script");
+  const attempt = new Promise<TurnstileApi>((resolve, reject) => {
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     script.async = true;
     script.defer = true;
@@ -4177,22 +4229,33 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
     script.addEventListener("error", () => reject(new Error("Turnstile could not be loaded")));
     window.document.head.append(script);
   });
+  const retryableAttempt = attempt.catch((error: unknown) => {
+    if (turnstileLoadPromise === retryableAttempt) turnstileLoadPromise = undefined;
+    script.remove();
+    throw error;
+  });
+  turnstileLoadPromise = retryableAttempt;
   return turnstileLoadPromise;
 }
 
 function setupStandingsTurnstile(): void {
-  if (standingsTurnstileSetupStarted) return;
+  const container = requiredElement<HTMLElement>("#standings-turnstile-widget");
+  if (!turnstileSurfaceIsVisible(container, 3) || standingsTurnstileSetupStarted) return;
   standingsTurnstileSetupStarted = true;
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const container = requiredElement<HTMLElement>("#standings-turnstile-widget");
   if (!siteKey) {
     container.textContent = "安全確認の設定が完了していないため、順位を確定できません。";
     standingsStatus.textContent =
       "安全確認の設定が完了していないため、順位を確定できません。";
     return;
   }
+  container.textContent = "安全確認を読み込んでいます。";
   void loadTurnstileApi()
     .then((api) => {
+      if (!turnstileSurfaceIsVisible(container, 3)) {
+        standingsTurnstileSetupStarted = false;
+        return;
+      }
       try {
         container.replaceChildren();
         standingsTurnstileWidgetId = api.render(container, {
@@ -4226,23 +4289,28 @@ function setupStandingsTurnstile(): void {
           },
         });
       } catch {
+        standingsTurnstileSetupStarted = false;
         container.textContent =
-          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+          "安全確認を初期化できませんでした。このタブを開き直してください。";
+        standingsStatus.textContent = container.textContent;
       }
     })
     .catch((error: unknown) => {
+      standingsTurnstileSetupStarted = false;
       const initialized =
         error instanceof Error && error.message === "Turnstile API is unavailable";
       container.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。通信状態を確認してください。";
+        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
+        : "安全確認を読み込めませんでした。接続回復後に再試行します。";
       standingsStatus.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。入力はこの端末に保存されています。";
+        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
+        : "安全確認を読み込めませんでした。入力は保存済みです。接続回復後に再試行します。";
     });
 }
 
 function setupTournamentResultsTurnstile(): void {
+  const container = requiredElement<HTMLElement>("#tournament-results-turnstile-widget");
+  if (!turnstileSurfaceIsVisible(container, 4)) return;
   const action = asObject(documentState.tournament.input.final_stage)?.format === "same_rank_league"
     ? "calculate_same_rank_results"
     : "calculate_tournament_results";
@@ -4251,16 +4319,20 @@ function setupTournamentResultsTurnstile(): void {
   tournamentResultsTurnstileAction = action;
   tournamentResultsTurnstileToken = "";
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const container = requiredElement<HTMLElement>("#tournament-results-turnstile-widget");
   if (!siteKey) {
     container.textContent =
       "安全確認の設定が完了していないため、総合最終順位を確定できません。";
     tournamentResultsStatus.textContent = container.textContent;
     return;
   }
+  container.textContent = "安全確認を読み込んでいます。";
   void loadTurnstileApi()
     .then((api) => {
       if (tournamentResultsTurnstileAction !== action) return;
+      if (!turnstileSurfaceIsVisible(container, 4)) {
+        tournamentResultsTurnstileSetupStarted = false;
+        return;
+      }
       try {
         if (tournamentResultsTurnstileWidgetId !== undefined) {
           api.remove?.(tournamentResultsTurnstileWidgetId);
@@ -4297,19 +4369,24 @@ function setupTournamentResultsTurnstile(): void {
           },
         });
       } catch {
+        tournamentResultsTurnstileSetupStarted = false;
+        tournamentResultsTurnstileWidgetId = undefined;
         container.textContent =
-          "安全確認を初期化できませんでした。画面を再読み込みしてください。";
+          "安全確認を初期化できませんでした。このタブを開き直してください。";
+        tournamentResultsStatus.textContent = container.textContent;
       }
     })
     .catch((error: unknown) => {
+      if (tournamentResultsTurnstileAction !== action) return;
+      tournamentResultsTurnstileSetupStarted = false;
       const initialized =
         error instanceof Error && error.message === "Turnstile API is unavailable";
       container.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。通信状態を確認してください。";
+        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
+        : "安全確認を読み込めませんでした。接続回復後に再試行します。";
       tournamentResultsStatus.textContent = initialized
-        ? "安全確認を初期化できませんでした。画面を再読み込みしてください。"
-        : "安全確認を読み込めませんでした。入力結果はこの端末に保存されています。";
+        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
+        : "安全確認を読み込めませんでした。入力結果は保存済みです。接続回復後に再試行します。";
     });
 }
 
