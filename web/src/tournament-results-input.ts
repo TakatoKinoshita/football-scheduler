@@ -69,6 +69,7 @@ export interface TournamentResultsInputHost {
 
 interface TournamentResultCommitQueue {
   tail: Promise<void>;
+  commitTail: Promise<void>;
   latestRequest: number;
   failed: boolean;
 }
@@ -81,9 +82,22 @@ const tournamentResultCommitQueues = new WeakMap<
 function commitQueue(controller: TournamentResultDraftController): TournamentResultCommitQueue {
   const current = tournamentResultCommitQueues.get(controller);
   if (current !== undefined) return current;
-  const created = { tail: Promise.resolve(), latestRequest: 0, failed: false };
+  const created = {
+    tail: Promise.resolve(),
+    commitTail: Promise.resolve(),
+    latestRequest: 0,
+    failed: false,
+  };
   tournamentResultCommitQueues.set(controller, created);
   return created;
+}
+
+function trackResultOperation(
+  queue: TournamentResultCommitQueue,
+  operation: Promise<void>,
+): void {
+  queue.tail = Promise.all([queue.tail, operation.catch(() => undefined)])
+    .then(() => undefined);
 }
 
 function sameDraft(
@@ -485,8 +499,11 @@ function buildEditor(
     state: TournamentResultDraftUiState | undefined,
   ): Promise<void> => {
     const queue = commitQueue(host.drafts);
-    const operation = queue.tail.then(() => host.persistDrafts(state));
-    queue.tail = operation.catch(() => undefined);
+    // Start the IndexedDB transaction immediately. A formal result commit started by the
+    // following change event is then queued after this transaction by IndexedDB itself,
+    // even when the page is reloaded before this promise settles.
+    const operation = host.persistDrafts(state);
+    trackResultOperation(queue, operation);
     return operation;
   };
   const recordDraft = (): TournamentResultDraft => {
@@ -527,6 +544,7 @@ function buildEditor(
         host.drafts.delete(matchId);
       });
       queue.tail = operation.catch(() => undefined);
+      queue.commitTail = operation.catch(() => undefined);
       await operation;
       for (const [field, input] of Object.entries(inputByField) as Array<
         [ScoreField, HTMLInputElement]
@@ -586,7 +604,7 @@ function buildEditor(
     const request = ++queue.latestRequest;
     host.setSaveStatus("保存しています…");
     for (const input of inputs) input.disabled = true;
-    const operation = queue.tail.then(async () => {
+    const operation = queue.commitTail.then(async () => {
       const queuedDraft = host.drafts.get(matchId);
       if (!sameDraft(queuedDraft, currentDraft)) return;
       const queuedEvaluation = evaluateTournamentResultDraft(queuedDraft);
@@ -621,9 +639,10 @@ function buildEditor(
         ? `結果を保存し、勝者変更の影響を受ける後続${String(changed.removedDescendantCount)}試合を取り消しました。`
         : "2日目の試合結果をこの端末へ保存しました。");
     });
-    queue.tail = operation.then(() => undefined, () => {
+    queue.commitTail = operation.then(() => undefined, () => {
       queue.failed = true;
     });
+    trackResultOperation(queue, operation);
     void operation.then(() => {
       if (request !== queue.latestRequest) return;
       if (queue.failed) {

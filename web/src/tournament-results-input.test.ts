@@ -250,6 +250,46 @@ describe("順位決定トーナメント結果入力", () => {
       .toMatchObject({ regular_score_away: 3 });
   });
 
+  it("draft永続化の完了前に正式結果のatomic保存を開始する", async () => {
+    const scenario = tournamentResultsPreviewScenario("winner-change")!;
+    const drafts = new TournamentResultDraftController();
+    drafts.activate("immediate-commit-test");
+    let releaseDraftPersistence: (() => void) | undefined;
+    const draftPersistence = new Promise<void>((resolve) => {
+      releaseDraftPersistence = resolve;
+    });
+    const host: TournamentResultsInputHost = {
+      drafts,
+      currentResults: () => scenario.results,
+      persistDrafts: vi.fn(() => draftPersistence),
+      commitResults: vi.fn(async () => undefined),
+      setSaveStatus: vi.fn(),
+      announce: vi.fn(),
+      refreshCompletion: vi.fn(),
+      rerender: vi.fn(),
+    };
+    const content = document.createElement("div");
+    document.body.append(content);
+    renderTournamentResultsInput({
+      content,
+      plan: scenario.plan,
+      results: scenario.results,
+      schedule: scenario.schedule,
+      teamNames: new Map(scenario.teams.map((team) => [team.id, team.name])),
+      layout: responsiveTournamentResultsLayout("table"),
+      host,
+    });
+    const input = content.querySelector<HTMLInputElement>(
+      '.result-input-entry[data-match-id="PT-1-RANK-3-4-M1"] input[data-score-field="regularAway"]',
+    )!;
+
+    dispatchScore(input, "2");
+
+    await vi.waitFor(() => expect(host.commitResults).toHaveBeenCalledTimes(1));
+    expect(host.persistDrafts).toHaveBeenCalled();
+    releaseDraftPersistence!();
+  });
+
   it("先行保存が失敗しても後続を実行し、失敗draftと最終focusを保持する", async () => {
     const scenario = tournamentResultsPreviewScenario("winner-change")!;
     const drafts = new TournamentResultDraftController();
