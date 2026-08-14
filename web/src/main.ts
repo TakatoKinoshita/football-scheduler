@@ -10,8 +10,10 @@ import {
 import {
   convertLegacyToEditableDocument,
   issuesFromApiDetails,
+  isPlacementTournamentTeamCountSupported,
   isDay1LeagueInput,
   normalizeDocument,
+  placementTournamentCountsForTeamCount,
   validateDay1LeagueDocument,
   type FieldIssue,
   type WizardStep,
@@ -299,12 +301,12 @@ root.innerHTML = `
         <div class="form-grid">
         <label class="field" for="final-stage-format">
           <span>2日目の決勝方式 <em>必須</em></span>
-          <select id="final-stage-format">
+          <select id="final-stage-format" aria-describedby="final-stage-format-guidance">
             <option value="">選択してください</option>
             <option value="placement_tournament">順位決定トーナメント</option>
             <option value="same_rank_league">同順位リーグ</option>
           </select>
-          <small>1日目を生成する前に選びます。変更すると入力済み結果を含む全生成結果を取り消します。</small>
+          <small id="final-stage-format-guidance" role="status" aria-live="polite">1日目を生成する前に選びます。変更すると入力済み結果を含む全生成結果を取り消します。</small>
           <span id="final-stage-format-error" class="field-error" role="alert"></span>
         </label>
         <label id="tournament-count-field" class="field" for="tournament-count" hidden>
@@ -728,6 +730,7 @@ const manualBlockSummary = requiredElement<HTMLElement>("#manual-block-summary")
 const manualBlockCounts = requiredElement<HTMLElement>("#manual-block-counts");
 const manualBlockTeamList = requiredElement<HTMLElement>("#manual-block-team-list");
 const finalStageFormatInput = requiredElement<HTMLSelectElement>("#final-stage-format");
+const finalStageFormatGuidance = requiredElement<HTMLElement>("#final-stage-format-guidance");
 const tournamentCountInput = requiredElement<HTMLSelectElement>("#tournament-count");
 const tournamentCountField = requiredElement<HTMLElement>("#tournament-count-field");
 const tournamentNamesField = requiredElement<HTMLFieldSetElement>("#tournament-names-field");
@@ -3136,14 +3139,40 @@ function setLegacyControlsDisabled(disabled: boolean): void {
 function renderFinalStageControls(): void {
   const teamCount = lines(teamsInput.value).length;
   const blockCount = blockCountInput.value === "" ? undefined : Number(blockCountInput.value);
+  const placementTournamentSupported = isPlacementTournamentTeamCountSupported(teamCount);
+  const placementTournamentOption = Array.from(finalStageFormatInput.options).find(
+    (option) => option.value === "placement_tournament",
+  );
+  if (placementTournamentOption !== undefined) {
+    placementTournamentOption.disabled = !legacyCompatibility && !placementTournamentSupported;
+  }
+  if (placementTournamentSupported) {
+    finalStageFormatGuidance.textContent =
+      `${String(teamCount)}チームでは順位決定トーナメントを選択できます。決勝方式を変更すると、入力済み結果を含む全生成結果を取り消します。`;
+  } else if (teamCount >= 4 && teamCount <= 32) {
+    finalStageFormatGuidance.textContent =
+      `現在の${String(teamCount)}チームでは順位決定トーナメントを選択できません。順位決定トーナメントは8、16、24、32チームで利用できます。同順位リーグを選択してください。`;
+  } else if (teamCount > 32) {
+    finalStageFormatGuidance.textContent =
+      "参加チームは32チーム以内にしてください。順位決定トーナメントは8、16、24、32チームで利用できます。";
+  } else {
+    finalStageFormatGuidance.textContent =
+      "順位決定トーナメントは8、16、24、32チームで利用できます。参加チームを登録してから決勝方式を選択してください。";
+  }
+  if (
+    !legacyCompatibility &&
+    !placementTournamentSupported &&
+    finalStageFormatInput.value === "placement_tournament"
+  ) {
+    finalStageFormatInput.value = "";
+    tournamentCountInput.value = "";
+    for (const [index, input] of tournamentNameInputs.entries()) {
+      input.value = `第${String(index + 1)}順位決定トーナメント`;
+    }
+  }
   const format = finalStageFormatInput.value;
   tournamentCountField.hidden = format !== "placement_tournament";
-  const supportedCounts = new Map<number, readonly string[]>([
-    [8, ["2"]],
-    [16, ["2"]],
-    [24, ["3"]],
-    [32, ["2", "4"]],
-  ]).get(teamCount) ?? [];
+  const supportedCounts = placementTournamentCountsForTeamCount(teamCount).map(String);
   for (const option of tournamentCountInput.options) {
     if (option.value !== "") option.disabled = !supportedCounts.includes(option.value);
   }
@@ -3700,7 +3729,9 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       return storage.replaceImported(documentState).then(() => {
         render();
         backupStatus.dataset.state = "imported";
-        backupStatus.textContent = mode.migrated
+        backupStatus.textContent = mode.unsupportedFinalStageReset
+          ? "現在のチーム数では順位決定トーナメントを利用できないため、決勝方式と以前の生成結果を取り消しました。決勝方式を選び直してください。"
+          : mode.migrated
           ? "以前の下書きを1日目リーグ形式へ移行して復元しました。"
           : "ファイルから復元しました。内容を確認してください。";
       });
@@ -4416,14 +4447,19 @@ void storage
     organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
     try {
-      await restoreAllResultDrafts();
+      if (mode.unsupportedFinalStageReset) clearAllResultDrafts();
+      else await restoreAllResultDrafts();
     } catch {
       tournamentResultDrafts.reset();
       backupStatus.textContent =
         "入力途中の2日目得点は復元できませんでした。正式に保存済みの結果は利用できます。";
     }
     render();
-    if (mode.migrated) {
+    if (mode.unsupportedFinalStageReset) {
+      void storage.saveDraft(documentState);
+      saveState.textContent =
+        "非対応の順位決定トーナメントと以前の生成結果を取り消しました。決勝方式を選び直してください";
+    } else if (mode.migrated) {
       void storage.saveDraft(documentState);
       saveState.textContent = "以前の下書きを新しい形式へ移行しました";
     } else {

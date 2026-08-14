@@ -27,7 +27,10 @@ async function expectGuidedTo(page: Page, fieldId: string, step: 1 | 2): Promise
   );
   await expect(field).toBeFocused();
   await expect(field).toHaveAttribute("aria-invalid", "true");
-  await expect(field).toHaveAttribute("aria-describedby", `${fieldId}-error`);
+  await expect(field).toHaveAttribute(
+    "aria-describedby",
+    new RegExp(`(?:^|\\s)${fieldId}-error(?:\\s|$)`, "u"),
+  );
   await expect(field.locator("xpath=ancestor::*[contains(@class, 'field')][1]"))
     .toHaveClass(/field-has-error/u);
   await expect(page.locator(`#${fieldId}-error`)).toHaveAttribute("data-error-active", "true");
