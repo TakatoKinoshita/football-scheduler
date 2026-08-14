@@ -19,10 +19,26 @@ export interface DocumentMode {
   document: TournamentDocument;
   migrated: boolean;
   legacyCompatibility: boolean;
+  unsupportedFinalStageReset?: boolean;
 }
 
 export type FinalStageFormat = "placement_tournament" | "same_rank_league";
 export type SameRankUnevenPolicy = "strict_same_rank" | "merge_bottom";
+
+const PLACEMENT_TOURNAMENT_COUNTS = new Map<number, readonly number[]>([
+  [8, [2]],
+  [16, [2]],
+  [24, [3]],
+  [32, [2, 4]],
+]);
+
+export function placementTournamentCountsForTeamCount(teamCount: number): readonly number[] {
+  return PLACEMENT_TOURNAMENT_COUNTS.get(teamCount) ?? [];
+}
+
+export function isPlacementTournamentTeamCountSupported(teamCount: number): boolean {
+  return placementTournamentCountsForTeamCount(teamCount).length > 0;
+}
 
 function objectValue(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -80,6 +96,22 @@ export function normalizeDocument(document: TournamentDocument): DocumentMode {
   }
   const input = document.tournament.input;
   if (isDay1LeagueInput(input)) {
+    const finalStage = objectValue(input.final_stage);
+    const teamCount = objectArray(input.teams).length;
+    if (
+      finalStage?.format === "placement_tournament" &&
+      !isPlacementTournamentTeamCountSupported(teamCount)
+    ) {
+      const normalized = cloneDocument(document);
+      delete normalized.tournament.input.final_stage;
+      delete normalized.tournament.result;
+      return {
+        document: normalized,
+        migrated: false,
+        legacyCompatibility: false,
+        unsupportedFinalStageReset: true,
+      };
+    }
     return { document, migrated: false, legacyCompatibility: false };
   }
 
@@ -274,13 +306,7 @@ export function validateDay1LeagueDocument(
     });
   } else if (finalStage.format === "placement_tournament") {
     const tournamentCount = numberValue(finalStage.tournament_count);
-    const supportedTeamCounts = new Set([8, 16, 24, 32]);
-    const supportedCounts = new Map<number, Set<number>>([
-      [8, new Set([2])],
-      [16, new Set([2])],
-      [24, new Set([3])],
-      [32, new Set([2, 4])],
-    ]);
+    const supportedCounts = new Set(placementTournamentCountsForTeamCount(teamCount));
     const supportedBlocks = new Map<string, Set<number>>([
       ["8:2", new Set([2, 4])],
       ["16:2", new Set([2, 4, 8])],
@@ -288,7 +314,7 @@ export function validateDay1LeagueDocument(
       ["32:2", new Set([2, 4, 8, 16])],
       ["32:4", new Set([2, 4, 8])],
     ]);
-    if (!supportedTeamCounts.has(teamCount)) {
+    if (!isPlacementTournamentTeamCountSupported(teamCount)) {
       issues.push({
         field: "teams",
         step: 1,
@@ -297,7 +323,7 @@ export function validateDay1LeagueDocument(
     } else if (
       tournamentCount === undefined ||
       !Number.isInteger(tournamentCount) ||
-      !supportedCounts.get(teamCount)?.has(tournamentCount)
+      !supportedCounts.has(tournamentCount)
     ) {
       issues.push({
         field: "tournament-count",

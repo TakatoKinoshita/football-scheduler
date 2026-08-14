@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildDay1ScheduleRequest,
   convertLegacyToEditableDocument,
+  isPlacementTournamentTeamCountSupported,
   issuesFromApiDetails,
   normalizeDocument,
+  placementTournamentCountsForTeamCount,
   validateDay1LeagueDocument,
 } from "./day1-form";
 import {
@@ -14,6 +16,26 @@ import {
 } from "./types";
 
 describe("1日目リーグ入力", () => {
+  it.each([
+    [7, false, []],
+    [8, true, [2]],
+    [9, false, []],
+    [15, false, []],
+    [16, true, [2]],
+    [17, false, []],
+    [23, false, []],
+    [24, true, [3]],
+    [25, false, []],
+    [31, false, []],
+    [32, true, [2, 4]],
+  ] as const)(
+    "%iチームの順位決定トーナメント対応可否と選択肢を返す",
+    (teamCount, supported, tournamentCounts) => {
+      expect(isPlacementTournamentTeamCountSupported(teamCount)).toBe(supported);
+      expect(placementTournamentCountsForTeamCount(teamCount)).toEqual(tournamentCounts);
+    },
+  );
+
   it("新規文書をschema 0.2.0の決勝方式未選択状態で作る", () => {
     const document = createTournamentDocument(new Date("2026-08-09T00:00:00Z"));
 
@@ -26,6 +48,47 @@ describe("1日目リーグ入力", () => {
       day2_fallback: "organizer",
     });
     expect(document.tournament.input.referees).not.toHaveProperty("tournament_fallback");
+  });
+
+  it("非対応チーム数で復元した順位決定トーナメントと生成結果を取り消す", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.teams = Array.from({ length: 7 }, (_, index) => ({
+      id: `team-${String(index + 1).padStart(2, "0")}`,
+      name: `チーム${String(index + 1)}`,
+    }));
+    document.tournament.input.final_stage = {
+      format: "placement_tournament",
+      tournament_count: 2,
+      tournament_names: ["上位", "下位"],
+    };
+    document.tournament.result = { status: "OPTIMAL" };
+
+    const normalized = normalizeDocument(document);
+
+    expect(normalized.unsupportedFinalStageReset).toBe(true);
+    expect(normalized.document).not.toBe(document);
+    expect(normalized.document.tournament.input).not.toHaveProperty("final_stage");
+    expect(normalized.document.tournament).not.toHaveProperty("result");
+    expect(document.tournament.input).toHaveProperty("final_stage");
+    expect(document.tournament).toHaveProperty("result");
+  });
+
+  it("対応チーム数の順位決定トーナメントは復元時に変更しない", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.teams = Array.from({ length: 8 }, (_, index) => ({
+      id: `team-${String(index + 1).padStart(2, "0")}`,
+      name: `チーム${String(index + 1)}`,
+    }));
+    document.tournament.input.final_stage = {
+      format: "placement_tournament",
+      tournament_count: 2,
+      tournament_names: ["上位", "下位"],
+    };
+
+    const normalized = normalizeDocument(document);
+
+    expect(normalized.unsupportedFinalStageReset).toBeUndefined();
+    expect(normalized.document).toBe(document);
   });
 
   it("大会文書の決勝方式を含め、2日目設定は1日目API要求へ含めない", () => {
