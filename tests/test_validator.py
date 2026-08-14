@@ -20,7 +20,7 @@ def valid_document() -> dict[str, object]:
     return {
         "schema_version": "0.2.0",
         "config": {
-            "teams": [{"id": team_id} for team_id in ("A", "B", "C", "D", "E")],
+            "teams": [{"id": team_id} for team_id in ("A", "B", "C", "D", "E", "F")],
             "courts": [
                 {"id": "court-a", "name": "Aコート"},
                 {"id": "court-b", "name": "Bコート"},
@@ -31,7 +31,8 @@ def valid_document() -> dict[str, object]:
         "matches": [
             {"id": "M1", "home": team("A"), "away": team("B")},
             {"id": "M2", "home": team("C"), "away": team("D")},
-            {"id": "M3", "home": winner("M1"), "away": winner("M2")},
+            {"id": "M3", "home": team("A"), "away": team("C")},
+            {"id": "M0", "home": team("E"), "away": team("F")},
         ],
         "schedule": {
             "slots": [
@@ -56,6 +57,13 @@ def valid_document() -> dict[str, object]:
                     "match_id": "M3",
                     "referee_assignment": {"type": "team", "team_id": "E"},
                 },
+                {
+                    "day_id": "day1",
+                    "section_no": 2,
+                    "court_id": "court-a",
+                    "match_id": "M0",
+                    "referee_assignment": {"type": "team", "team_id": "B"},
+                },
             ]
         },
         "results": [{"match_id": "M1"}],
@@ -73,15 +81,16 @@ def test_valid_schedule_passes_independent_validation(valid_document: dict[str, 
         "valid": True,
         "diagnostics": [],
         "summary": {
-            "checked_match_count": 3,
-            "checked_slot_count": 3,
+            "checked_match_count": 4,
+            "checked_slot_count": 4,
             "error_count": 0,
             "league_team_referee_counts": [
                 {"team_id": "A", "count": 0},
-                {"team_id": "B", "count": 0},
+                {"team_id": "B", "count": 1},
                 {"team_id": "C", "count": 0},
                 {"team_id": "D", "count": 0},
                 {"team_id": "E", "count": 1},
+                {"team_id": "F", "count": 0},
             ],
             "league_team_referee_count_min": 0,
             "league_team_referee_count_max": 1,
@@ -110,9 +119,10 @@ def test_referee_summary_excludes_tournament_matches(
     summary = validate_schedule(document)["summary"]
 
     assert summary["league_team_referee_counts"] == [
-        {"team_id": team_id, "count": 0} for team_id in ("A", "B", "C", "D", "E")
+        {"team_id": team_id, "count": 1 if team_id == "B" else 0}
+        for team_id in ("A", "B", "C", "D", "E", "F")
     ]
-    assert summary["league_team_referee_count_difference"] == 0
+    assert summary["league_team_referee_count_difference"] == 1
 
 
 def test_detects_missing_and_duplicate_match_assignments(
@@ -168,6 +178,9 @@ def test_detects_consecutive_section_conflict_through_winner_reference(
     valid_document: dict[str, object],
 ) -> None:
     document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    matches[2]["home"] = winner("M1")
+    matches[2]["away"] = winner("M2")
     slots = document["schedule"]["slots"]  # type: ignore[index]
     slots[2]["section_no"] = 2
 
@@ -179,6 +192,9 @@ def test_detects_consecutive_section_conflict_through_winner_reference(
 
 def test_detects_dependency_order_violation(valid_document: dict[str, object]) -> None:
     document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    matches[2]["home"] = winner("M1")
+    matches[2]["away"] = winner("M2")
     slots = document["schedule"]["slots"]  # type: ignore[index]
     slots[2]["section_no"] = 1
     slots[2]["court_id"] = "court-c"
@@ -229,7 +245,100 @@ def test_detects_adjacent_assignment_court_change(
         "roles": ["referee", "referee"],
         "match_ids": ["M1", "M3"],
     }
-    assert report["summary"]["adjacent_assignment_court_change_count"] == 3
+    assert report["summary"]["adjacent_assignment_court_change_count"] == 2
+
+
+def test_detects_league_referee_without_previous_same_court_match(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    slots = document["schedule"]["slots"]  # type: ignore[index]
+    slots[2]["court_id"] = "court-b"
+
+    report = validate_schedule(document)
+    diagnostic = next(
+        item for item in report["diagnostics"] if item["code"] == "LEAGUE_REFEREE_SOURCE_INVALID"
+    )
+
+    assert diagnostic["details"] == {
+        "day_id": "day1",
+        "section_no": 3,
+        "court_id": "court-b",
+        "match_id": "M3",
+        "team_id": "E",
+        "previous_section_no": 2,
+        "source_match_id": None,
+        "reason": "previous_same_court_match_missing",
+    }
+
+
+def test_requires_referee_to_be_guaranteed_previous_match_participant(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    matches[3].pop("home")
+    matches[3].pop("away")
+    matches[3]["possible_home_team_ids"] = ["E", "G"]
+    matches[3]["possible_away_team_ids"] = ["F"]
+
+    report = validate_schedule(document)
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "LEAGUE_REFEREE_SOURCE_INVALID" and item["details"]["match_id"] == "M3"
+    )
+
+    assert diagnostic["details"]["reason"] == "referee_not_guaranteed_source_participant"
+    assert diagnostic["details"]["possible_team_ids"] == ["E", "F", "G"]
+    assert diagnostic["details"]["guaranteed_team_ids"] == ["F"]
+
+
+@pytest.mark.parametrize(
+    ("later_role", "expected_roles"),
+    [
+        ("match", ["referee", "match"]),
+        ("referee", ["referee", "referee"]),
+    ],
+)
+def test_rejects_assignment_after_referee_in_consecutive_section(
+    valid_document: dict[str, object],
+    later_role: str,
+    expected_roles: list[str],
+) -> None:
+    document = deepcopy(valid_document)
+    slots = document["schedule"]["slots"]  # type: ignore[index]
+    if later_role == "match":
+        matches = document["matches"]  # type: ignore[assignment]
+        matches[2]["home"] = team("B")
+        matches[2]["away"] = team("C")
+    else:
+        slots[2]["referee_assignment"] = {"type": "team", "team_id": "B"}
+
+    report = validate_schedule(document)
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "LEAGUE_ADJACENT_ROLE_INVALID" and item["details"]["team_id"] == "B"
+    )
+
+    assert diagnostic["details"]["roles"] == expected_roles
+    assert diagnostic["details"]["section_nos"] == [2, 3]
+
+
+def test_league_referee_rule_does_not_apply_to_placement_tournament(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    matches[2]["phase"] = "placement_tournament"
+    slots = document["schedule"]["slots"]  # type: ignore[index]
+    slots[2]["court_id"] = "court-b"
+
+    result_codes = codes(document)
+
+    assert "LEAGUE_REFEREE_SOURCE_INVALID" not in result_codes
+    assert "LEAGUE_ADJACENT_ROLE_INVALID" not in result_codes
 
 
 def test_detects_organizer_capacity_overrun(valid_document: dict[str, object]) -> None:

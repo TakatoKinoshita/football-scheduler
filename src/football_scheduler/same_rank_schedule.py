@@ -285,6 +285,7 @@ def generate_same_rank_day2_schedule(
         len(rank_refs),
         len(data.courts),
         horizon,
+        require_team_referees=data.referees.day2_fallback is Day2Fallback.STRICT,
     )
     attempts = 0
     current_used: int | None = None
@@ -299,7 +300,11 @@ def generate_same_rank_day2_schedule(
         if remaining <= 0:
             timed_out = True
             break
-        layout_status, layout = _solve_layout(layout_model, data.random_seed, remaining)
+        layout_status, layout = _solve_layout(
+            layout_model,
+            data.random_seed,
+            max(0.001, remaining * 0.65),
+        )
         if layout is None:
             timed_out = layout_status is SolverStatus.UNKNOWN
             break
@@ -391,6 +396,8 @@ def _build_layout_model(
     rank_count: int,
     court_count: int,
     horizon: int,
+    *,
+    require_team_referees: bool,
 ) -> _LayoutModel:
     model = cp_model.CpModel()
     sections = tuple(
@@ -414,6 +421,34 @@ def _build_layout_model(
         ]
         if len(intervals) > 1:
             model.add_no_overlap(intervals)
+    if require_team_referees:
+        matches_by_rank = {
+            rank: tuple(
+                match for match, participants in enumerate(match_ranks) if rank in participants
+            )
+            for rank in range(rank_count)
+        }
+        for current, current_participants in enumerate(match_ranks):
+            first_section = model.new_bool_var(f"first_section_{current}")
+            model.add(sections[current] == 0).only_enforce_if(first_section)
+            model.add(sections[current] != 0).only_enforce_if(~first_section)
+            sources: list[cp_model.IntVar] = []
+            for previous, previous_participants in enumerate(match_ranks):
+                if previous == current:
+                    continue
+                for rank in previous_participants:
+                    if rank in current_participants:
+                        continue
+                    source = model.new_bool_var(f"source_{previous}_{current}_{rank}")
+                    sources.append(source)
+                    model.add(sections[current] == sections[previous] + 1).only_enforce_if(source)
+                    model.add(courts[current] == courts[previous]).only_enforce_if(source)
+                    for following in matches_by_rank[rank]:
+                        if following != previous:
+                            model.add(sections[following] != sections[current] + 1).only_enforce_if(
+                                source
+                            )
+            model.add(sum(sources) + first_section == 1)
     minimum = model.new_int_var(0, horizon - 1, "minimum_section")
     maximum = model.new_int_var(0, horizon - 1, "maximum_section")
     model.add_min_equality(minimum, sections)
@@ -538,17 +573,24 @@ def _solve_referee_model(
 ) -> tuple[SolverStatus, _RefereeSolution | None]:
     model = cp_model.CpModel()
     organizer = tuple(model.new_bool_var(f"organizer_{match}") for match in range(len(match_ranks)))
+    match_by_position = {
+        (section, court): match
+        for match, (section, court) in enumerate(zip(layout.sections, layout.courts, strict=True))
+    }
     referee: dict[tuple[int, int], cp_model.IntVar] = {}
     for match, participants in enumerate(match_ranks):
         match_candidates: list[cp_model.IntVar] = []
-        for rank in range(rank_count):
-            if rank in participants:
+        section = layout.sections[match]
+        previous_match = match_by_position.get((section - 1, layout.courts[match]))
+        previous_participants = match_ranks[previous_match] if previous_match is not None else ()
+        for rank in previous_participants:
+            if rank in participants or (match, rank) in referee:
                 continue
             value = model.new_bool_var(f"referee_{match}_{rank}")
             referee[match, rank] = value
             match_candidates.append(value)
         model.add(sum(match_candidates) + organizer[match] == 1)
-        if layout.sections[match] == 0:
+        if section == 0:
             model.add(organizer[match] == 1)
         elif not allow_fallback:
             model.add(organizer[match] == 0)
@@ -575,13 +617,9 @@ def _solve_referee_model(
                     model.add(variable == 0)
             else:
                 model.add(sum(variable for _, variable in section_candidates) <= 1)
-            for adjacent in (section - 1, section + 1):
-                adjacent_match_court = match_court_by_rank_section.get((rank, adjacent))
-                if adjacent_match_court is None:
-                    continue
-                for match, variable in section_candidates:
-                    if layout.courts[match] != adjacent_match_court:
-                        model.add(variable == 0)
+            if (rank, section + 1) in match_court_by_rank_section:
+                for _, variable in section_candidates:
+                    model.add(variable == 0)
         for section, current in referee_by_section.items():
             following = referee_by_section.get(section + 1, ())
             for current_match, current_var in current:
@@ -606,22 +644,11 @@ def _solve_referee_model(
     model.add(organizer_count == sum(organizer))
     referee_then_match_terms: list[cp_model.IntVar] = []
     previous_same_court_terms: list[cp_model.IntVar] = []
-    previous_match_by_match: dict[int, int] = {}
-    for match, (section, court) in enumerate(zip(layout.sections, layout.courts, strict=True)):
-        previous = [
-            candidate
-            for candidate, (other_section, other_court) in enumerate(
-                zip(layout.sections, layout.courts, strict=True)
-            )
-            if other_court == court and other_section < section
-        ]
-        if previous:
-            previous_match_by_match[match] = max(previous, key=lambda item: layout.sections[item])
     for (match, rank), variable in referee.items():
         section = layout.sections[match]
         if (rank, section + 1) in match_court_by_rank_section:
             referee_then_match_terms.append(variable)
-        previous_match = previous_match_by_match.get(match)
+        previous_match = match_by_position.get((section - 1, layout.courts[match]))
         if previous_match is not None and rank in match_ranks[previous_match]:
             previous_same_court_terms.append(variable)
     referee_then_match = model.new_int_var(0, len(match_ranks), "referee_then_match")
@@ -633,13 +660,7 @@ def _solve_referee_model(
     stages: list[tuple[cp_model.IntVar, bool]] = []
     if allow_fallback:
         stages.append((organizer_count, False))
-    stages.extend(
-        (
-            (difference, False),
-            (referee_then_match, False),
-            (previous_same_court, True),
-        )
-    )
+    stages.extend(((difference, False),))
     status: cp_model.CpSolverStatus = cp_model.UNKNOWN
     best_solver: cp_model.CpSolver | None = None
     all_optimal = True
@@ -713,8 +734,6 @@ def _objective_key(
         referee.fallback_count,
         max(referee.counts, default=0) - min(referee.counts, default=0),
         maximum_wait,
-        referee.referee_then_match_count,
-        -referee.previous_same_court_referee_count,
         gap_moves,
         court_difference,
     )
@@ -875,8 +894,6 @@ def _successful_schedule(
             "used_sections",
             "referee_count_difference",
             "maximum_team_wait_sections",
-            "referee_then_match_count",
-            "previous_same_court_referee_count",
             "gap_court_change_count",
             "court_usage_difference",
         ),
@@ -884,27 +901,20 @@ def _successful_schedule(
             ObjectiveStageMetric(
                 objective=name,
                 value=value,
-                optimality_proven=(optimality_proven if index else layout.optimal),
+                optimality_proven=optimality_proven,
             )
-            for index, (name, value) in enumerate(
+            for name, value in (
+                ("used_sections", layout.used_sections),
                 (
-                    ("used_sections", layout.used_sections),
-                    (
-                        "referee_count_difference",
-                        max(referee.counts, default=0) - min(referee.counts, default=0),
-                    ),
-                    ("maximum_team_wait_sections", maximum_wait),
-                    ("referee_then_match_count", referee.referee_then_match_count),
-                    (
-                        "previous_same_court_referee_count",
-                        referee.previous_same_court_referee_count,
-                    ),
-                    ("gap_court_change_count", gap_moves),
-                    (
-                        "court_usage_difference",
-                        max(court_usage, default=0) - min(court_usage, default=0),
-                    ),
-                )
+                    "referee_count_difference",
+                    max(referee.counts, default=0) - min(referee.counts, default=0),
+                ),
+                ("maximum_team_wait_sections", maximum_wait),
+                ("gap_court_change_count", gap_moves),
+                (
+                    "court_usage_difference",
+                    max(court_usage, default=0) - min(court_usage, default=0),
+                ),
             )
         ),
         optimality_proven=optimality_proven,

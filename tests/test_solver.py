@@ -148,7 +148,8 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     possible_teams = {match.id: match.possible_team_ids for match in request.matches}
     roles_by_section: dict[int, list[str]] = defaultdict(list)
     matches_by_team: dict[str, list[int]] = defaultdict(list)
-    assignments_by_team: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    assignments_by_team: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    slots_by_position = {(slot.section_no, slot.court_id): slot for slot in scheduled_slots}
     organizer_count: Counter[int] = Counter()
     for slot in scheduled_slots:
         assert slot.match_id is not None
@@ -156,14 +157,17 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
         roles_by_section[slot.section_no].extend(possible_teams[slot.match_id])
         for team_id in possible_teams[slot.match_id]:
             matches_by_team[team_id].append(slot.section_no)
-            assignments_by_team[team_id].append((slot.section_no, slot.court_id))
+            assignments_by_team[team_id].append((slot.section_no, slot.court_id, "match"))
         if slot.referee_assignment.kind is RefereeKind.TEAM:
             assert slot.referee_assignment.team_id is not None
             roles_by_section[slot.section_no].append(slot.referee_assignment.team_id)
             assignments_by_team[slot.referee_assignment.team_id].append(
-                (slot.section_no, slot.court_id)
+                (slot.section_no, slot.court_id, "referee")
             )
             assert slot.section_no != 1
+            previous = slots_by_position[slot.section_no - 1, slot.court_id]
+            assert previous.match_id is not None
+            assert slot.referee_assignment.team_id in possible_teams[previous.match_id]
         else:
             organizer_count[slot.section_no] += 1
 
@@ -176,6 +180,7 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
         for left, right in pairwise(sorted(assignments)):
             if right[0] == left[0] + 1:
                 assert right[1] == left[1]
+                assert (left[2], right[2]) == ("match", "referee")
     assert all(count <= request.referees.organizer_capacity for count in organizer_count.values())
     assert all(
         slot.referee_assignment is not None
@@ -186,15 +191,19 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     referee_counts = {
         item.team_id: item.count for item in result.metrics.league_team_referee_counts
     }
-    assert result.metrics.used_sections == 8
+    assert result.metrics.used_sections == 10
     assert sum(referee_counts.values()) == 21
-    assert set(referee_counts.values()) == {1, 2}
-    assert result.metrics.league_team_referee_count_min == 1
-    assert result.metrics.league_team_referee_count_max == 2
-    assert result.metrics.league_team_referee_count_difference == 1
+    assert result.metrics.league_previous_same_court_referee_count == 21
+    assert result.metrics.referee_then_match_count == 0
     assert result.metrics.adjacent_assignment_court_change_count == 0
     assert "adjacent_assignment_court_change_count" not in result.metrics.optimized_objectives
     assert "adjacent_assignment_court_change_count" not in {
+        stage.objective for stage in result.metrics.objective_stages
+    }
+    assert "referee_then_match_count" not in {
+        stage.objective for stage in result.metrics.objective_stages
+    }
+    assert "league_previous_same_court_referee_count" not in {
         stage.objective for stage in result.metrics.objective_stages
     }
 
@@ -299,7 +308,7 @@ def test_same_seed_produces_same_schedule() -> None:
     )
 
 
-def test_unavoidable_referee_imbalance_does_not_make_schedule_infeasible() -> None:
+def test_league_without_a_safe_previous_match_referee_is_infeasible() -> None:
     base = make_smoke_request()
     repeated_matches = tuple(
         MatchSpec(
@@ -323,10 +332,9 @@ def test_unavoidable_referee_imbalance_does_not_make_schedule_infeasible() -> No
 
     result = solve_schedule(request)
 
-    assert result.status is SolverStatus.OPTIMAL
-    assert result.metrics.used_sections == 5
-    assert [item.count for item in result.metrics.league_team_referee_counts] == [0, 0, 0, 2]
-    assert result.metrics.league_team_referee_count_difference == 2
+    assert result.status is SolverStatus.INFEASIBLE
+    assert result.slots == ()
+    assert result.diagnostics[0].code == "LEAGUE_REFEREE_UNAVAILABLE"
 
 
 def test_schedule_without_league_matches_reports_zero_league_referee_counts() -> None:
@@ -365,15 +373,23 @@ def test_organizer_only_league_reports_zero_team_referee_counts() -> None:
 def test_feasible_fairness_solution_keeps_referee_audit_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    representative = make_representative_request()
+    teams = tuple(Team(id=f"team-{index}", name=f"チーム{index}") for index in range(1, 9))
     request = ScheduleRequest(
-        teams=representative.teams[:4],
-        courts=representative.courts[:2],
-        matches=representative.matches[:6],
-        day=DaySettings(max_sections=12),
-        referees=representative.referees,
-        random_seed=representative.random_seed,
-        solver=representative.solver.model_copy(update={"max_time_seconds": 10}),
+        teams=teams,
+        courts=(Court(id="court-a", name="Aコート"), Court(id="court-b", name="Bコート")),
+        matches=tuple(
+            MatchSpec(
+                id=f"LG-M{index + 1}",
+                phase="league",
+                possible_home_team_ids=(teams[index * 2].id,),
+                possible_away_team_ids=(teams[index * 2 + 1].id,),
+            )
+            for index in range(4)
+        ),
+        day=DaySettings(max_sections=2),
+        referees=RefereeSettings(organizer_capacity=2),
+        random_seed=20260803,
+        solver=SolverSettings(max_time_seconds=10),
     )
     original_configured_solver = solver_module._configured_solver
     call_count = 0
@@ -382,9 +398,8 @@ def test_feasible_fairness_solution_keeps_referee_audit_metrics(
         nonlocal call_count
         call_count += 1
         configured = original_configured_solver(max_time_seconds, random_seed)
-        # 理論最小セクションでの試行、通常区間での主目的探索に続く
-        # 公平性探索だけを打ち切る。
-        if call_count == 3:
+        # 主目的探索に続く公平性探索だけを打ち切る。
+        if call_count == 2:
             configured.parameters.max_time_in_seconds = 0.000001
         return configured
 
@@ -394,7 +409,7 @@ def test_feasible_fairness_solution_keeps_referee_audit_metrics(
 
     assert result.status is SolverStatus.FEASIBLE
     assert result.metrics.optimality_proven is False
-    assert len(result.metrics.league_team_referee_counts) == 4
+    assert len(result.metrics.league_team_referee_counts) == 8
     assert result.metrics.league_team_referee_count_difference is not None
 
 

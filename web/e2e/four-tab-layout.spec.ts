@@ -90,6 +90,14 @@ test("入力と設定区画を決められたタブと順序に配置する", as
   await expect(settingsPanel.locator("#organizer-capacity")).toBeVisible();
   await expect(settingsPanel.locator("#random-seed")).toBeVisible();
   await expect(settingsPanel.locator("#block-count")).toBeVisible();
+  const teamReferees = settingsPanel.locator("#team-referees");
+  const day1Details = teamReferees.locator("xpath=ancestor::details[1]");
+  await day1Details.locator("summary").click();
+  await expect(teamReferees).toBeChecked();
+  await expect(settingsPanel.locator("label[for='team-referees']")).toContainText(
+    "直前セクションの同じコートで試合したチームの審判を必須",
+  );
+  await expect(day1Details).toContainText("オフにすると主催者審判へ切り替え");
   await expect(settingsPanel.locator("#final-stage-format")).toBeVisible();
   await expect(settingsPanel.getByRole("button", { name: "日程を生成する" })).toBeVisible();
 
