@@ -14,7 +14,7 @@ function objects(value: unknown): JsonObject[] {
     : [];
 }
 
-function rankKey(value: unknown): string | undefined {
+export function sameRankEntryKey(value: unknown): string | undefined {
   const entry = object(value);
   return entry?.type === "league_rank" &&
     typeof entry.block_id === "string" &&
@@ -37,7 +37,7 @@ function teamsByRank(standings: JsonObject): Map<string, string> {
 }
 
 function teamFor(entry: unknown, mapping: ReadonlyMap<string, string>): JsonObject {
-  const key = rankKey(entry);
+  const key = sameRankEntryKey(entry);
   const teamId = key === undefined ? undefined : mapping.get(key);
   if (teamId === undefined) throw new Error("順位枠に対応するチームがありません。");
   return { type: "concrete_team", team_id: teamId };

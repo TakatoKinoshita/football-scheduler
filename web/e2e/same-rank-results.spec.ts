@@ -39,6 +39,48 @@ async function expectEditingState(row: Locator): Promise<void> {
     .toBe("入力中");
 }
 
+test("次試合を審判するaway順位枠を2日目同順位リーグ日程の左側へ表示する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, sameRankWebFixture(16, {
+    resolved: false,
+    teamReferees: true,
+  }));
+  await page.locator("#tab-day2").click();
+
+  const courtRow = page.locator(
+    '#day2-schedule-view [data-schedule-view="court"] tr[data-match-id="SR-1-M1"]',
+  );
+  await expect(courtRow.locator("td").nth(2)).toHaveText(
+    "Bブロック 1位 対 Aブロック 1位",
+  );
+
+  await page.locator("#day2-schedule-view-toggle").getByLabel("時間順").check();
+  const timeRow = page.locator(
+    '#day2-schedule-view [data-schedule-view="time"] tr[data-match-id="SR-1-M1"]',
+  );
+  await expect(timeRow.locator("td").nth(3)).toHaveText(
+    "Bブロック 1位 対 Aブロック 1位",
+  );
+  await page.emulateMedia({ media: "print" });
+  await expect(timeRow.locator("td").nth(3)).toHaveText(
+    "Bブロック 1位 対 Aブロック 1位",
+  );
+
+  await page.emulateMedia({ media: "screen" });
+  await importDocument(page, sameRankWebFixture(16, { teamReferees: true }));
+  await page.locator("#tab-day2").click();
+  const resolvedRow = page.locator(
+    '#day2-schedule-view [data-schedule-view="time"] tr[data-match-id="SR-1-M1"]',
+  );
+  await expect(resolvedRow.locator("td").nth(3)).toHaveText("チーム5 対 チーム1");
+  await expect(
+    page.locator('#same-rank-results-input [data-match-id="SR-1-M1"] [data-field="teams"]'),
+  ).toHaveText("チーム1 対 チーム5");
+});
+
 test("16チーム4ブロックの同順位リーグを再表示し、引き分け結果から総合順位を確定する", async ({
   page,
 }) => {

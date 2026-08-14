@@ -789,10 +789,15 @@ export function scheduleViewTournamentFixture() {
 
 export function sameRankWebFixture(
   teamCount: 16 | 17 | 18,
-  options: { resolved?: boolean; policy?: "strict_same_rank" | "merge_bottom" } = {},
+  options: {
+    resolved?: boolean;
+    policy?: "strict_same_rank" | "merge_bottom";
+    teamReferees?: boolean;
+  } = {},
 ) {
   const resolved = options.resolved ?? true;
   const policy = options.policy ?? "strict_same_rank";
+  const teamReferees = options.teamReferees ?? false;
   const document = scheduleViewTournamentFixture() as unknown as {
     tournament: { input: Record<string, unknown>; result: Record<string, unknown> };
   };
@@ -1064,31 +1069,63 @@ export function sameRankWebFixture(
   const byPosition = new Map(
     scheduledMatches.map((item) => [`${String(item.section)}:${item.court}`, item]),
   );
-  schedule.slots = Array.from({ length: usedSections }, (_, index) => index + 1).flatMap((section) =>
+  const rankRefKey = (rankRef: unknown): string => {
+    const entry = rankRef as Record<string, unknown>;
+    return `${String(entry.block_id)}:${String(entry.rank)}`;
+  };
+  const teamIdForRankRef = (rankRef: unknown): string | null =>
+    resolved ? (teamByRank.get(rankRefKey(rankRef)) ?? null) : null;
+  const day2Slots = Array.from({ length: usedSections }, (_, index) => index + 1).flatMap((section) =>
     ["court-a", "court-b"].map((court) => {
       const item = byPosition.get(`${String(section)}:${court}`);
-      return item === undefined
-        ? { day_id: "day2", section_no: section, court_id: court, match_id: null, referee_assignment: null }
-        : {
-            day_id: "day2", section_no: section, court_id: court, match_id: item.match.id,
-            referee_assignment: section === 1
-              ? { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "first_section", fallback_reasons: [] }
-              : { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "fallback", fallback_reasons: ["team_referee_unavailable"] },
-          };
+      if (item === undefined) {
+        return { day_id: "day2", section_no: section, court_id: court, match_id: null, referee_assignment: null };
+      }
+      const previous = byPosition.get(`${String(section - 1)}:${court}`);
+      const refereeRankRef = teamReferees && section > 1 ? previous?.match.away : undefined;
+      return {
+        day_id: "day2",
+        section_no: section,
+        court_id: court,
+        match_id: item.match.id,
+        referee_assignment: refereeRankRef === undefined
+          ? section === 1
+            ? { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "first_section", fallback_reasons: [] }
+            : { kind: "organizer", rank_ref: null, team_id: null, organizer_reason: "fallback", fallback_reasons: ["team_referee_unavailable"] }
+          : {
+              kind: "team",
+              rank_ref: refereeRankRef,
+              team_id: teamIdForRankRef(refereeRankRef),
+              organizer_reason: null,
+              fallback_reasons: [],
+            },
+      };
     })
   );
-  schedule.team_schedules = scheduledMatches.flatMap((item) =>
-    [item.match.home, item.match.away].map((rankRef) => ({
-      rank_ref: rankRef,
-      team_id: resolved
-        ? teamByRank.get(`${String((rankRef as Record<string, unknown>).block_id)}:${String((rankRef as Record<string, unknown>).rank)}`)
-        : null,
-      role: "match",
-      match_id: item.match.id,
-      section_no: item.section,
-      court_id: item.court,
-    }))
-  );
+  schedule.slots = day2Slots;
+  schedule.team_schedules = [
+    ...scheduledMatches.flatMap((item) =>
+      [item.match.home, item.match.away].map((rankRef) => ({
+        rank_ref: rankRef,
+        team_id: teamIdForRankRef(rankRef),
+        role: "match",
+        match_id: item.match.id,
+        section_no: item.section,
+        court_id: item.court,
+      }))
+    ),
+    ...day2Slots.flatMap((slot) => {
+      const assignment = slot.referee_assignment as Record<string, unknown> | null;
+      return assignment?.kind === "team" ? [{
+        rank_ref: assignment.rank_ref,
+        team_id: assignment.team_id,
+        role: "referee",
+        match_id: slot.match_id,
+        section_no: slot.section_no,
+        court_id: slot.court_id,
+      }] : [];
+    }),
+  ];
   const day2Start = 9 * 60 + 30;
   schedule.section_timings = Array.from({ length: usedSections }, (_, index) => {
     const start = day2Start + index * 15;
@@ -1102,14 +1139,50 @@ export function sameRankWebFixture(
   schedule.expected_end_time = usedSections === 0
     ? null
     : (schedule.section_timings as Array<Record<string, unknown>>).at(-1)!.match_end_time;
-  const organizerCount = scheduledMatches.length;
-  const fallbackCount = scheduledMatches.filter((item) => item.section > 1).length;
+  const rankRefs = groups.flatMap((group) =>
+    group.participants.map((participant) => participant.entry)
+  );
+  const refereeCounts = new Map(rankRefs.map((rankRef) => [rankRefKey(rankRef), 0]));
+  let organizerCount = 0;
+  let fallbackCount = 0;
+  let previousSameCourtRefereeCount = 0;
+  for (const slot of day2Slots) {
+    if (slot.match_id === null) continue;
+    const assignment = slot.referee_assignment as Record<string, unknown>;
+    if (assignment.kind === "organizer") {
+      organizerCount += 1;
+      if (slot.section_no > 1) fallbackCount += 1;
+    } else {
+      const key = rankRefKey(assignment.rank_ref);
+      refereeCounts.set(key, (refereeCounts.get(key) ?? 0) + 1);
+      previousSameCourtRefereeCount += 1;
+    }
+  }
   const sectionsByRank = new Map<string, number[]>();
+  const rolesByRank = new Map<
+    string,
+    Array<{ section: number; court: string; role: "match" | "referee" }>
+  >();
+  const pushRole = (
+    rankRef: unknown,
+    section: number,
+    court: string,
+    role: "match" | "referee",
+  ): void => {
+    const key = rankRefKey(rankRef);
+    rolesByRank.set(key, [...(rolesByRank.get(key) ?? []), { section, court, role }]);
+  };
   for (const item of scheduledMatches) {
     for (const rankRef of [item.match.home, item.match.away]) {
-      const entry = rankRef as Record<string, unknown>;
-      const key = `${String(entry.block_id)}:${String(entry.rank)}`;
+      const key = rankRefKey(rankRef);
       sectionsByRank.set(key, [...(sectionsByRank.get(key) ?? []), item.section]);
+      pushRole(rankRef, item.section, item.court, "match");
+    }
+  }
+  for (const slot of day2Slots) {
+    const assignment = slot.referee_assignment as Record<string, unknown> | null;
+    if (slot.match_id !== null && assignment?.kind === "team") {
+      pushRole(assignment.rank_ref, slot.section_no, slot.court_id, "referee");
     }
   }
   let maximumWait = 0;
@@ -1122,13 +1195,35 @@ export function sameRankWebFixture(
   const courtCounts = ["court-a", "court-b"].map(
     (court) => scheduledMatches.filter((item) => item.court === court).length,
   );
+  const refereeCountValues = [...refereeCounts.values()];
+  const refereeCountMin = Math.min(...refereeCountValues);
+  const refereeCountMax = Math.max(...refereeCountValues);
+  let refereeThenMatchCount = 0;
+  let gapCourtChangeCount = 0;
+  for (const roles of rolesByRank.values()) {
+    const ordered = [...roles].sort((left, right) => left.section - right.section);
+    for (let index = 1; index < ordered.length; index += 1) {
+      const previous = ordered[index - 1]!;
+      const current = ordered[index]!;
+      if (
+        previous.role === "referee" &&
+        current.role === "match" &&
+        current.section === previous.section + 1
+      ) {
+        refereeThenMatchCount += 1;
+      }
+      if (current.section - previous.section > 1 && current.court !== previous.court) {
+        gapCourtChangeCount += 1;
+      }
+    }
+  }
   const metricValues: Record<string, number> = {
     used_sections: usedSections,
-    referee_count_difference: 0,
+    referee_count_difference: refereeCountMax - refereeCountMin,
     maximum_team_wait_sections: maximumWait,
-    referee_then_match_count: 0,
-    previous_same_court_referee_count: 0,
-    gap_court_change_count: 0,
+    referee_then_match_count: refereeThenMatchCount,
+    previous_same_court_referee_count: previousSameCourtRefereeCount,
+    gap_court_change_count: gapCourtChangeCount,
     court_usage_difference: Math.max(...courtCounts) - Math.min(...courtCounts),
   };
   const objectives = [
@@ -1156,18 +1251,18 @@ export function sameRankWebFixture(
     organizer_referee_count: organizerCount,
     fallback_count: fallbackCount,
     unused_slot_count: usedSections * 2 - sameRankMatches.length,
-    referee_counts: groups.flatMap((group) => group.participants.map((participant) => ({
-      rank_ref: participant.entry,
-      team_id: resolved ? participant.team?.team_id ?? null : null,
-      count: 0,
-    }))),
-    referee_count_min: 0,
-    referee_count_max: 0,
-    referee_count_difference: 0,
+    referee_counts: rankRefs.map((rankRef) => ({
+      rank_ref: rankRef,
+      team_id: teamIdForRankRef(rankRef),
+      count: refereeCounts.get(rankRefKey(rankRef)) ?? 0,
+    })),
+    referee_count_min: refereeCountMin,
+    referee_count_max: refereeCountMax,
+    referee_count_difference: metricValues.referee_count_difference,
     maximum_team_wait_sections: maximumWait,
-    referee_then_match_count: 0,
-    previous_same_court_referee_count: 0,
-    gap_court_change_count: 0,
+    referee_then_match_count: refereeThenMatchCount,
+    previous_same_court_referee_count: previousSameCourtRefereeCount,
+    gap_court_change_count: gapCourtChangeCount,
     court_usage_difference: metricValues.court_usage_difference,
     layout_attempt_count: 1,
     optimized_objectives: objectives,
