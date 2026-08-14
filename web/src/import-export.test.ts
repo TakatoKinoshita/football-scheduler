@@ -13,6 +13,7 @@ import {
   createTournamentDocument,
   type TournamentDocument,
 } from "./types";
+import pythonSameRankDocument from "./fixtures/python-same-rank-document.json";
 
 function validDocument() {
   const document = createTournamentDocument(new Date("2026-08-05T00:00:00Z"));
@@ -385,6 +386,22 @@ describe("大会JSONの入出力", () => {
       .toEqual(document);
   });
 
+  it("Pythonが生成した同順位リーグ日程を現行の5目的契約で復元する", () => {
+    const document = structuredClone(pythonSameRankDocument) as unknown as TournamentDocument;
+    const result = document.tournament.result as Record<string, unknown>;
+    const schedule = result.day2_schedule as Record<string, unknown>;
+    const metrics = schedule.metrics as Record<string, unknown>;
+
+    expect(metrics.optimized_objectives).toEqual([
+      "used_sections",
+      "referee_count_difference",
+      "maximum_team_wait_sections",
+      "gap_court_change_count",
+      "court_usage_difference",
+    ]);
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+  });
+
   it("同順位グループの順位範囲改ざんを拒否する", () => {
     const document = sameRankWebFixture(16, { resolved: false });
     const result = document.tournament.result as Record<string, unknown>;
@@ -485,6 +502,13 @@ describe("大会JSONの入出力", () => {
     const changedMetrics = changedSchedule.metrics as Record<string, unknown>;
     (changedMetrics.objective_stages as Array<Record<string, unknown>>)[0]!.value = 999;
     expect(() => parseTournamentJson(JSON.stringify(changedStage))).toThrow(/目的別監査値/);
+
+    const changedAudit = sameRankWebFixture(16, { resolved: false }) as unknown as TournamentDocument;
+    const changedAuditResult = changedAudit.tournament.result as Record<string, unknown>;
+    const changedAuditSchedule = changedAuditResult.day2_schedule as Record<string, unknown>;
+    const changedAuditMetrics = changedAuditSchedule.metrics as Record<string, unknown>;
+    changedAuditMetrics.referee_then_match_count = 999;
+    expect(() => parseTournamentJson(JSON.stringify(changedAudit))).toThrow(/日程監査値/);
   });
 
   it("同順位リーグ日程の独立検証欠落と統合検証不一致を拒否する", () => {

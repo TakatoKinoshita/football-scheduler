@@ -1300,7 +1300,6 @@ function validateSameRankDay2Schedule(
   }
   const objectives = [
     "used_sections", "referee_count_difference", "maximum_team_wait_sections",
-    "referee_then_match_count", "previous_same_court_referee_count",
     "gap_court_change_count", "court_usage_difference",
   ];
   const optimizedObjectives = metrics.optimized_objectives;

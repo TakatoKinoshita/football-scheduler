@@ -1131,7 +1131,13 @@ export function sameRankWebFixture(
     gap_court_change_count: 0,
     court_usage_difference: Math.max(...courtCounts) - Math.min(...courtCounts),
   };
-  const objectives = Object.keys(metricValues);
+  const objectives = [
+    "used_sections",
+    "referee_count_difference",
+    "maximum_team_wait_sections",
+    "gap_court_change_count",
+    "court_usage_difference",
+  ];
   const summary = {
     expected_match_count: sameRankMatches.length,
     scheduled_match_count: sameRankMatches.length,

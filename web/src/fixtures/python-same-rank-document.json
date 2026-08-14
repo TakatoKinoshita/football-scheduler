@@ -1,0 +1,746 @@
+{
+  "documentType": "football-scheduler-tournament",
+  "schemaVersion": "0.2.0",
+  "updatedAt": "2026-08-14T00:00:00.000Z",
+  "tournament": {
+    "name": "Python生成同順位リーグ契約fixture",
+    "input": {
+      "schema_version": "0.2.0",
+      "request_kind": "day1_league",
+      "teams": [
+        {
+          "id": "team-1",
+          "name": "チーム1"
+        },
+        {
+          "id": "team-2",
+          "name": "チーム2"
+        },
+        {
+          "id": "team-3",
+          "name": "チーム3"
+        },
+        {
+          "id": "team-4",
+          "name": "チーム4"
+        }
+      ],
+      "courts": [
+        {
+          "id": "court-a",
+          "name": "Aコート"
+        },
+        {
+          "id": "court-b",
+          "name": "Bコート"
+        }
+      ],
+      "league": {
+        "block_count": 2,
+        "assignment_mode": "seeded_snake"
+      },
+      "final_stage": {
+        "format": "same_rank_league",
+        "uneven_policy": "strict_same_rank"
+      },
+      "day": {
+        "id": "day1",
+        "start_time": "09:30",
+        "game_duration_minutes": 35,
+        "margin_minutes": 5,
+        "max_sections": 2
+      },
+      "day2": {
+        "id": "day2",
+        "start_time": "09:30",
+        "game_duration_minutes": 35,
+        "margin_minutes": 10,
+        "max_sections": 2
+      },
+      "referees": {
+        "organizer_capacity": 2,
+        "team_referees_required_after_first": true,
+        "day2_fallback": "organizer"
+      },
+      "random_seed": 20260803,
+      "solver": {
+        "max_time_seconds": 5
+      }
+    },
+    "result": {
+      "schema_version": "0.2.0",
+      "status": "OPTIMAL",
+      "slots": [
+        {
+          "day_id": "day1",
+          "section_no": 1,
+          "court_id": "court-a",
+          "match_id": "LG-B-M1",
+          "referee_assignment": {
+            "kind": "organizer",
+            "team_id": null,
+            "source_match_id": null,
+            "organizer_reason": null,
+            "fallback_reasons": []
+          }
+        },
+        {
+          "day_id": "day1",
+          "section_no": 1,
+          "court_id": "court-b",
+          "match_id": "LG-A-M1",
+          "referee_assignment": {
+            "kind": "organizer",
+            "team_id": null,
+            "source_match_id": null,
+            "organizer_reason": null,
+            "fallback_reasons": []
+          }
+        }
+      ],
+      "section_timings": [
+        {
+          "day_id": "day1",
+          "section_no": 1,
+          "start_time": "09:30:00",
+          "match_end_time": "10:05:00",
+          "break_after_minutes": 0
+        }
+      ],
+      "expected_end_time": "10:05:00",
+      "metrics": {
+        "random_seed": 20260803,
+        "num_search_workers": 1,
+        "max_time_seconds": 5.0,
+        "ortools_version": "9.15.6755",
+        "wall_time_seconds": 0,
+        "used_sections": 1,
+        "objective_value": 1.0,
+        "best_objective_bound": 1.0,
+        "league_team_referee_counts": [
+          {
+            "team_id": "team-1",
+            "count": 0
+          },
+          {
+            "team_id": "team-2",
+            "count": 0
+          },
+          {
+            "team_id": "team-3",
+            "count": 0
+          },
+          {
+            "team_id": "team-4",
+            "count": 0
+          }
+        ],
+        "league_team_referee_count_min": 0,
+        "league_team_referee_count_max": 0,
+        "league_team_referee_count_difference": 0,
+        "maximum_team_wait_sections": 0,
+        "referee_then_match_count": 0,
+        "league_previous_same_court_referee_count": 0,
+        "adjacent_assignment_court_change_count": 0,
+        "team_court_change_count": 0,
+        "court_usage_difference": 0,
+        "organizer_referee_count": 2,
+        "tournament_team_referee_count": 0,
+        "tournament_referee_fallback_count": 0,
+        "unused_slot_count": null,
+        "placement_tournament_finals": [],
+        "non_primary_final_max_gap": null,
+        "non_primary_final_sum_gap": null,
+        "optimized_objectives": [
+          "used_sections",
+          "league_team_referee_count_difference",
+          "maximum_team_wait_sections",
+          "team_court_change_count",
+          "court_usage_difference"
+        ],
+        "objective_stages": [
+          {
+            "objective": "used_sections",
+            "value": 1,
+            "optimality_proven": true
+          },
+          {
+            "objective": "league_team_referee_count_difference",
+            "value": 0,
+            "optimality_proven": true
+          },
+          {
+            "objective": "maximum_team_wait_sections",
+            "value": 0,
+            "optimality_proven": true
+          },
+          {
+            "objective": "team_court_change_count",
+            "value": 0,
+            "optimality_proven": true
+          },
+          {
+            "objective": "court_usage_difference",
+            "value": 0,
+            "optimality_proven": true
+          }
+        ],
+        "optimality_proven": true
+      },
+      "diagnostics": [],
+      "schedule_scope": "day1_league",
+      "league_plan": {
+        "schema_version": "0.2.0",
+        "assignment_mode": "seeded_snake",
+        "random_seed": 20260803,
+        "blocks": [
+          {
+            "id": "A",
+            "team_ids": [
+              "team-1",
+              "team-4"
+            ]
+          },
+          {
+            "id": "B",
+            "team_ids": [
+              "team-2",
+              "team-3"
+            ]
+          }
+        ],
+        "logical_rounds": [
+          {
+            "block_id": "A",
+            "round_no": 1,
+            "match_ids": [
+              "LG-A-M1"
+            ]
+          },
+          {
+            "block_id": "B",
+            "round_no": 1,
+            "match_ids": [
+              "LG-B-M1"
+            ]
+          }
+        ],
+        "matches": [
+          {
+            "id": "LG-A-M1",
+            "phase": "league",
+            "round": "Aブロック 第1ラウンド",
+            "possible_home_team_ids": [
+              "team-1"
+            ],
+            "possible_away_team_ids": [
+              "team-4"
+            ],
+            "prerequisite_match_ids": [],
+            "organizer_referee_required": false
+          },
+          {
+            "id": "LG-B-M1",
+            "phase": "league",
+            "round": "Bブロック 第1ラウンド",
+            "possible_home_team_ids": [
+              "team-2"
+            ],
+            "possible_away_team_ids": [
+              "team-3"
+            ],
+            "prerequisite_match_ids": [],
+            "organizer_referee_required": false
+          }
+        ]
+      },
+      "validation": {
+        "valid": true,
+        "diagnostics": [],
+        "summary": {
+          "checked_match_count": 2,
+          "checked_slot_count": 2,
+          "error_count": 0,
+          "league_team_referee_counts": [
+            {
+              "team_id": "team-1",
+              "count": 0
+            },
+            {
+              "team_id": "team-2",
+              "count": 0
+            },
+            {
+              "team_id": "team-3",
+              "count": 0
+            },
+            {
+              "team_id": "team-4",
+              "count": 0
+            }
+          ],
+          "league_team_referee_count_min": 0,
+          "league_team_referee_count_max": 0,
+          "league_team_referee_count_difference": 0,
+          "adjacent_assignment_court_change_count": 0
+        }
+      },
+      "same_rank_plan": {
+        "schema_version": "0.2.0",
+        "format": "same_rank_league",
+        "status": "COMPLETE",
+        "participant_resolution": "provisional",
+        "uneven_policy": "strict_same_rank",
+        "team_count": 4,
+        "block_count": 2,
+        "random_seed": 20260803,
+        "groups": [
+          {
+            "id": "same-rank-1",
+            "display_name": "予選1位リーグ",
+            "source_block_ranks": [
+              1
+            ],
+            "overall_rank_range": [
+              1,
+              2
+            ],
+            "participants": [
+              {
+                "entry": {
+                  "type": "league_rank",
+                  "block_id": "A",
+                  "rank": 1
+                },
+                "team": null
+              },
+              {
+                "entry": {
+                  "type": "league_rank",
+                  "block_id": "B",
+                  "rank": 1
+                },
+                "team": null
+              }
+            ],
+            "logical_rounds": [
+              {
+                "group_id": "same-rank-1",
+                "round_no": 1,
+                "match_ids": [
+                  "SR-1-M1"
+                ]
+              }
+            ],
+            "matches": [
+              {
+                "id": "SR-1-M1",
+                "phase": "same_rank_league",
+                "group_id": "same-rank-1",
+                "round": "予選1位リーグ 第1ラウンド",
+                "round_no": 1,
+                "home": {
+                  "type": "league_rank",
+                  "block_id": "A",
+                  "rank": 1
+                },
+                "away": {
+                  "type": "league_rank",
+                  "block_id": "B",
+                  "rank": 1
+                },
+                "home_team": null,
+                "away_team": null
+              }
+            ]
+          },
+          {
+            "id": "same-rank-2",
+            "display_name": "予選2位リーグ",
+            "source_block_ranks": [
+              2
+            ],
+            "overall_rank_range": [
+              3,
+              4
+            ],
+            "participants": [
+              {
+                "entry": {
+                  "type": "league_rank",
+                  "block_id": "A",
+                  "rank": 2
+                },
+                "team": null
+              },
+              {
+                "entry": {
+                  "type": "league_rank",
+                  "block_id": "B",
+                  "rank": 2
+                },
+                "team": null
+              }
+            ],
+            "logical_rounds": [
+              {
+                "group_id": "same-rank-2",
+                "round_no": 1,
+                "match_ids": [
+                  "SR-2-M1"
+                ]
+              }
+            ],
+            "matches": [
+              {
+                "id": "SR-2-M1",
+                "phase": "same_rank_league",
+                "group_id": "same-rank-2",
+                "round": "予選2位リーグ 第1ラウンド",
+                "round_no": 1,
+                "home": {
+                  "type": "league_rank",
+                  "block_id": "A",
+                  "rank": 2
+                },
+                "away": {
+                  "type": "league_rank",
+                  "block_id": "B",
+                  "rank": 2
+                },
+                "home_team": null,
+                "away_team": null
+              }
+            ]
+          }
+        ],
+        "automatic_standings": [],
+        "warnings": []
+      },
+      "day2_schedule": {
+        "schema_version": "0.2.0",
+        "schedule_scope": "day2_same_rank_league",
+        "participant_resolution": "provisional",
+        "status": "OPTIMAL",
+        "same_rank_matches": [
+          {
+            "id": "SR-1-M1",
+            "phase": "same_rank_league",
+            "group_id": "same-rank-1",
+            "round": "予選1位リーグ 第1ラウンド",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 1
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 1
+            },
+            "home_team": null,
+            "away_team": null
+          },
+          {
+            "id": "SR-2-M1",
+            "phase": "same_rank_league",
+            "group_id": "same-rank-2",
+            "round": "予選2位リーグ 第1ラウンド",
+            "round_no": 1,
+            "home": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 2
+            },
+            "away": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 2
+            },
+            "home_team": null,
+            "away_team": null
+          }
+        ],
+        "slots": [
+          {
+            "day_id": "day2",
+            "section_no": 1,
+            "court_id": "court-a",
+            "match_id": "SR-1-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "rank_ref": null,
+              "team_id": null,
+              "organizer_reason": "first_section",
+              "fallback_reasons": []
+            }
+          },
+          {
+            "day_id": "day2",
+            "section_no": 1,
+            "court_id": "court-b",
+            "match_id": "SR-2-M1",
+            "referee_assignment": {
+              "kind": "organizer",
+              "rank_ref": null,
+              "team_id": null,
+              "organizer_reason": "first_section",
+              "fallback_reasons": []
+            }
+          }
+        ],
+        "section_timings": [
+          {
+            "day_id": "day2",
+            "section_no": 1,
+            "start_time": "09:30:00",
+            "match_end_time": "10:05:00",
+            "break_after_minutes": 0
+          }
+        ],
+        "expected_end_time": "10:05:00",
+        "team_schedules": [
+          {
+            "rank_ref": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 1
+            },
+            "team_id": null,
+            "role": "match",
+            "match_id": "SR-1-M1",
+            "section_no": 1,
+            "court_id": "court-a"
+          },
+          {
+            "rank_ref": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 1
+            },
+            "team_id": null,
+            "role": "match",
+            "match_id": "SR-1-M1",
+            "section_no": 1,
+            "court_id": "court-a"
+          },
+          {
+            "rank_ref": {
+              "type": "league_rank",
+              "block_id": "A",
+              "rank": 2
+            },
+            "team_id": null,
+            "role": "match",
+            "match_id": "SR-2-M1",
+            "section_no": 1,
+            "court_id": "court-b"
+          },
+          {
+            "rank_ref": {
+              "type": "league_rank",
+              "block_id": "B",
+              "rank": 2
+            },
+            "team_id": null,
+            "role": "match",
+            "match_id": "SR-2-M1",
+            "section_no": 1,
+            "court_id": "court-b"
+          }
+        ],
+        "metrics": {
+          "random_seed": 20260803,
+          "num_search_workers": 1,
+          "max_time_seconds": 5.0,
+          "ortools_version": "9.15.6755",
+          "wall_time_seconds": 0,
+          "used_sections": 1,
+          "referee_counts": [
+            {
+              "rank_ref": {
+                "type": "league_rank",
+                "block_id": "A",
+                "rank": 1
+              },
+              "team_id": null,
+              "count": 0
+            },
+            {
+              "rank_ref": {
+                "type": "league_rank",
+                "block_id": "B",
+                "rank": 1
+              },
+              "team_id": null,
+              "count": 0
+            },
+            {
+              "rank_ref": {
+                "type": "league_rank",
+                "block_id": "A",
+                "rank": 2
+              },
+              "team_id": null,
+              "count": 0
+            },
+            {
+              "rank_ref": {
+                "type": "league_rank",
+                "block_id": "B",
+                "rank": 2
+              },
+              "team_id": null,
+              "count": 0
+            }
+          ],
+          "referee_count_min": 0,
+          "referee_count_max": 0,
+          "referee_count_difference": 0,
+          "maximum_team_wait_sections": 0,
+          "referee_then_match_count": 0,
+          "previous_same_court_referee_count": 0,
+          "gap_court_change_count": 0,
+          "court_usage_difference": 0,
+          "organizer_referee_count": 2,
+          "fallback_count": 0,
+          "unused_slot_count": 0,
+          "layout_attempt_count": 3,
+          "optimized_objectives": [
+            "used_sections",
+            "referee_count_difference",
+            "maximum_team_wait_sections",
+            "gap_court_change_count",
+            "court_usage_difference"
+          ],
+          "objective_stages": [
+            {
+              "objective": "used_sections",
+              "value": 1,
+              "optimality_proven": true
+            },
+            {
+              "objective": "referee_count_difference",
+              "value": 0,
+              "optimality_proven": true
+            },
+            {
+              "objective": "maximum_team_wait_sections",
+              "value": 0,
+              "optimality_proven": true
+            },
+            {
+              "objective": "gap_court_change_count",
+              "value": 0,
+              "optimality_proven": true
+            },
+            {
+              "objective": "court_usage_difference",
+              "value": 0,
+              "optimality_proven": true
+            }
+          ],
+          "optimality_proven": true
+        },
+        "diagnostics": [],
+        "validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "expected_match_count": 2,
+            "scheduled_match_count": 2,
+            "used_sections": 1,
+            "organizer_referee_count": 2,
+            "fallback_count": 0,
+            "error_count": 0
+          }
+        },
+        "integrated_validation": {
+          "valid": true,
+          "diagnostics": [],
+          "summary": {
+            "day1": {
+              "checked_match_count": 2,
+              "checked_slot_count": 2,
+              "error_count": 0,
+              "league_team_referee_counts": [
+                {
+                  "team_id": "team-1",
+                  "count": 0
+                },
+                {
+                  "team_id": "team-2",
+                  "count": 0
+                },
+                {
+                  "team_id": "team-3",
+                  "count": 0
+                },
+                {
+                  "team_id": "team-4",
+                  "count": 0
+                }
+              ],
+              "league_team_referee_count_min": 0,
+              "league_team_referee_count_max": 0,
+              "league_team_referee_count_difference": 0,
+              "adjacent_assignment_court_change_count": 0
+            },
+            "day2": {
+              "expected_match_count": 2,
+              "scheduled_match_count": 2,
+              "used_sections": 1,
+              "organizer_referee_count": 2,
+              "fallback_count": 0,
+              "error_count": 0
+            },
+            "error_count": 0
+          }
+        }
+      },
+      "integrated_validation": {
+        "valid": true,
+        "diagnostics": [],
+        "summary": {
+          "day1": {
+            "checked_match_count": 2,
+            "checked_slot_count": 2,
+            "error_count": 0,
+            "league_team_referee_counts": [
+              {
+                "team_id": "team-1",
+                "count": 0
+              },
+              {
+                "team_id": "team-2",
+                "count": 0
+              },
+              {
+                "team_id": "team-3",
+                "count": 0
+              },
+              {
+                "team_id": "team-4",
+                "count": 0
+              }
+            ],
+            "league_team_referee_count_min": 0,
+            "league_team_referee_count_max": 0,
+            "league_team_referee_count_difference": 0,
+            "adjacent_assignment_court_change_count": 0
+          },
+          "day2": {
+            "expected_match_count": 2,
+            "scheduled_match_count": 2,
+            "used_sections": 1,
+            "organizer_referee_count": 2,
+            "fallback_count": 0,
+            "error_count": 0
+          },
+          "error_count": 0
+        }
+      }
+    }
+  }
+}
