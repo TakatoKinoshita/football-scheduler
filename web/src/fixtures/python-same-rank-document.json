@@ -114,6 +114,10 @@
         "max_time_seconds": 5.0,
         "ortools_version": "9.15.6755",
         "wall_time_seconds": 0,
+        "model_variant": "compact_day1_league",
+        "model_variable_count": 15,
+        "model_constraint_count": 19,
+        "team_referee_variable_count": 0,
         "used_sections": 1,
         "objective_value": 1.0,
         "best_objective_bound": 1.0,
@@ -147,7 +151,7 @@
         "organizer_referee_count": 2,
         "tournament_team_referee_count": 0,
         "tournament_referee_fallback_count": 0,
-        "unused_slot_count": null,
+        "unused_slot_count": 0,
         "placement_tournament_finals": [],
         "non_primary_final_max_gap": null,
         "non_primary_final_sum_gap": null,
@@ -162,27 +166,37 @@
           {
             "objective": "used_sections",
             "value": 1,
-            "optimality_proven": true
+            "best_bound": 1.0,
+            "optimality_proven": true,
+            "termination_reason": "capacity_lower_bound"
           },
           {
             "objective": "league_team_referee_count_difference",
             "value": 0,
-            "optimality_proven": true
+            "best_bound": 0.0,
+            "optimality_proven": true,
+            "termination_reason": "optimal"
           },
           {
             "objective": "maximum_team_wait_sections",
             "value": 0,
-            "optimality_proven": true
+            "best_bound": 0.0,
+            "optimality_proven": true,
+            "termination_reason": "optimal"
           },
           {
             "objective": "team_court_change_count",
             "value": 0,
-            "optimality_proven": true
+            "best_bound": 0.0,
+            "optimality_proven": true,
+            "termination_reason": "optimal"
           },
           {
             "objective": "court_usage_difference",
             "value": 0,
-            "optimality_proven": true
+            "best_bound": 0.0,
+            "optimality_proven": true,
+            "termination_reason": "capacity_balance"
           }
         ],
         "optimality_proven": true
@@ -618,27 +632,37 @@
             {
               "objective": "used_sections",
               "value": 1,
-              "optimality_proven": true
+              "best_bound": null,
+              "optimality_proven": true,
+              "termination_reason": null
             },
             {
               "objective": "referee_count_difference",
               "value": 0,
-              "optimality_proven": true
+              "best_bound": null,
+              "optimality_proven": true,
+              "termination_reason": null
             },
             {
               "objective": "maximum_team_wait_sections",
               "value": 0,
-              "optimality_proven": true
+              "best_bound": null,
+              "optimality_proven": true,
+              "termination_reason": null
             },
             {
               "objective": "gap_court_change_count",
               "value": 0,
-              "optimality_proven": true
+              "best_bound": null,
+              "optimality_proven": true,
+              "termination_reason": null
             },
             {
               "objective": "court_usage_difference",
               "value": 0,
-              "optimality_proven": true
+              "best_bound": null,
+              "optimality_proven": true,
+              "termination_reason": null
             }
           ],
           "optimality_proven": true

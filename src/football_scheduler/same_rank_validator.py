@@ -322,19 +322,22 @@ def validate_same_rank_day2_schedule(
         ordered = sorted(entries)
         for left, right in pairwise(ordered):
             if right[0] == left[0] + 1:
-                if right[1] != left[1]:
+                if left[2] == "match" and right[2] == "referee" and right[1] != left[1]:
                     diagnostics.append(
                         _diagnostic(
                             "SAME_RANK_ADJACENT_COURT_CHANGE",
-                            "連続セクションの試合・審判は同じコートへ配置してください。",
+                            "試合直後のチーム審判は同じコートへ配置してください。",
                             rank_ref=f"{rank_key[0]}:{rank_key[1]}",
                         )
                     )
-                if left[2] != "match" or right[2] != "referee":
+                if (left[2], right[2]) not in {
+                    ("match", "referee"),
+                    ("referee", "match"),
+                }:
                     diagnostics.append(
                         _diagnostic(
                             "SAME_RANK_CONSECUTIVE_ROLE_INVALID",
-                            "連続セクションでは試合から審判への担当だけが許可されます。",
+                            "連続担当は試合→審判または試合→審判→試合にしてください。",
                             rank_ref=f"{rank_key[0]}:{rank_key[1]}",
                         )
                     )

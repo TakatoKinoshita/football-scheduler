@@ -191,18 +191,18 @@ def test_strict_uses_team_referees_after_first_section() -> None:
     )
 
 
-def test_all_adjacent_match_and_referee_roles_stay_on_same_court() -> None:
+def test_match_then_referee_stays_on_the_same_court() -> None:
     request, _ = _request(team_count=8, block_count=4, court_count=2, max_time_seconds=1)
     result = generate_same_rank_day2_schedule(request)
-    roles: dict[tuple[str, int], list[tuple[int, str]]] = {}
+    roles: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
     for route in result.team_schedules:
         key = route.rank_ref.block_id, route.rank_ref.rank
-        roles.setdefault(key, []).append((route.section_no, route.court_id))
+        roles.setdefault(key, []).append((route.section_no, route.court_id, route.role))
 
     for entries in roles.values():
         ordered = sorted(entries)
         for left, right in pairwise(ordered):
-            if right[0] == left[0] + 1:
+            if right[0] == left[0] + 1 and (left[2], right[2]) == ("match", "referee"):
                 assert right[1] == left[1]
 
 
@@ -238,7 +238,7 @@ def test_team_referee_always_comes_from_immediately_previous_match_on_same_court
         }
 
 
-def test_role_sequences_only_allow_match_then_referee_when_adjacent() -> None:
+def test_role_sequences_allow_match_referee_match_but_not_adjacent_referees() -> None:
     request, _ = _request(
         team_count=8,
         block_count=4,
@@ -257,10 +257,20 @@ def test_role_sequences_only_allow_match_then_referee_when_adjacent() -> None:
     for entries in roles.values():
         ordered = sorted(entries)
         assert ordered[0][2] == "match"
-        for left, right in pairwise(ordered):
+        for index, (left, right) in enumerate(pairwise(ordered)):
             if right[0] == left[0] + 1:
-                assert (left[2], right[2]) == ("match", "referee")
-                assert left[1] == right[1]
+                assert (left[2], right[2]) in {
+                    ("match", "referee"),
+                    ("referee", "match"),
+                }
+                if (left[2], right[2]) == ("match", "referee"):
+                    assert left[1] == right[1]
+                else:
+                    assert index > 0
+                    source = ordered[index - 1]
+                    assert source[0] == left[0] - 1
+                    assert (source[2], left[2]) == ("match", "referee")
+                    assert source[1] == left[1]
             else:
                 assert right[2] == "match"
 
@@ -424,7 +434,7 @@ def test_search_timeout_is_unknown_and_reports_capacity_evidence() -> None:
     } <= result.diagnostics[0].details.keys()
 
 
-def test_organizer_fallback_can_complete_when_strict_search_cannot() -> None:
+def test_organizer_policy_uses_no_fallback_when_team_referees_are_feasible() -> None:
     request, _ = _request(
         team_count=17,
         block_count=4,
@@ -436,8 +446,8 @@ def test_organizer_fallback_can_complete_when_strict_search_cannot() -> None:
     result = generate_same_rank_day2_schedule(request)
 
     assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
-    assert result.metrics.fallback_count is not None
-    assert result.metrics.fallback_count > 0
+    assert result.metrics.fallback_count == 0
+    assert result.metrics.referee_then_match_count > 0
     assert validate_same_rank_day2_schedule(request, result).valid is True
 
 
