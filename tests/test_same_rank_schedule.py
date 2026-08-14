@@ -275,6 +275,35 @@ def test_role_sequences_allow_match_referee_match_but_not_adjacent_referees() ->
                 assert right[2] == "match"
 
 
+def test_sixteen_teams_three_courts_allow_cross_court_match_after_referee() -> None:
+    request, _ = _request(
+        team_count=16,
+        block_count=4,
+        court_count=3,
+        fallback="organizer",
+        max_time_seconds=2,
+    )
+
+    result = generate_same_rank_day2_schedule(request)
+    roles: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
+    for route in result.team_schedules:
+        key = route.rank_ref.block_id, route.rank_ref.rank
+        roles.setdefault(key, []).append((route.section_no, route.court_id, route.role))
+
+    cross_court_referee_then_match = [
+        (left, right)
+        for entries in roles.values()
+        for left, right in pairwise(sorted(entries))
+        if left[2] == "referee"
+        and right[2] == "match"
+        and right[0] == left[0] + 1
+        and right[1] != left[1]
+    ]
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert cross_court_referee_then_match
+    assert validate_same_rank_day2_schedule(request, result).valid is True
+
+
 def test_configured_break_still_uses_previous_section_as_team_referee_source() -> None:
     request, _ = _request()
     dumped = request.model_dump(mode="json")
@@ -348,7 +377,13 @@ def test_validator_detects_duplicate_match() -> None:
 
 
 def test_validator_detects_adjacent_court_change() -> None:
-    request, _ = _request(team_count=8, block_count=4, court_count=2, max_time_seconds=1)
+    request, _ = _request(
+        team_count=8,
+        block_count=4,
+        court_count=2,
+        fallback="strict",
+        max_time_seconds=5,
+    )
     result = generate_same_rank_day2_schedule(request)
     dumped = result.model_dump(mode="json")
     referee_route = next(

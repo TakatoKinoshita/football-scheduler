@@ -27,6 +27,7 @@ import {
   readTournamentLogicalLayout,
   TournamentLogicalLayoutError,
 } from "./tournament-logical-layout";
+import { sameRankRoleSequenceViolation } from "./same-rank-role-policy";
 
 export const MAX_JSON_BYTES = 1_000_000;
 export const LIMITS = {
@@ -1133,17 +1134,21 @@ function validateSameRankDay2Schedule(
     if ([...sectionCounts.values()].some((count) => count > 1)) {
       throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグで同じ順位枠の役割が同一セクションに重複しています。");
     }
-    for (let index = 1; index < ordered.length; index += 1) {
-      const previous = ordered[index - 1]!;
-      const current = ordered[index]!;
-      if (current.section === previous.section + 1) {
-        if (current.role === "match" && previous.role === "match") {
-          throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグで同じ順位枠の試合が連続しています。");
-        }
-        if (current.court !== previous.court) {
-          throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの連続セクションで担当コートが変わっています。");
-        }
-      }
+    const violation = sameRankRoleSequenceViolation(ordered);
+    if (violation === "consecutive_match") {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグで同じ順位枠の試合が連続しています。");
+    }
+    if (violation === "match_to_referee_court_change") {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグの試合直後の審判が別コートに配置されています。");
+    }
+    if (violation === "consecutive_referee") {
+      throw new ImportValidationError("INVALID_REFERENCE", "同順位リーグで審判担当が連続しています。");
+    }
+    if (violation === "referee_source_invalid") {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "同順位リーグのチーム審判が直前セクションの同じコートの試合から供給されていません。",
+      );
     }
   }
   const routes = arrayValue(schedule.team_schedules, "同順位リーグ順位枠別予定", LIMITS.matches * LIMITS.teams);
