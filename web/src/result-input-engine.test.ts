@@ -105,6 +105,79 @@ describe("共通結果入力engine", () => {
     expect(content.querySelector("[data-field='penalty-score']")).toBeNull();
   });
 
+  it.each(["table", "cards"] as const)(
+    "awayを左へ表示する%sでもdraft復元と正式保存を正本のhome/awayへ対応させる",
+    async (presentation) => {
+      const controller = new ResultDraftController();
+      controller.activate("league-plan", {
+        "LG-1": {
+          regularHome: "2",
+          regularAway: "4",
+          penaltyHome: "",
+          penaltyAway: "",
+        },
+      });
+      const adapter = host(controller);
+      const content = document.createElement("div");
+      renderResultInput({
+        content,
+        sectionId: "league-results",
+        heading: "リーグ結果入力",
+        description: "",
+        ariaLabel: "リーグ結果入力",
+        rows: [{
+          matchId: "LG-1",
+          displayNumber: "A①",
+          timeLabel: "09:30〜10:05",
+          courtName: "Aコート",
+          ready: true,
+          homeName: "チーム甲",
+          awayName: "チーム乙",
+          displayAwayFirst: true,
+          savedResult: { regularHome: 1, regularAway: 3 },
+          penaltySupported: false,
+        }],
+        rule: "league",
+        presentation,
+        host: adapter,
+      });
+      document.body.append(content);
+
+      const entry = content.querySelector<HTMLElement>('[data-match-id="LG-1"]')!;
+      expect(entry.querySelector('[data-field="teams"]')?.textContent).toBe(
+        "チーム乙 対 チーム甲",
+      );
+      const [left, right] = [...entry.querySelectorAll<HTMLInputElement>("input")];
+      expect([left?.dataset.scoreField, right?.dataset.scoreField]).toEqual([
+        "regularAway",
+        "regularHome",
+      ]);
+      expect([left?.value, right?.value]).toEqual(["4", "2"]);
+      expect(left?.getAttribute("aria-label")).toBe(
+        "チーム乙 対 チーム甲・チーム乙の得点",
+      );
+      expect(right?.getAttribute("aria-label")).toBe(
+        "チーム乙 対 チーム甲・チーム甲の得点",
+      );
+
+      left!.value = "5";
+      inputEvent(left!, "input");
+      right!.value = "1";
+      inputEvent(right!, "input");
+      right!.focus();
+      inputEvent(right!, "change");
+
+      await vi.waitFor(() => expect(adapter.commitResult).toHaveBeenCalledTimes(1));
+      expect(adapter.commitResult).toHaveBeenCalledWith(
+        expect.objectContaining({ matchId: "LG-1", displayAwayFirst: true }),
+        { regularHome: 1, regularAway: 5 },
+        undefined,
+      );
+      await vi.waitFor(() => expect(adapter.rerender).toHaveBeenCalledTimes(1));
+      content.remove();
+    },
+  );
+
   it("複数行の正式保存を直列化し、後続adapterは最新状態から実行する", async () => {
     const controller = new ResultDraftController();
     controller.activate("league-plan");

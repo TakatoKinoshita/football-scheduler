@@ -1,3 +1,4 @@
+import { displayedTeamPair } from "./day1-team-display-order";
 import type { ResultInputStateControl } from "./result-input-state-control";
 
 export type ResultInputPresentation = "table" | "cards";
@@ -18,6 +19,7 @@ export interface ResultInputRenderRow {
   ready: boolean;
   homeName: string;
   awayName: string;
+  displayAwayFirst?: boolean;
   editor: ResultInputEditorView;
 }
 
@@ -95,6 +97,11 @@ function appendFeedback(parent: HTMLElement, row: ResultInputRenderRow): void {
   parent.append(row.editor.errorArea);
 }
 
+function displayedMatchup(row: ResultInputRenderRow): string {
+  const teams = displayedTeamPair(row.homeName, row.awayName, row.displayAwayFirst);
+  return `${teams.left} 対 ${teams.right}`;
+}
+
 export function renderIntegratedResultInputTable(
   section: HTMLElement,
   rows: readonly ResultInputRenderRow[],
@@ -141,7 +148,7 @@ export function renderIntegratedResultInputTable(
     const teams = appendTextElement(
       row,
       "td",
-      item.ready ? `${item.homeName} 対 ${item.awayName}` : "前提試合の結果待ち",
+      item.ready ? displayedMatchup(item) : "前提試合の結果待ち",
     );
     teams.dataset.field = "teams";
     const result = document.createElement("td");
@@ -197,7 +204,7 @@ export function renderResultInputCards(
     const teams = appendTextElement(
       article,
       "p",
-      item.ready ? `${item.homeName} 対 ${item.awayName}` : "前提試合の結果待ち",
+      item.ready ? displayedMatchup(item) : "前提試合の結果待ち",
       "result-input-card-teams",
     );
     teams.dataset.field = "teams";
