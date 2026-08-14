@@ -65,6 +65,7 @@ import {
   unbindSameRankPlan,
   unbindSameRankSchedule,
 } from "./same-rank-league";
+import { sameRankAwayFirstMatchIds } from "./same-rank-team-display-order";
 import {
   AutosaveController,
   StorageUpgradeBlockedError,
@@ -2533,6 +2534,23 @@ function renderSameRankSchedule(
   );
   const groups = new Map(sameRankGroups(plan).map((group) => [String(group.id), String(group.display_name ?? group.id)]));
   const presentation = buildWebSchedulePresentation("day2", schedule);
+  const awayFirstMatchIds = sameRankAwayFirstMatchIds(
+    [...matches].map(([matchId, match]) => ({
+      matchId,
+      home: match.home,
+      away: match.away,
+    })),
+    presentation.timeRows.map((row) => {
+      const assignment = asObject(row.slot.referee_assignment);
+      const kind = assignment?.kind ?? assignment?.type;
+      return {
+        sectionNo: row.sectionNo,
+        courtId: row.courtId,
+        matchId: row.matchId,
+        refereeRankRef: kind === "team" ? assignment?.rank_ref : undefined,
+      };
+    }),
+  );
   const details = (row: SchedulePresentationRow<WebScheduleSlot>): ScheduleRowDetails => {
     const match = matches.get(row.matchId);
     const assignment = asObject(row.slot.referee_assignment);
@@ -2543,9 +2561,14 @@ function renderSameRankSchedule(
             type: "concrete_team", team_id: assignment.team_id,
           }, teamNames)
         : "確認中";
+    const displayed = displayedTeamPair(
+      sameRankEntryLabel(match?.home, match?.home_team, teamNames),
+      sameRankEntryLabel(match?.away, match?.away_team, teamNames),
+      awayFirstMatchIds.has(row.matchId),
+    );
     return {
       phase: groups.get(String(match?.group_id)) ?? String(match?.group_id ?? "同順位リーグ"),
-      matchup: `${sameRankEntryLabel(match?.home, match?.home_team, teamNames)} 対 ${sameRankEntryLabel(match?.away, match?.away_team, teamNames)}`,
+      matchup: `${displayed.left} 対 ${displayed.right}`,
       referee,
     };
   };
