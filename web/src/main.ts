@@ -20,6 +20,10 @@ import {
 } from "./day1-form";
 import { day1AdjacentCourtViolations } from "./day1-schedule-policy";
 import {
+  day1AwayFirstMatchIds,
+  displayedTeamPair,
+} from "./day1-team-display-order";
+import {
   ImportValidationError,
   parseTournamentJson,
   safeFileName,
@@ -1474,6 +1478,26 @@ function renderResult(): void {
       .filter((match) => typeof match.id === "string")
       .map((match) => [match.id as string, match]),
   );
+  const awayFirstMatchIds = day1AwayFirstMatchIds(
+    [...matches].map(([matchId, match]) => ({
+      matchId,
+      homeTeamId: exactTeamId(match, "home"),
+      awayTeamId: exactTeamId(match, "away"),
+    })),
+    schedulePresentation.timeRows.map((row) => {
+      const assignment = asObject(row.slot.referee_assignment);
+      const kind = assignment?.kind ?? assignment?.type;
+      const refereeTeamId = kind === "team" && typeof assignment?.team_id === "string"
+        ? assignment.team_id
+        : undefined;
+      return {
+        sectionNo: row.sectionNo,
+        courtId: row.courtId,
+        matchId: row.matchId,
+        refereeTeamId,
+      };
+    }),
+  );
   const status = result.status === "OPTIMAL" || result.status === "FEASIBLE" ? "生成完了" : String(result.status ?? "完了");
   summary.textContent = `${status}／配置済み ${slots.length}試合`;
   content.replaceChildren();
@@ -1553,7 +1577,12 @@ function renderResult(): void {
         : refereeTeamId === undefined
           ? "確認中"
           : (teamNames.get(refereeTeamId) ?? "名称未設定");
-    return { matchup: `${homeName} 対 ${awayName}`, referee: refereeName };
+    const displayed = displayedTeamPair(
+      homeName,
+      awayName,
+      awayFirstMatchIds.has(presentationRow.matchId),
+    );
+    return { matchup: `${displayed.left} 対 ${displayed.right}`, referee: refereeName };
   };
   for (const presentationRow of schedulePresentation.timeRows) {
     const slot = presentationRow.slot;
@@ -1690,6 +1719,7 @@ function renderResult(): void {
         ready: home !== undefined && away !== undefined,
         homeName,
         awayName,
+        displayAwayFirst: awayFirstMatchIds.has(matchId),
         penaltySupported: false,
         ...(typeof current?.home_score === "number" && typeof current.away_score === "number"
           ? { savedResult: { regularHome: current.home_score, regularAway: current.away_score } }

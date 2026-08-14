@@ -120,6 +120,70 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
 });
 
+test("次試合を審判するawayチームを日程と結果入力の左側へ揃えて正本得点を保存する", async ({
+  page,
+}) => {
+  await openScheduleViewFixture(page);
+  await page.locator("#tab-day1").click();
+
+  const scheduleRow = page.locator(
+    '#day1-schedule-view tr[data-match-id="LG-B-M1"]',
+  );
+  const resultEntry = page.locator(
+    '#league-results-input [data-match-id="LG-B-M1"]',
+  );
+  await expect(scheduleRow.locator("td").nth(3)).toHaveText("白波SC 対 赤松FC");
+  await expect(resultEntry.locator('[data-field="teams"]')).toHaveText("白波SC 対 赤松FC");
+  const inputs = resultEntry.locator("input.score-input");
+  await expect(inputs.nth(0)).toHaveAttribute("data-score-field", "regularAway");
+  await expect(inputs.nth(1)).toHaveAttribute("data-score-field", "regularHome");
+  await expect(inputs.nth(0)).toHaveAccessibleName("白波SC 対 赤松FC・白波SCの得点");
+  await expect(inputs.nth(1)).toHaveAccessibleName("白波SC 対 赤松FC・赤松FCの得点");
+
+  await page.locator("#result-content").evaluate((element) => {
+    element.style.width = "375px";
+    element.style.padding = "0";
+  });
+  await expect(page.locator("#league-results-input")).toHaveAttribute(
+    "data-responsive-presentation",
+    "cards",
+  );
+  await expect(resultEntry.locator('[data-field="teams"]')).toHaveText("白波SC 対 赤松FC");
+  await expect(resultEntry.locator("input.score-input").nth(0)).toHaveAttribute(
+    "data-score-field",
+    "regularAway",
+  );
+  await page.locator("#result-content").evaluate((element) => {
+    element.style.width = "1002px";
+  });
+  await expect(page.locator("#league-results-input")).toHaveAttribute(
+    "data-responsive-presentation",
+    "table",
+  );
+
+  const refreshedInputs = resultEntry.locator("input.score-input");
+  await refreshedInputs.nth(0).fill("4");
+  await refreshedInputs.nth(1).fill("1");
+  await refreshedInputs.nth(1).press("Tab");
+  await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
+
+  const downloaded = await downloadTournamentDocument(page);
+  const savedResult = downloaded.tournament.result as {
+    league_results: Array<{ match_id: string; home_score: number; away_score: number }>;
+  };
+  expect(savedResult.league_results.find((result) => result.match_id === "LG-B-M1"))
+    .toEqual({ match_id: "LG-B-M1", home_score: 1, away_score: 4 });
+
+  await page.locator("#day1-schedule-view-toggle").getByLabel("コート別").check();
+  await expect(
+    page.locator('#day1-schedule-view tr[data-match-id="LG-B-M1"] td').nth(2),
+  ).toHaveText("白波SC 対 赤松FC");
+  await page.emulateMedia({ media: "print" });
+  await expect(
+    page.locator('#day1-schedule-view tr[data-match-id="LG-B-M1"] td').nth(2),
+  ).toHaveText("白波SC 対 赤松FC");
+});
+
 test("旧ルールの1日目日程を保持して警告し、統合生成で再作成できる", async ({
   page,
 }) => {

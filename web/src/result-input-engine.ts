@@ -1,3 +1,4 @@
+import { displayedTeamPair } from "./day1-team-display-order";
 import {
   evaluateResultDraft,
   type ResultDraft,
@@ -32,6 +33,7 @@ export interface ResultInputRowModel {
   ready: boolean;
   homeName: string;
   awayName: string;
+  displayAwayFirst?: boolean;
   savedResult?: SavedResultInputValue;
   penaltySupported: boolean;
 }
@@ -263,36 +265,58 @@ function editorForRow(
   const saved = row.savedResult;
   const restored = host.drafts.get(row.matchId);
   const regularScoreKind = row.penaltySupported ? "通常得点" : "得点";
+  const displayedNames = displayedTeamPair(
+    row.homeName,
+    row.awayName,
+    row.displayAwayFirst,
+  );
+  const matchup = `${displayedNames.left} 対 ${displayedNames.right}`;
   const regularHome = scoreInput(
-    `${row.homeName} 対 ${row.awayName}・${row.homeName}の${regularScoreKind}`,
+    `${matchup}・${row.homeName}の${regularScoreKind}`,
     restored?.regularHome ?? (saved === undefined ? "" : String(saved.regularHome)),
   );
   regularHome.dataset.scoreField = "regularHome";
   const regularAway = scoreInput(
-    `${row.homeName} 対 ${row.awayName}・${row.awayName}の${regularScoreKind}`,
+    `${matchup}・${row.awayName}の${regularScoreKind}`,
     restored?.regularAway ?? (saved === undefined ? "" : String(saved.regularAway)),
   );
   regularAway.dataset.scoreField = "regularAway";
   const regularFields = document.createElement("span");
-  regularFields.append(regularHome, regularAway);
+  const displayedRegularInputs = displayedTeamPair(
+    regularHome,
+    regularAway,
+    row.displayAwayFirst,
+  );
+  regularFields.append(displayedRegularInputs.left, displayedRegularInputs.right);
 
   const penaltyFields = document.createElement("span");
-  const penaltyInputs: HTMLInputElement[] = [];
+  let penaltyHome: HTMLInputElement | undefined;
+  let penaltyAway: HTMLInputElement | undefined;
   if (row.penaltySupported) {
-    const penaltyHome = scoreInput(
-      `${row.homeName} 対 ${row.awayName}・${row.homeName}のPK得点`,
+    penaltyHome = scoreInput(
+      `${matchup}・${row.homeName}のPK得点`,
       restored?.penaltyHome ?? (saved?.penaltyHome === undefined ? "" : String(saved.penaltyHome)),
     );
     penaltyHome.dataset.scoreField = "penaltyHome";
-    const penaltyAway = scoreInput(
-      `${row.homeName} 対 ${row.awayName}・${row.awayName}のPK得点`,
+    penaltyAway = scoreInput(
+      `${matchup}・${row.awayName}のPK得点`,
       restored?.penaltyAway ?? (saved?.penaltyAway === undefined ? "" : String(saved.penaltyAway)),
     );
     penaltyAway.dataset.scoreField = "penaltyAway";
-    penaltyFields.append(penaltyHome, penaltyAway);
-    penaltyInputs.push(penaltyHome, penaltyAway);
+    const displayedPenaltyInputs = displayedTeamPair(
+      penaltyHome,
+      penaltyAway,
+      row.displayAwayFirst,
+    );
+    penaltyFields.append(displayedPenaltyInputs.left, displayedPenaltyInputs.right);
   }
-  const inputs = [regularHome, regularAway, ...penaltyInputs];
+  const inputs = [
+    displayedRegularInputs.left,
+    displayedRegularInputs.right,
+    ...(penaltyHome === undefined || penaltyAway === undefined
+      ? []
+      : row.displayAwayFirst ? [penaltyAway, penaltyHome] : [penaltyHome, penaltyAway]),
+  ];
   const stateControl = createResultInputStateControl(
     restored === undefined ? (saved === undefined ? "empty" : "saved") : "editing",
   );
@@ -312,10 +336,11 @@ function editorForRow(
     inputs.map((input) => [input.dataset.scoreField!, input] as const),
   );
   const firstChangedField = restored === undefined
-    ? "regularHome"
+    ? displayedRegularInputs.left.dataset.scoreField!
     : (Object.keys(savedDraft) as (keyof ResultDraft)[])
-      .find((field) => restored[field] !== savedDraft[field]) ?? "regularHome";
-  const firstChangedInput = inputByField.get(firstChangedField) ?? regularHome;
+      .find((field) => restored[field] !== savedDraft[field]) ??
+        displayedRegularInputs.left.dataset.scoreField!;
+  const firstChangedInput = inputByField.get(firstChangedField) ?? displayedRegularInputs.left;
   let lastEditedFocus: ResultInputFocusSnapshot = {
     matchId: row.matchId,
     scoreField: firstChangedInput.dataset.scoreField,
@@ -337,8 +362,8 @@ function editorForRow(
   const draftFromInputs = (): ResultDraft => ({
     regularHome: regularHome.value,
     regularAway: regularAway.value,
-    penaltyHome: penaltyInputs[0]?.value ?? "",
-    penaltyAway: penaltyInputs[1]?.value ?? "",
+    penaltyHome: penaltyHome?.value ?? "",
+    penaltyAway: penaltyAway?.value ?? "",
   });
   const updatePenaltyVisibility = (): void => {
     if (!row.penaltySupported) return;
@@ -347,8 +372,8 @@ function editorForRow(
     const tied = typeof home === "number" && typeof away === "number" && home === away;
     penaltyFields.hidden = !tied;
     if (typeof home === "number" && typeof away === "number" && !tied) {
-      penaltyInputs[0]!.value = "";
-      penaltyInputs[1]!.value = "";
+      penaltyHome!.value = "";
+      penaltyAway!.value = "";
     }
   };
   const renderDraftState = (draft = host.drafts.get(row.matchId)): void => {
@@ -367,7 +392,7 @@ function editorForRow(
     stateControl.setDraftAction({
       label: actionLabel,
       accessibleName:
-        `試合番号 ${row.displayNumber}、${row.homeName} 対 ${row.awayName}：${actionLabel}`,
+        `試合番号 ${row.displayNumber}、${matchup}：${actionLabel}`,
       onActivate: () => discardDraft(),
     });
     if (evaluation.status !== "invalid") return;
@@ -378,8 +403,18 @@ function editorForRow(
       regularAway.toggleAttribute("aria-invalid", parsedScore(regularAway) === undefined);
     } else {
       const tied = evaluation.message.startsWith("PK戦");
-      penaltyInputs[0]?.toggleAttribute("aria-invalid", tied || parsedScore(penaltyInputs[0]) === undefined);
-      penaltyInputs[1]?.toggleAttribute("aria-invalid", tied || parsedScore(penaltyInputs[1]) === undefined);
+      if (penaltyHome !== undefined) {
+        penaltyHome.toggleAttribute(
+          "aria-invalid",
+          tied || parsedScore(penaltyHome) === undefined,
+        );
+      }
+      if (penaltyAway !== undefined) {
+        penaltyAway.toggleAttribute(
+          "aria-invalid",
+          tied || parsedScore(penaltyAway) === undefined,
+        );
+      }
     }
   };
   const recordDraft = (): ResultDraft => {
@@ -432,15 +467,15 @@ function editorForRow(
         ? undefined
         : inputByField.get(lastEditedFocus.scoreField);
       const focusInput = preferred === undefined || preferred.closest("[hidden]") !== null
-        ? regularHome
+        ? displayedRegularInputs.left
         : preferred;
       focusToRestore = focusInput === preferred
         ? lastEditedFocus
         : {
             ...lastEditedFocus,
-            scoreField: "regularHome",
-            selectionStart: regularHome.value.length,
-            selectionEnd: regularHome.value.length,
+            scoreField: displayedRegularInputs.left.dataset.scoreField,
+            selectionStart: displayedRegularInputs.left.value.length,
+            selectionEnd: displayedRegularInputs.left.value.length,
           };
     } catch {
       host.setSaveStatus("保存できませんでした");
