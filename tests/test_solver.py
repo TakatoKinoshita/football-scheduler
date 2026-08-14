@@ -4,7 +4,6 @@ from collections import Counter, defaultdict
 from itertools import pairwise
 
 import pytest
-from ortools.sat.python import cp_model
 
 from football_scheduler import solver as solver_module
 from football_scheduler.fixtures import (
@@ -24,6 +23,7 @@ from football_scheduler.models import (
     Team,
 )
 from football_scheduler.solver import solve_schedule
+from football_scheduler.validator import validate_schedule
 
 
 def test_smoke_fixture_is_optimal_and_json_serializable() -> None:
@@ -68,6 +68,24 @@ def test_maximum_mvp_fixture_uses_documented_input_limits() -> None:
     assert len(request.matches) == 48
     assert request.day.max_sections == 24
     assert request.solver.max_time_seconds == 20
+
+
+def test_maximum_mvp_fixture_uses_compact_model_with_balanced_courts() -> None:
+    request = make_maximum_mvp_request()
+
+    result = solve_schedule(request)
+
+    scheduled_slots = [slot for slot in result.slots if slot.match_id is not None]
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.metrics.used_sections == 12
+    assert Counter(slot.court_id for slot in scheduled_slots) == Counter(
+        {court.id: 12 for court in request.courts}
+    )
+    assert result.metrics.model_variant == "compact_day1_league"
+    assert result.metrics.team_referee_variable_count == 11 * 4 * 32
+    assert result.metrics.model_variable_count is not None
+    assert result.metrics.model_variable_count < 48 * 12 * 32
+    assert result.metrics.wall_time_seconds <= request.solver.max_time_seconds
 
 
 def _court_movement_request(*, unavoidable: bool) -> ScheduleRequest:
@@ -177,10 +195,21 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
         ordered = sorted(sections)
         assert all(right - left >= 2 for left, right in pairwise(ordered))
     for assignments in assignments_by_team.values():
-        for left, right in pairwise(sorted(assignments)):
+        ordered = sorted(assignments)
+        for index, (left, right) in enumerate(pairwise(ordered)):
             if right[0] == left[0] + 1:
-                assert right[1] == left[1]
-                assert (left[2], right[2]) == ("match", "referee")
+                assert (left[2], right[2]) in {
+                    ("match", "referee"),
+                    ("referee", "match"),
+                }
+                if (left[2], right[2]) == ("match", "referee"):
+                    assert right[1] == left[1]
+                else:
+                    assert index > 0
+                    source = ordered[index - 1]
+                    assert source[0] == left[0] - 1
+                    assert (source[2], left[2]) == ("match", "referee")
+                    assert source[1] == left[1]
     assert all(count <= request.referees.organizer_capacity for count in organizer_count.values())
     assert all(
         slot.referee_assignment is not None
@@ -191,11 +220,40 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     referee_counts = {
         item.team_id: item.count for item in result.metrics.league_team_referee_counts
     }
-    assert result.metrics.used_sections == 10
+    assert result.metrics.used_sections == 8
+    court_counts = Counter(slot.court_id for slot in scheduled_slots)
+    assert court_counts == Counter({court.id: 8 for court in request.courts})
     assert sum(referee_counts.values()) == 21
     assert result.metrics.league_previous_same_court_referee_count == 21
-    assert result.metrics.referee_then_match_count == 0
     assert result.metrics.adjacent_assignment_court_change_count == 0
+    assert result.metrics.court_usage_difference == 0
+    assert result.metrics.model_variant == "compact_day1_league"
+    assert result.metrics.team_referee_variable_count == 7 * 3 * 16
+    assert result.metrics.model_variable_count is not None
+    assert result.metrics.model_variable_count < 5_040
+    stages = {stage.objective: stage for stage in result.metrics.objective_stages}
+    assert stages["used_sections"].value == 8
+    assert stages["used_sections"].optimality_proven is True
+    assert stages["league_team_referee_count_difference"].value == 1
+    assert stages["league_team_referee_count_difference"].optimality_proven is True
+    assert stages["maximum_team_wait_sections"].value == 2
+    assert stages["maximum_team_wait_sections"].optimality_proven is True
+    assert stages["court_usage_difference"].value == 0
+    assert stages["court_usage_difference"].optimality_proven is True
+    validation = validate_schedule(
+        {
+            "schema_version": "0.2.0",
+            "config": {
+                "teams": [team.model_dump(mode="json") for team in request.teams],
+                "courts": [court.model_dump(mode="json") for court in request.courts],
+                "days": {"day1": request.day.model_dump(mode="json")},
+                "referees": request.referees.model_dump(mode="json"),
+            },
+            "matches": [match.model_dump(mode="json") for match in request.matches],
+            "schedule": result.model_dump(mode="json"),
+        }
+    )
+    assert validation["valid"] is True, validation
     assert "adjacent_assignment_court_change_count" not in result.metrics.optimized_objectives
     assert "adjacent_assignment_court_change_count" not in {
         stage.objective for stage in result.metrics.objective_stages
@@ -206,90 +264,6 @@ def test_representative_fixture_satisfies_core_hard_constraints() -> None:
     assert "league_previous_same_court_referee_count" not in {
         stage.objective for stage in result.metrics.objective_stages
     }
-
-
-def _transition_model_status(
-    first_role: str,
-    second_role: str,
-    *,
-    second_section: int = 1,
-    second_court: int = 1,
-) -> cp_model.CpSolverStatus:
-    model = cp_model.CpModel()
-    horizon = 3
-    placement: dict[tuple[int, int, int], cp_model.IntVar] = {}
-    match_in_section: dict[tuple[int, int], cp_model.IntVar] = {}
-    fixed_positions = ((0, 0), (second_section, second_court))
-    for match_index, fixed_position in enumerate(fixed_positions):
-        for section in range(horizon):
-            in_section = model.new_bool_var(f"match_{match_index}_{section}")
-            match_in_section[match_index, section] = in_section
-            court_variables = []
-            for court in range(2):
-                variable = model.new_bool_var(f"placement_{match_index}_{section}_{court}")
-                placement[match_index, section, court] = variable
-                court_variables.append(variable)
-                model.add(variable == int(fixed_position == (section, court)))
-            model.add(sum(court_variables) == in_section)
-
-    possible_matches = {
-        "focus": tuple(
-            match_index
-            for match_index, role in enumerate((first_role, second_role))
-            if role == "match"
-        )
-    }
-    team_referee: dict[tuple[int, int, str], cp_model.IntVar] = {}
-    for match_index, (role, (section, _court)) in enumerate(
-        zip((first_role, second_role), fixed_positions, strict=True)
-    ):
-        if role != "referee":
-            continue
-        variable = model.new_bool_var(f"referee_{match_index}_{section}")
-        model.add(variable == 1)
-        team_referee[match_index, section, "focus"] = variable
-
-    role_any, _role_on_court, role_court, _match_court = solver_module._add_team_role_court_state(
-        model,
-        placement,
-        match_in_section,
-        team_referee,
-        possible_matches,
-        horizon,
-        2,
-    )
-    solver_module._add_adjacent_assignment_same_court_constraints(
-        model,
-        role_any,
-        role_court,
-        ("focus",),
-        horizon,
-    )
-    return cp_model.CpSolver().solve(model)
-
-
-@pytest.mark.parametrize(
-    ("first_role", "second_role"),
-    [("match", "referee"), ("referee", "match"), ("referee", "referee")],
-)
-def test_adjacent_day1_roles_cannot_change_courts(
-    first_role: str,
-    second_role: str,
-) -> None:
-    assert _transition_model_status(first_role, second_role) == cp_model.INFEASIBLE
-    assert _transition_model_status(first_role, second_role, second_court=0) == cp_model.OPTIMAL
-
-
-def test_day1_court_change_is_allowed_after_an_empty_section() -> None:
-    assert (
-        _transition_model_status(
-            "match",
-            "referee",
-            second_section=2,
-            second_court=1,
-        )
-        == cp_model.OPTIMAL
-    )
 
 
 def test_same_seed_produces_same_schedule() -> None:

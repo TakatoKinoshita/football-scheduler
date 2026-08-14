@@ -235,7 +235,9 @@ class ObjectiveStageMetric(ContractModel):
 
     objective: Identifier
     value: Annotated[int, Field(ge=0)]
+    best_bound: float | None = None
     optimality_proven: bool
+    termination_reason: Identifier | None = None
 
 
 class PoolFinalMetric(ContractModel):
@@ -252,6 +254,10 @@ class SolverMetrics(ContractModel):
     max_time_seconds: float
     ortools_version: NonEmptyText
     wall_time_seconds: Annotated[float, Field(ge=0)]
+    model_variant: Identifier | None = None
+    model_variable_count: Annotated[int, Field(ge=0)] | None = None
+    model_constraint_count: Annotated[int, Field(ge=0)] | None = None
+    team_referee_variable_count: Annotated[int, Field(ge=0)] | None = None
     used_sections: Annotated[int, Field(ge=0)] | None = None
     objective_value: float | None = None
     best_objective_bound: float | None = None

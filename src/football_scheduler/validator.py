@@ -1631,7 +1631,7 @@ def _adjacent_assignment_court_changes(
         later = assignments.get((day_id, team_id, section_no + 1), set())
         for left in sorted(earlier):
             for right in sorted(later):
-                if left[0] == right[0]:
+                if left[0] == right[0] or left[1] != "match" or right[1] != "referee":
                     continue
                 changes.append(
                     {
@@ -1742,6 +1742,7 @@ def _validate_league_referee_rules(
     occupied_by_position: defaultdict[tuple[str, int, str], list[Mapping[str, Any]]] = defaultdict(
         list
     )
+    valid_match_to_referee: set[tuple[str, str, int]] = set()
     for slot in slots:
         if slot.get("match_id") in matches_by_id:
             occupied_by_position[_slot_position(slot)].append(slot)
@@ -1808,9 +1809,12 @@ def _validate_league_referee_rules(
                     reason="referee_not_guaranteed_source_participant",
                 )
             )
+        else:
+            valid_match_to_referee.add((day_id, team_id, section_no))
 
     # match→match は既存の TEAM_CONSECUTIVE_SECTION_CONFLICT が検出する。
-    # ここでは新規則で明示的に禁止された referee→match/referee だけを追加検証する。
+    # referee→matchは、直前試合から供給されたmatch→referee→matchなら許可する。
+    # referee→refereeは引き続き禁止する。
     referee_slots_by_team_section: defaultdict[tuple[str, str, int], list[Mapping[str, Any]]] = (
         defaultdict(list)
     )
@@ -1846,11 +1850,12 @@ def _validate_league_referee_rules(
                     )
                 )
             for later in later_matches:
-                diagnostics.append(
-                    _league_adjacent_role_diagnostic(
-                        day_id, team_id, section_no, earlier, later, "match"
+                if (day_id, team_id, section_no) not in valid_match_to_referee:
+                    diagnostics.append(
+                        _league_adjacent_role_diagnostic(
+                            day_id, team_id, section_no, earlier, later, "match"
+                        )
                     )
-                )
 
 
 def _league_adjacent_role_diagnostic(
@@ -1862,12 +1867,17 @@ def _league_adjacent_role_diagnostic(
     later_role: str,
 ) -> JsonObject:
     role_label = "試合" if later_role == "match" else "審判"
+    requirement = (
+        "審判前のセクションに同じコートで出場した試合が必要です。"
+        if later_role == "match"
+        else "審判を連続セクションへ割り当てないでください。"
+    )
     return _diagnostic(
         "LEAGUE_ADJACENT_ROLE_INVALID",
         (
             f"{day_id}の連続する第{section_no}・第{section_no + 1}セクションで、"
             f"チーム「{team_id}」が審判の直後に{role_label}を担当しています。"
-            "連続担当は試合から審判への移行だけにしてください。"
+            f"{requirement}"
         ),
         day_id=day_id,
         team_id=team_id,

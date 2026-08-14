@@ -617,15 +617,11 @@ def _solve_referee_model(
                     model.add(variable == 0)
             else:
                 model.add(sum(variable for _, variable in section_candidates) <= 1)
-            if (rank, section + 1) in match_court_by_rank_section:
-                for _, variable in section_candidates:
-                    model.add(variable == 0)
         for section, current in referee_by_section.items():
             following = referee_by_section.get(section + 1, ())
-            for current_match, current_var in current:
-                for next_match, next_var in following:
-                    if layout.courts[current_match] != layout.courts[next_match]:
-                        model.add(current_var + next_var <= 1)
+            for _current_match, current_var in current:
+                for _next_match, next_var in following:
+                    model.add(current_var + next_var <= 1)
 
     counts = tuple(
         model.new_int_var(0, len(match_ranks), f"count_{rank}") for rank in range(rank_count)

@@ -86,7 +86,11 @@ export function day1AdjacentCourtViolations(
     const later = assignments.get(assignmentKey(parsed.teamId, parsed.sectionNo + 1)) ?? [];
     for (const left of sortedAssignments(earlier)) {
       for (const right of sortedAssignments(later)) {
-        if (left.courtId === right.courtId) continue;
+        if (
+          left.courtId === right.courtId ||
+          left.role !== "match" ||
+          right.role !== "referee"
+        ) continue;
         violations.push({
           teamId: parsed.teamId,
           sectionNos: [parsed.sectionNo, parsed.sectionNo + 1],

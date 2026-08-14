@@ -9,36 +9,38 @@ const matches = [
 ];
 
 describe("1日目の隣接担当コート規則", () => {
-  it.each([
-    ["試合→審判", undefined, { kind: "team", team_id: "A" }, ["match", "referee"]],
-    ["審判→試合", { kind: "team", team_id: "E" }, undefined, ["referee", "match"]],
-    [
-      "審判→審判",
-      { kind: "team", team_id: "G" },
-      { kind: "team", team_id: "G" },
-      ["referee", "referee"],
-    ],
-  ])("%sの異コート割当てを検出する", (_label, firstReferee, secondReferee, roles) => {
-    const firstMatchId = firstReferee === undefined ? "M1" : "M2";
-    const secondMatchId = secondReferee === undefined ? "M3" : "M2";
+  it("試合→審判の異コート割当てを検出する", () => {
     const violations = day1AdjacentCourtViolations(matches, [
       {
         day_id: "day1",
         section_no: 1,
         court_id: "court-a",
-        match_id: firstMatchId,
-        referee_assignment: firstReferee,
+        match_id: "M1",
       },
       {
         day_id: "day1",
         section_no: 2,
         court_id: "court-b",
-        match_id: secondMatchId,
-        referee_assignment: secondReferee,
+        match_id: "M3",
+        referee_assignment: { kind: "team", team_id: "A" },
       },
     ]);
 
-    expect(violations).toContainEqual(expect.objectContaining({ roles }));
+    expect(violations).toContainEqual(expect.objectContaining({ roles: ["match", "referee"] }));
+  });
+
+  it("試合→審判→試合の後半は異なるコートでも違反にしない", () => {
+    expect(day1AdjacentCourtViolations(matches, [
+      { day_id: "day1", section_no: 1, court_id: "court-a", match_id: "M1" },
+      {
+        day_id: "day1",
+        section_no: 2,
+        court_id: "court-a",
+        match_id: "M2",
+        referee_assignment: { kind: "team", team_id: "A" },
+      },
+      { day_id: "day1", section_no: 3, court_id: "court-b", match_id: "M3" },
+    ])).toEqual([]);
   });
 
   it("同一コートまたは空きセクションを挟む担当は違反にしない", () => {

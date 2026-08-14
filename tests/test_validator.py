@@ -225,8 +225,7 @@ def test_detects_adjacent_assignment_court_change(
 ) -> None:
     document = deepcopy(valid_document)
     slots = document["schedule"]["slots"]  # type: ignore[index]
-    slots[0]["referee_assignment"] = {"type": "team", "team_id": "E"}
-    slots[2]["section_no"] = 2
+    slots[3]["court_id"] = "court-b"
     slots[2]["court_id"] = "court-b"
 
     report = validate_schedule(document)
@@ -234,18 +233,18 @@ def test_detects_adjacent_assignment_court_change(
         item
         for item in report["diagnostics"]
         if item["code"] == "ADJACENT_ASSIGNMENT_COURT_CONFLICT"
-        and item["details"]["team_id"] == "E"
+        and item["details"]["team_id"] == "B"
     )
 
     assert conflict["details"] == {
         "day_id": "day1",
-        "team_id": "E",
+        "team_id": "B",
         "section_nos": [1, 2],
         "court_ids": ["court-a", "court-b"],
-        "roles": ["referee", "referee"],
-        "match_ids": ["M1", "M3"],
+        "roles": ["match", "referee"],
+        "match_ids": ["M1", "M0"],
     }
-    assert report["summary"]["adjacent_assignment_court_change_count"] == 2
+    assert report["summary"]["adjacent_assignment_court_change_count"] == 1
 
 
 def test_detects_league_referee_without_previous_same_court_match(
@@ -294,26 +293,28 @@ def test_requires_referee_to_be_guaranteed_previous_match_participant(
     assert diagnostic["details"]["guaranteed_team_ids"] == ["F"]
 
 
-@pytest.mark.parametrize(
-    ("later_role", "expected_roles"),
-    [
-        ("match", ["referee", "match"]),
-        ("referee", ["referee", "referee"]),
-    ],
-)
-def test_rejects_assignment_after_referee_in_consecutive_section(
+def test_allows_match_referee_match_with_court_change_after_referee(
     valid_document: dict[str, object],
-    later_role: str,
-    expected_roles: list[str],
+) -> None:
+    document = deepcopy(valid_document)
+    matches = document["matches"]  # type: ignore[assignment]
+    slots = document["schedule"]["slots"]  # type: ignore[index]
+    matches[2]["home"] = team("B")
+    matches[2]["away"] = team("C")
+    slots[2]["court_id"] = "court-b"
+    slots[2]["referee_assignment"] = {"type": "organizer"}
+
+    report = validate_schedule(document)
+
+    assert report["valid"] is True, report
+
+
+def test_rejects_referee_in_consecutive_sections(
+    valid_document: dict[str, object],
 ) -> None:
     document = deepcopy(valid_document)
     slots = document["schedule"]["slots"]  # type: ignore[index]
-    if later_role == "match":
-        matches = document["matches"]  # type: ignore[assignment]
-        matches[2]["home"] = team("B")
-        matches[2]["away"] = team("C")
-    else:
-        slots[2]["referee_assignment"] = {"type": "team", "team_id": "B"}
+    slots[2]["referee_assignment"] = {"type": "team", "team_id": "B"}
 
     report = validate_schedule(document)
     diagnostic = next(
@@ -322,7 +323,7 @@ def test_rejects_assignment_after_referee_in_consecutive_section(
         if item["code"] == "LEAGUE_ADJACENT_ROLE_INVALID" and item["details"]["team_id"] == "B"
     )
 
-    assert diagnostic["details"]["roles"] == expected_roles
+    assert diagnostic["details"]["roles"] == ["referee", "referee"]
     assert diagnostic["details"]["section_nos"] == [2, 3]
 
 
