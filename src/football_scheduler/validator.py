@@ -120,6 +120,12 @@ def validate_schedule(document: Any) -> JsonObject:
         _organizer_capacity(data),
         diagnostics,
     )
+    _validate_league_referee_rules(
+        normalized_slots,
+        matches_by_id,
+        candidate_cache,
+        diagnostics,
+    )
     adjacent_court_changes = _adjacent_assignment_court_changes(
         normalized_slots,
         matches_by_id,
@@ -1720,6 +1726,158 @@ def _validate_referees(
                 )
 
 
+def _validate_league_referee_rules(
+    slots: Sequence[Mapping[str, Any]],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    candidate_cache: dict[str, frozenset[str]],
+    diagnostics: list[JsonObject],
+) -> None:
+    """リーグ形式のチーム審判の供給元と連続担当の向きを検証する。
+
+    チーム審判は、直前セクションの同じコートにある実試合へ、すべての
+    参加経路で必ず出場するチームだけを許可する。候補集合に含まれるだけの
+    未確定チームは、実際にはその試合へ出場しない経路があるため認めない。
+    """
+
+    occupied_by_position: defaultdict[tuple[str, int, str], list[Mapping[str, Any]]] = defaultdict(
+        list
+    )
+    for slot in slots:
+        if slot.get("match_id") in matches_by_id:
+            occupied_by_position[_slot_position(slot)].append(slot)
+
+    for slot in slots:
+        match_id = slot.get("match_id")
+        if match_id not in matches_by_id or not _is_league_format_match(
+            matches_by_id[str(match_id)]
+        ):
+            continue
+        referee_type, team_id = _referee(slot)
+        if referee_type != "team" or team_id is None:
+            continue
+
+        day_id = str(slot["day_id"])
+        section_no = int(slot["section_no"])
+        court_id = str(slot["court_id"])
+        previous_slots = occupied_by_position.get((day_id, section_no - 1, court_id), [])
+        if len(previous_slots) != 1:
+            diagnostics.append(
+                _diagnostic(
+                    "LEAGUE_REFEREE_SOURCE_INVALID",
+                    (
+                        f"{day_id}の第{section_no}セクション・{court_id}のチーム審判"
+                        f"「{team_id}」には、直前セクションの同じコートで試合をした"
+                        "チームを割り当ててください。"
+                    ),
+                    day_id=day_id,
+                    section_no=section_no,
+                    court_id=court_id,
+                    match_id=match_id,
+                    team_id=team_id,
+                    previous_section_no=section_no - 1,
+                    source_match_id=None,
+                    reason="previous_same_court_match_missing",
+                )
+            )
+            continue
+
+        source_slot = previous_slots[0]
+        source_match_id = str(source_slot["match_id"])
+        possible_team_ids = _slot_candidates(source_slot, matches_by_id, candidate_cache)
+        guaranteed_team_ids = _guaranteed_match_candidates(
+            source_match_id, matches_by_id, candidate_cache
+        )
+        if team_id not in guaranteed_team_ids:
+            diagnostics.append(
+                _diagnostic(
+                    "LEAGUE_REFEREE_SOURCE_INVALID",
+                    (
+                        f"{day_id}の第{section_no}セクション・{court_id}のチーム審判"
+                        f"「{team_id}」は、直前試合「{source_match_id}」のすべての"
+                        "参加経路で出場するチームではありません。"
+                    ),
+                    day_id=day_id,
+                    section_no=section_no,
+                    court_id=court_id,
+                    match_id=match_id,
+                    team_id=team_id,
+                    previous_section_no=section_no - 1,
+                    source_match_id=source_match_id,
+                    possible_team_ids=sorted(possible_team_ids),
+                    guaranteed_team_ids=sorted(guaranteed_team_ids),
+                    reason="referee_not_guaranteed_source_participant",
+                )
+            )
+
+    # match→match は既存の TEAM_CONSECUTIVE_SECTION_CONFLICT が検出する。
+    # ここでは新規則で明示的に禁止された referee→match/referee だけを追加検証する。
+    referee_slots_by_team_section: defaultdict[tuple[str, str, int], list[Mapping[str, Any]]] = (
+        defaultdict(list)
+    )
+    for slot in slots:
+        match_id = slot.get("match_id")
+        if match_id not in matches_by_id or not _is_league_format_match(
+            matches_by_id[str(match_id)]
+        ):
+            continue
+        referee_type, team_id = _referee(slot)
+        if referee_type == "team" and team_id is not None:
+            key = str(slot["day_id"]), team_id, int(slot["section_no"])
+            referee_slots_by_team_section[key].append(slot)
+
+    for (day_id, team_id, section_no), earlier_slots in sorted(
+        referee_slots_by_team_section.items()
+    ):
+        later_referees = referee_slots_by_team_section.get((day_id, team_id, section_no + 1), [])
+        later_matches = [
+            slot
+            for slot in slots
+            if str(slot["day_id"]) == day_id
+            and int(slot["section_no"]) == section_no + 1
+            and slot.get("match_id") in matches_by_id
+            and _is_league_format_match(matches_by_id[str(slot["match_id"])])
+            and team_id in _slot_candidates(slot, matches_by_id, candidate_cache)
+        ]
+        for earlier in earlier_slots:
+            for later in later_referees:
+                diagnostics.append(
+                    _league_adjacent_role_diagnostic(
+                        day_id, team_id, section_no, earlier, later, "referee"
+                    )
+                )
+            for later in later_matches:
+                diagnostics.append(
+                    _league_adjacent_role_diagnostic(
+                        day_id, team_id, section_no, earlier, later, "match"
+                    )
+                )
+
+
+def _league_adjacent_role_diagnostic(
+    day_id: str,
+    team_id: str,
+    section_no: int,
+    earlier: Mapping[str, Any],
+    later: Mapping[str, Any],
+    later_role: str,
+) -> JsonObject:
+    role_label = "試合" if later_role == "match" else "審判"
+    return _diagnostic(
+        "LEAGUE_ADJACENT_ROLE_INVALID",
+        (
+            f"{day_id}の連続する第{section_no}・第{section_no + 1}セクションで、"
+            f"チーム「{team_id}」が審判の直後に{role_label}を担当しています。"
+            "連続担当は試合から審判への移行だけにしてください。"
+        ),
+        day_id=day_id,
+        team_id=team_id,
+        section_nos=[section_no, section_no + 1],
+        court_ids=[str(earlier["court_id"]), str(later["court_id"])],
+        roles=["referee", later_role],
+        match_ids=[str(earlier["match_id"]), str(later["match_id"])],
+    )
+
+
 def _validate_max_sections(
     slots: Sequence[Mapping[str, Any]],
     max_sections_by_day: Mapping[str, int],
@@ -1825,6 +1983,47 @@ def _match_candidates(
     return result
 
 
+def _guaranteed_match_candidates(
+    match_id: str,
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    cache: dict[str, frozenset[str]],
+) -> frozenset[str]:
+    """試合の全参加経路で必ず出場する具体チームを返す。"""
+
+    match = matches_by_id.get(match_id)
+    if match is None:
+        return frozenset()
+
+    guaranteed: set[str] = set()
+    side_annotations_found = False
+    for side, possible_key in (
+        ("home", "possible_home_team_ids"),
+        ("away", "possible_away_team_ids"),
+    ):
+        raw_possible = _string_set(match.get(possible_key))
+        if raw_possible:
+            side_annotations_found = True
+            if len(raw_possible) == 1:
+                guaranteed.update(raw_possible)
+            continue
+        reference = match.get(side)
+        if reference not in (None, ""):
+            side_annotations_found = True
+        candidates = _reference_candidates(reference, matches_by_id, cache, frozenset({match_id}))
+        if len(candidates) == 1:
+            guaranteed.update(candidates)
+
+    # 古いJSONで両側の区別がなく、候補がちょうど2チームなら、総当たりの
+    # 1試合に両チームが出場する注記として扱う。3チーム以上の候補集合からは
+    # 全経路で必ず出場するチームを特定できない。
+    if not side_annotations_found:
+        undivided = _string_set(match.get("possible_team_ids"))
+        undivided |= _string_set(match.get("candidate_team_ids"))
+        if len(undivided) == 2:
+            guaranteed.update(undivided)
+    return frozenset(guaranteed)
+
+
 def _reference_candidates(
     reference: Any,
     matches_by_id: Mapping[str, Mapping[str, Any]],
@@ -1850,6 +2049,10 @@ def _reference_candidates(
         if source_id not in (None, ""):
             candidates.update(_match_candidates(str(source_id), matches_by_id, cache, visiting))
     return frozenset(candidates)
+
+
+def _is_league_format_match(match: Mapping[str, Any]) -> bool:
+    return str(match.get("phase", "league")) in {"league", "same_rank_league"}
 
 
 def _slot_candidates(

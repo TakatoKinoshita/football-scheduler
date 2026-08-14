@@ -142,8 +142,6 @@ def test_schedule_assigns_all_matches_once_and_independently_validates() -> None
         "used_sections",
         "referee_count_difference",
         "maximum_team_wait_sections",
-        "referee_then_match_count",
-        "previous_same_court_referee_count",
         "gap_court_change_count",
         "court_usage_difference",
     )
@@ -206,6 +204,122 @@ def test_all_adjacent_match_and_referee_roles_stay_on_same_court() -> None:
         for left, right in pairwise(ordered):
             if right[0] == left[0] + 1:
                 assert right[1] == left[1]
+
+
+def test_team_referee_always_comes_from_immediately_previous_match_on_same_court() -> None:
+    request, plan = _request(
+        team_count=8,
+        block_count=4,
+        court_count=2,
+        max_time_seconds=2,
+    )
+
+    result = generate_same_rank_day2_schedule(request)
+
+    matches = {match.id: match for group in plan.groups for match in group.matches}
+    slots = {(slot.section_no, slot.court_id): slot for slot in result.slots}
+    team_referee_slots = [
+        slot
+        for slot in result.slots
+        if slot.referee_assignment is not None and slot.referee_assignment.kind is RefereeKind.TEAM
+    ]
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert team_referee_slots
+    for slot in team_referee_slots:
+        assignment = slot.referee_assignment
+        assert assignment is not None
+        assert assignment.rank_ref is not None
+        source_slot = slots[slot.section_no - 1, slot.court_id]
+        assert source_slot.match_id is not None
+        source_match = matches[source_slot.match_id]
+        assert (assignment.rank_ref.block_id, assignment.rank_ref.rank) in {
+            (source_match.home.block_id, source_match.home.rank),
+            (source_match.away.block_id, source_match.away.rank),
+        }
+
+
+def test_role_sequences_only_allow_match_then_referee_when_adjacent() -> None:
+    request, _ = _request(
+        team_count=8,
+        block_count=4,
+        court_count=2,
+        max_time_seconds=2,
+    )
+
+    result = generate_same_rank_day2_schedule(request)
+    roles: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
+    for route in result.team_schedules:
+        key = route.rank_ref.block_id, route.rank_ref.rank
+        roles.setdefault(key, []).append((route.section_no, route.court_id, route.role))
+
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert roles
+    for entries in roles.values():
+        ordered = sorted(entries)
+        assert ordered[0][2] == "match"
+        for left, right in pairwise(ordered):
+            if right[0] == left[0] + 1:
+                assert (left[2], right[2]) == ("match", "referee")
+                assert left[1] == right[1]
+            else:
+                assert right[2] == "match"
+
+
+def test_configured_break_still_uses_previous_section_as_team_referee_source() -> None:
+    request, _ = _request()
+    dumped = request.model_dump(mode="json")
+    dumped["day"]["breaks"] = [{"after_section": 1, "duration_minutes": 60}]
+
+    result = generate_same_rank_day2_schedule(SameRankDay2ScheduleRequest.model_validate(dumped))
+
+    second = next(slot for slot in result.slots if slot.section_no == 2 and slot.match_id)
+    assert second.referee_assignment is not None
+    assert second.referee_assignment.kind is RefereeKind.TEAM
+    assert result.section_timings[0].break_after_minutes == 60
+
+
+def test_validator_rejects_team_referee_not_in_immediately_previous_match() -> None:
+    request, plan = _request(
+        team_count=8,
+        block_count=4,
+        court_count=2,
+        max_time_seconds=2,
+    )
+    result = generate_same_rank_day2_schedule(request)
+    dumped = deepcopy(result.model_dump(mode="json"))
+    target = next(
+        slot
+        for slot in dumped["slots"]
+        if slot["match_id"] and slot["referee_assignment"]["kind"] == "team"
+    )
+    match_by_id = {match.id: match for group in plan.groups for match in group.matches}
+    current = match_by_id[target["match_id"]]
+    source_slot = next(
+        slot
+        for slot in dumped["slots"]
+        if slot["section_no"] == target["section_no"] - 1 and slot["court_id"] == target["court_id"]
+    )
+    source = match_by_id[source_slot["match_id"]]
+    excluded = {
+        (current.home.block_id, current.home.rank),
+        (current.away.block_id, current.away.rank),
+        (source.home.block_id, source.home.rank),
+        (source.away.block_id, source.away.rank),
+    }
+    replacement = next(
+        participant.entry
+        for group in plan.groups
+        for participant in group.participants
+        if (participant.entry.block_id, participant.entry.rank) not in excluded
+    )
+    target["referee_assignment"]["rank_ref"] = replacement.model_dump(mode="json")
+
+    report = validate_same_rank_day2_schedule(request, dumped)
+
+    assert report.valid is False
+    assert "SAME_RANK_REFEREE_SOURCE_INVALID" in {
+        diagnostic.code for diagnostic in report.diagnostics
+    }
 
 
 def test_validator_detects_duplicate_match() -> None:

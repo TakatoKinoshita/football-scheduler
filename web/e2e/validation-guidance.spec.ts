@@ -60,11 +60,13 @@ test("共通設定は初期・再読込み・JSON読込み後に閉じ、名称�
 
   const imported = tournamentFixture();
   imported.tournament.input.referees.organizer_capacity = 2;
+  imported.tournament.input.referees.team_referees_required_after_first = false;
   imported.tournament.input.random_seed = 17;
   await importDocument(page, imported);
   await page.locator("#tab-schedule-settings").click();
   await expect(page.locator("#common-advanced-settings")).not.toHaveAttribute("open", "");
   await expect(page.locator("#organizer-capacity")).toHaveValue("2");
+  await expect(page.locator("#team-referees")).not.toBeChecked();
   await expect(page.locator("#random-seed")).toHaveValue("17");
 });
 

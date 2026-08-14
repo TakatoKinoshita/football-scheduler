@@ -290,8 +290,9 @@ root.innerHTML = `
             </label>
             <label class="check-field field-wide" for="team-referees">
               <input id="team-referees" type="checkbox" />
-              <span>第2セクション以降は、空いている参加チームにも審判を割り当てる</span>
+              <span>第2セクション以降は、直前セクションの同じコートで試合したチームの審判を必須にする</span>
             </label>
+            <small class="field-wide">オフにすると主催者審判へ切り替えられます。設定休憩があっても、連続するセクションとして扱います。</small>
             <span id="team-referees-error" class="field-error field-wide" role="alert"></span>
           </div>
         </details>
