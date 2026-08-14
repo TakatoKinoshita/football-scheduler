@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from functools import cache
 from importlib.metadata import version
-from itertools import pairwise
+from itertools import combinations, combinations_with_replacement, pairwise, product
 from time import perf_counter
 from typing import Any
 
@@ -38,6 +39,7 @@ _FULL_API_TIME_BUDGET_SECONDS = 30.0
 _MIN_FAIRNESS_TIME_SECONDS = 2.0
 _LARGE_LEAGUE_FAIRNESS_TIME_SECONDS = 8.0
 _MINIMUM_HORIZON_TIME_SHARE = 0.85
+_DAY1_HINT_PROOF_TIME_SECONDS = 5.0
 _DAY1_ID = "day1"
 
 
@@ -71,7 +73,12 @@ def solve_schedule(request: ScheduleRequest | Mapping[str, Any]) -> ScheduleResu
         )
 
     minimum_horizon = (len(request.matches) + len(request.courts) - 1) // len(request.courts)
-    if minimum_horizon < horizon:
+    strict_day1_league_referees = (
+        request.day.id == _DAY1_ID
+        and request.referees.team_referees_required_after_first
+        and all(match.phase == "league" for match in request.matches)
+    )
+    if minimum_horizon < horizon and not strict_day1_league_referees:
         # 容量上の理論最小値で実行可能なら、第1目的の最適性は探索せずとも
         # 証明できる。広い未使用区間を持つモデルよりも安定して同じ解を得やすい。
         minimum_result = _solve_schedule_at_horizon(
@@ -233,6 +240,21 @@ def _solve_schedule_at_horizon(
             horizon,
         )
 
+    league_match_indexes = frozenset(
+        index for index, match in enumerate(request.matches) if match.phase == "league"
+    )
+    if request.day.id == _DAY1_ID:
+        _add_league_team_referee_source_constraints(
+            model,
+            placement,
+            match_in_section,
+            team_referee,
+            possible_matches_by_team,
+            league_match_indexes,
+            horizon,
+            len(request.courts),
+        )
+
     for team_id in team_ids:
         relevant_matches = possible_matches_by_team[team_id]
         for section_index in range(horizon - 1):
@@ -275,9 +297,6 @@ def _solve_schedule_at_horizon(
         horizon,
     )
 
-    league_match_indexes = frozenset(
-        index for index, match in enumerate(request.matches) if match.phase == "league"
-    )
     league_match_count = len(league_match_indexes)
     used_sections_expression = sum(active_sections)
     primary_objective_weight = league_match_count + 1
@@ -295,12 +314,29 @@ def _solve_schedule_at_horizon(
         # このモデルはチーム審判候補の対称性が大きく、最大入力では
         # presolveだけで時間上限へ達し得る。完全な実行可能hintを直接探索する。
         primary_solver.parameters.cp_model_presolve = False
+        primary_solver.parameters.max_time_in_seconds = min(
+            solver_time_budget,
+            _DAY1_HINT_PROOF_TIME_SECONDS,
+        )
     primary_status = _STATUS_MAP.get(primary_solver.solve(model), SolverStatus.UNKNOWN)
     wall_time = primary_solver.wall_time
 
     if primary_status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
+        if primary_status is SolverStatus.UNKNOWN:
+            constructed = _construct_day1_league_hint(request, horizon)
+            if constructed is not None:
+                return _result_from_day1_league_hint(
+                    request,
+                    constructed,
+                    wall_time,
+                )
         diagnostic = _failure_diagnostic(primary_status, request, horizon)
         return _result_without_schedule(request, primary_status, wall_time, (diagnostic,))
+
+    if primary_status is SolverStatus.FEASIBLE:
+        constructed = _construct_day1_league_hint(request, horizon)
+        if constructed is not None:
+            return _result_from_day1_league_hint(request, constructed, wall_time)
 
     solver = primary_solver
     status = SolverStatus.FEASIBLE
@@ -416,7 +452,6 @@ def _solve_schedule_at_horizon(
                     request,
                     placement,
                     match_in_section,
-                    team_referee,
                     possible_matches_by_team,
                     role_on_court,
                     solver,
@@ -544,11 +579,6 @@ def _solve_schedule_at_horizon(
                         maximum_league_referee_count_value - minimum_league_referee_count_value,
                     ),
                     ("maximum_team_wait_sections", audit["maximum_team_wait_sections"]),
-                    ("referee_then_match_count", audit["referee_then_match_count"]),
-                    (
-                        "league_previous_same_court_referee_count",
-                        audit["league_previous_same_court_referee_count"],
-                    ),
                     ("team_court_change_count", audit["team_court_change_count"]),
                     ("court_usage_difference", audit["court_usage_difference"]),
                 )
@@ -645,6 +675,46 @@ def _add_adjacent_assignment_same_court_constraints(
             ).only_enforce_if([role_any[team_id, section], role_any[team_id, section + 1]])
 
 
+def _add_league_team_referee_source_constraints(
+    model: cp_model.CpModel,
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
+    possible_matches_by_team: Mapping[str, tuple[int, ...]],
+    league_match_indexes: frozenset[int],
+    horizon: int,
+    court_count: int,
+) -> None:
+    """1日目リーグの審判供給元と許可する連続担当を固定する。
+
+    チーム審判は、直前セクションの同一コートでそのチームが出場した
+    実試合からだけ供給する。試合の次に審判を担当する遷移だけを許可し、
+    審判の直後に試合へ出場する遷移は禁止する。
+    """
+
+    for (match_index, section, team_id), referee in team_referee.items():
+        if match_index not in league_match_indexes:
+            continue
+        if section == 0:
+            model.add(referee == 0)
+            continue
+
+        source_matches = possible_matches_by_team[team_id]
+        for court in range(court_count):
+            previous_same_court_matches = sum(
+                placement[source_match, section - 1, court] for source_match in source_matches
+            )
+            model.add(
+                referee + placement[match_index, section, court] <= previous_same_court_matches + 1
+            )
+
+        if section + 1 < horizon:
+            next_matches = sum(
+                match_in_section[next_match, section + 1] for next_match in source_matches
+            )
+            model.add(referee + next_matches <= 1)
+
+
 def _add_day1_league_initial_hint(
     model: cp_model.CpModel,
     request: ScheduleRequest,
@@ -660,13 +730,43 @@ def _add_day1_league_initial_hint(
     match_court: Mapping[int, cp_model.IntVar],
     horizon: int,
 ) -> bool:
-    """主催者審判で成立する1日目リーグの貪欲解を探索開始点にする。"""
+    """1日目リーグの実行可能解を探索開始点にする。"""
 
-    if (
-        request.day.id != _DAY1_ID
-        or request.referees.organizer_capacity <= 0
-        or any(match.phase != "league" or match.prerequisite_match_ids for match in request.matches)
+    if request.day.id != _DAY1_ID or any(
+        match.phase != "league" or match.prerequisite_match_ids for match in request.matches
     ):
+        return False
+
+    if request.referees.team_referees_required_after_first and all(
+        not match.organizer_referee_required for match in request.matches
+    ):
+        constructed_hint = _construct_day1_league_hint(request, horizon)
+        if constructed_hint is not None:
+            constructed_assignment, constructed_referees = constructed_hint
+            constructed_organizers = frozenset(
+                match_index
+                for match_index, (section, _court) in constructed_assignment.items()
+                if section == 0
+            )
+            return _apply_day1_league_hint(
+                model,
+                request,
+                constructed_assignment,
+                constructed_organizers,
+                constructed_referees,
+                placement,
+                match_in_section,
+                active_sections,
+                organizer_referee,
+                team_referee,
+                section_number,
+                role_any,
+                role_on_court,
+                role_court,
+                match_court,
+            )
+
+    if request.referees.organizer_capacity <= 0:
         return False
 
     section_capacities = [
@@ -714,6 +814,7 @@ def _add_day1_league_initial_hint(
             or not request.referees.team_referees_required_after_first
         ):
             organizer_matches.add(match_index)
+    match_role_positions = dict(role_positions)
 
     for section in range(horizon):
         organizer_count = sum(
@@ -735,8 +836,8 @@ def _add_day1_league_initial_hint(
                 for team in request.teams
                 if (match_index, section, team.id) in team_referee
                 and (team.id, section) not in role_positions
-                and role_positions.get((team.id, section - 1), court) == court
-                and role_positions.get((team.id, section + 1), court) == court
+                and match_role_positions.get((team.id, section - 1)) == court
+                and (team.id, section + 1) not in match_role_positions
             ]
 
         ordered_matches = sorted(
@@ -749,6 +850,307 @@ def _add_day1_league_initial_hint(
         for match_index, team_id in chosen.items():
             referee_by_match[match_index] = team_id
             role_positions[team_id, section] = assignment[match_index][1]
+
+    return _apply_day1_league_hint(
+        model,
+        request,
+        assignment,
+        frozenset(organizer_matches),
+        referee_by_match,
+        placement,
+        match_in_section,
+        active_sections,
+        organizer_referee,
+        team_referee,
+        section_number,
+        role_any,
+        role_on_court,
+        role_court,
+        match_court,
+    )
+
+
+@cache
+def _construct_day1_league_hint(
+    request: ScheduleRequest,
+    horizon: int,
+) -> tuple[dict[int, tuple[int, int]], dict[int, str]] | None:
+    """リーグのコート列を直接組み立て、審判供給元を含む完全hintを返す。"""
+
+    if (
+        request.day.id != _DAY1_ID
+        or not request.referees.team_referees_required_after_first
+        or any(match.phase != "league" or match.prerequisite_match_ids for match in request.matches)
+        or any(match.organizer_referee_required for match in request.matches)
+    ):
+        return None
+    match_count = len(request.matches)
+    active_court_count = min(
+        len(request.courts),
+        request.referees.organizer_capacity,
+        match_count,
+    )
+    if active_court_count == 0 or match_count > active_court_count * horizon:
+        return None
+    deadline = perf_counter() + min(5.0, request.solver.max_time_seconds * 0.2)
+
+    participants = tuple(match.possible_team_ids for match in request.matches)
+    guaranteed_referees = tuple(
+        tuple(
+            sorted(
+                {
+                    *(
+                        match.possible_home_team_ids
+                        if len(match.possible_home_team_ids) == 1
+                        else ()
+                    ),
+                    *(
+                        match.possible_away_team_ids
+                        if len(match.possible_away_team_ids) == 1
+                        else ()
+                    ),
+                }
+            )
+        )
+        for match in request.matches
+    )
+
+    def batch_is_disjoint(batch: tuple[int, ...]) -> bool:
+        occupied: set[str] = set()
+        for match_index in batch:
+            if occupied.intersection(participants[match_index]):
+                return False
+            occupied.update(participants[match_index])
+        return True
+
+    length_candidates: list[tuple[int, ...]] = []
+    minimum_used = (match_count + active_court_count - 1) // active_court_count
+    for used_sections in range(minimum_used, horizon + 1):
+        for lengths in combinations_with_replacement(
+            range(1, used_sections + 1), active_court_count
+        ):
+            if sum(lengths) == match_count and max(lengths) == used_sections:
+                length_candidates.append(tuple(sorted(lengths, reverse=True)))
+    length_candidates = list(dict.fromkeys(length_candidates))
+
+    all_remaining = (1 << match_count) - 1
+    for lengths in length_candidates:
+        batch_sizes = tuple(
+            sum(length > section for length in lengths) for section in range(max(lengths))
+        )
+
+        @cache
+        def build(
+            remaining: int,
+            previous: tuple[int, ...],
+            previous_referees: tuple[str, ...],
+            section: int,
+            section_sizes: tuple[int, ...] = batch_sizes,
+        ) -> (
+            tuple[tuple[tuple[int, ...], tuple[int, ...], tuple[tuple[int, str], ...]], ...] | None
+        ):
+            if perf_counter() >= deadline:
+                return None
+            if remaining == 0:
+                return ()
+            size = section_sizes[section]
+            excluded = set(previous_referees)
+            for previous_match in previous:
+                excluded.update(participants[previous_match])
+
+            available_matches = tuple(
+                match
+                for match in range(match_count)
+                if remaining & (1 << match) and participants[match].isdisjoint(excluded)
+            )
+            candidate_batches = combinations(available_matches, size)
+            first_section_batch_seen = False
+            for batch in candidate_batches:
+                if not batch_is_disjoint(batch):
+                    continue
+                if section == 0 and first_section_batch_seen:
+                    break
+                first_section_batch_seen = True
+
+                active_sources = combinations(previous, size) if previous else ((),)
+                for sources in active_sources:
+                    referee_choices = (
+                        product(*(guaranteed_referees[match] for match in sources))
+                        if sources
+                        else ((),)
+                    )
+                    for selected_referees in referee_choices:
+                        if len(set(selected_referees)) != len(selected_referees):
+                            continue
+                        referee_items = tuple(
+                            (batch[index], referee)
+                            for index, referee in enumerate(selected_referees)
+                        )
+                        next_remaining = remaining
+                        for match in batch:
+                            next_remaining &= ~(1 << match)
+                        suffix = build(
+                            next_remaining,
+                            batch,
+                            tuple(sorted(selected_referees)),
+                            section + 1,
+                        )
+                        if suffix is not None:
+                            return ((batch, tuple(sources), referee_items), *suffix)
+            return None
+
+        built = build(all_remaining, (), (), 0)
+        if built is None:
+            continue
+        assignment: dict[int, tuple[int, int]] = {}
+        referee_by_match: dict[int, str] = {}
+        previous_courts: dict[int, int] = {}
+        for section, (batch, sources, referees) in enumerate(built):
+            courts = (
+                tuple(previous_courts[source] for source in sources)
+                if sources
+                else tuple(range(len(batch)))
+            )
+            current_courts = dict(zip(batch, courts, strict=True))
+            for match, court in current_courts.items():
+                assignment[match] = section, court
+            referee_by_match.update(referees)
+            previous_courts = current_courts
+        return assignment, referee_by_match
+    return None
+
+
+def _result_from_day1_league_hint(
+    request: ScheduleRequest,
+    constructed: tuple[dict[int, tuple[int, int]], dict[int, str]],
+    wall_time_seconds: float,
+) -> ScheduleResult:
+    """CP-SATが時間切れでも、検証可能な構築済みリーグ日程を返す。"""
+
+    assignment, referee_by_match = constructed
+    used_sections = max(section for section, _court in assignment.values()) + 1
+    match_by_id = {match.id: match for match in request.matches}
+    match_by_position = {position: match_index for match_index, position in assignment.items()}
+    slots: list[Slot] = []
+    for section in range(used_sections):
+        for court, court_spec in enumerate(request.courts):
+            match_index = match_by_position.get((section, court))
+            if match_index is None:
+                slots.append(
+                    Slot(
+                        day_id=request.day.id,
+                        section_no=section + 1,
+                        court_id=court_spec.id,
+                        match_id=None,
+                        referee_assignment=None,
+                    )
+                )
+                continue
+            referee_team_id = referee_by_match.get(match_index)
+            if section > 0:
+                assert referee_team_id is not None
+            slot_referee = (
+                RefereeAssignment(kind=RefereeKind.ORGANIZER)
+                if section == 0
+                else RefereeAssignment(kind=RefereeKind.TEAM, team_id=referee_team_id)
+            )
+            slots.append(
+                Slot(
+                    day_id=request.day.id,
+                    section_no=section + 1,
+                    court_id=court_spec.id,
+                    match_id=request.matches[match_index].id,
+                    referee_assignment=slot_referee,
+                )
+            )
+
+    frozen_slots = tuple(slots)
+    audit = _audit_schedule_quality(request, frozen_slots)
+    counts = {team.id: 0 for team in request.teams}
+    for slot in frozen_slots:
+        if slot.match_id is None or match_by_id[slot.match_id].phase != "league":
+            continue
+        audit_referee = slot.referee_assignment
+        if audit_referee is not None and audit_referee.kind is RefereeKind.TEAM:
+            assert audit_referee.team_id is not None
+            counts[audit_referee.team_id] += 1
+    count_values = list(counts.values())
+    minimum = min(count_values, default=0)
+    maximum = max(count_values, default=0)
+    objective_values = (
+        ("used_sections", used_sections),
+        ("league_team_referee_count_difference", maximum - minimum),
+        ("maximum_team_wait_sections", audit["maximum_team_wait_sections"]),
+        ("team_court_change_count", audit["team_court_change_count"]),
+        ("court_usage_difference", audit["court_usage_difference"]),
+    )
+    return ScheduleResult(
+        status=SolverStatus.FEASIBLE,
+        slots=frozen_slots,
+        section_timings=section_timings(request.day, used_sections),
+        expected_end_time=expected_end_time(request.day, used_sections),
+        metrics=SolverMetrics(
+            random_seed=request.random_seed,
+            max_time_seconds=request.solver.max_time_seconds,
+            ortools_version=_ORTOOLS_VERSION,
+            wall_time_seconds=wall_time_seconds,
+            used_sections=used_sections,
+            objective_value=float(used_sections),
+            league_team_referee_counts=tuple(
+                TeamRefereeCount(team_id=team_id, count=counts[team_id])
+                for team_id in sorted(counts)
+            ),
+            league_team_referee_count_min=minimum,
+            league_team_referee_count_max=maximum,
+            league_team_referee_count_difference=maximum - minimum,
+            maximum_team_wait_sections=audit["maximum_team_wait_sections"],
+            referee_then_match_count=audit["referee_then_match_count"],
+            league_previous_same_court_referee_count=audit[
+                "league_previous_same_court_referee_count"
+            ],
+            adjacent_assignment_court_change_count=audit["adjacent_assignment_court_change_count"],
+            team_court_change_count=audit["team_court_change_count"],
+            court_usage_difference=audit["court_usage_difference"],
+            organizer_referee_count=audit["organizer_referee_count"],
+            tournament_team_referee_count=audit["tournament_team_referee_count"],
+            tournament_referee_fallback_count=0,
+            objective_stages=tuple(
+                ObjectiveStageMetric(
+                    objective=name,
+                    value=value,
+                    optimality_proven=False,
+                )
+                for name, value in objective_values
+            ),
+            optimality_proven=False,
+        ),
+        diagnostics=(
+            Diagnostic(
+                code="OPTIMALITY_NOT_PROVEN",
+                message="実行可能な日程は見つかりましたが、制限時間内に最適性を証明できませんでした。",
+            ),
+        ),
+    )
+
+
+def _apply_day1_league_hint(
+    model: cp_model.CpModel,
+    request: ScheduleRequest,
+    assignment: Mapping[int, tuple[int, int]],
+    organizer_matches: frozenset[int],
+    referee_by_match: Mapping[int, str],
+    placement: Mapping[tuple[int, int, int], cp_model.IntVar],
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    active_sections: list[cp_model.IntVar],
+    organizer_referee: Mapping[tuple[int, int], cp_model.IntVar],
+    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
+    section_number: Mapping[int, cp_model.IntVar],
+    role_any: Mapping[tuple[str, int], cp_model.IntVar],
+    role_on_court: Mapping[tuple[str, int, int], cp_model.IntVar],
+    role_court: Mapping[tuple[str, int], cp_model.IntVar],
+    match_court: Mapping[int, cp_model.IntVar],
+) -> bool:
+    """完全な日程と審判割当てを主モデルのhintへ変換する。"""
 
     used_sections = max((section for section, _court in assignment.values()), default=-1) + 1
     for (item_index, section, court), variable in placement.items():
@@ -774,6 +1176,13 @@ def _add_day1_league_initial_hint(
     for item_index, variable in match_court.items():
         model.add_hint(variable, assignment[item_index][1] + 1)
 
+    role_positions: dict[tuple[str, int], int] = {}
+    for item_index, (section, court) in assignment.items():
+        for team_id in request.matches[item_index].possible_team_ids:
+            role_positions[team_id, section] = court
+        referee_team_id = referee_by_match.get(item_index)
+        if referee_team_id is not None:
+            role_positions[referee_team_id, section] = court
     for key, variable in role_any.items():
         model.add_hint(variable, int(key in role_positions))
     for (team_id, section, court), variable in role_on_court.items():
@@ -812,7 +1221,6 @@ def _optimize_lower_objectives(
     request: ScheduleRequest,
     placement: Mapping[tuple[int, int, int], cp_model.IntVar],
     match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
-    team_referee: Mapping[tuple[int, int, str], cp_model.IntVar],
     possible_matches_by_team: Mapping[str, tuple[int, ...]],
     role_on_court: Mapping[tuple[str, int, int], cp_model.IntVar],
     initial_solver: cp_model.CpSolver,
@@ -829,53 +1237,6 @@ def _optimize_lower_objectives(
     maximum_wait = _add_maximum_wait_objective(
         model, possible_matches_by_team, match_in_section, horizon
     )
-    referee_then_match: list[cp_model.IntVar] = []
-    previous_same_court: list[cp_model.IntVar] = []
-    for team_id, relevant_matches in possible_matches_by_team.items():
-        for section in sections:
-            referee_now = [
-                variable
-                for (match, ref_section, referee_team), variable in team_referee.items()
-                if ref_section == section and referee_team == team_id
-            ]
-            if section + 1 < horizon:
-                transition = model.new_bool_var(f"referee_then_match_{team_id}_{section}")
-                played_next = sum(
-                    match_in_section[index, section + 1] for index in relevant_matches
-                )
-                model.add(transition <= sum(referee_now))
-                model.add(transition <= played_next)
-                model.add(transition >= sum(referee_now) + played_next - 1)
-                referee_then_match.append(transition)
-
-            for court in courts:
-                if section > 0:
-                    previous_played = sum(
-                        placement[index, section - 1, court] for index in relevant_matches
-                    )
-                    continued = model.new_bool_var(
-                        f"previous_same_court_referee_{team_id}_{section}_{court}"
-                    )
-                    model.add(continued <= sum(referee_now))
-                    model.add(continued <= role_on_court[team_id, section, court])
-                    model.add(continued <= previous_played)
-                    model.add(
-                        continued
-                        >= sum(referee_now)
-                        + role_on_court[team_id, section, court]
-                        + previous_played
-                        - 2
-                    )
-                    previous_same_court.append(continued)
-
-    referee_then_match_count = model.new_int_var(
-        0, len(referee_then_match), "referee_then_match_count"
-    )
-    model.add(referee_then_match_count == sum(referee_then_match))
-    previous_same_court_count = model.new_int_var(
-        0, len(previous_same_court), "previous_same_court_referee_count"
-    )
-    model.add(previous_same_court_count == sum(previous_same_court))
 
     # 直前の割当てコートを状態として持ち、空きセクションを挟む移動も1回として数える。
     # 全セクション対の組合せを作らないため、最大入力でもモデルサイズを抑えられる。
@@ -936,8 +1297,6 @@ def _optimize_lower_objectives(
 
     stages: tuple[tuple[str, cp_model.IntVar, bool], ...] = (
         ("maximum_team_wait_sections", maximum_wait, False),
-        ("referee_then_match_count", referee_then_match_count, False),
-        ("league_previous_same_court_referee_count", previous_same_court_count, True),
         ("team_court_change_count", all_move_count, False),
         ("court_usage_difference", court_usage_difference, False),
     )
@@ -1189,6 +1548,19 @@ def _failure_diagnostic(status: SolverStatus, request: ScheduleRequest, horizon:
         "max_sections": horizon,
     }
     if status is SolverStatus.INFEASIBLE:
+        if (
+            request.day.id == _DAY1_ID
+            and request.referees.team_referees_required_after_first
+            and all(match.phase == "league" for match in request.matches)
+        ):
+            return Diagnostic(
+                code="LEAGUE_REFEREE_UNAVAILABLE",
+                message=(
+                    "直前セクションの同じコートで試合したチームから安全な審判を"
+                    "供給できるリーグ日程がありません。セクション数やコート数を確認してください。"
+                ),
+                details=details,
+            )
         return Diagnostic(
             code="SCHEDULE_INFEASIBLE",
             message="指定された制約をすべて満たす日程は存在しません。",

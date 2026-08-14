@@ -31,8 +31,6 @@ _OBJECTIVES = (
     "used_sections",
     "referee_count_difference",
     "maximum_team_wait_sections",
-    "referee_then_match_count",
-    "previous_same_court_referee_count",
     "gap_court_change_count",
     "court_usage_difference",
 )
@@ -118,6 +116,7 @@ def validate_same_rank_day2_schedule(
     positions: set[tuple[int, str]] = set()
     occupied_ids: list[str] = []
     slot_by_match: dict[str, SameRankSlot] = {}
+    slot_by_position: dict[tuple[int, str], SameRankSlot] = {}
     for slot in result.slots:
         position = (slot.section_no, slot.court_id)
         if position in positions:
@@ -130,6 +129,7 @@ def validate_same_rank_day2_schedule(
                 )
             )
         positions.add(position)
+        slot_by_position.setdefault(position, slot)
         if slot.court_id not in court_ids or not 1 <= slot.section_no <= used_sections:
             diagnostics.append(
                 _diagnostic(
@@ -255,6 +255,30 @@ def validate_same_rank_day2_schedule(
                 )
             )
             continue
+        source_slot = slot_by_position.get((slot.section_no - 1, slot.court_id))
+        source_match = (
+            expected_by_id.get(source_slot.match_id)
+            if source_slot is not None and source_slot.match_id is not None
+            else None
+        )
+        source_keys = (
+            {
+                (source_match.home.block_id, source_match.home.rank),
+                (source_match.away.block_id, source_match.away.rank),
+            }
+            if source_match is not None
+            else set()
+        )
+        if rank_key not in source_keys:
+            diagnostics.append(
+                _diagnostic(
+                    "SAME_RANK_REFEREE_SOURCE_INVALID",
+                    "チーム審判は直前セクションの同じコートで試合したチームから選んでください。",
+                    match_id=match_id,
+                    section_no=slot.section_no,
+                    court_id=slot.court_id,
+                )
+            )
         if assignment.team_id != team_by_rank[rank_key]:
             diagnostics.append(
                 _diagnostic(
@@ -297,11 +321,28 @@ def validate_same_rank_day2_schedule(
             )
         ordered = sorted(entries)
         for left, right in pairwise(ordered):
-            if right[0] == left[0] + 1 and right[1] != left[1]:
+            if right[0] == left[0] + 1:
+                if right[1] != left[1]:
+                    diagnostics.append(
+                        _diagnostic(
+                            "SAME_RANK_ADJACENT_COURT_CHANGE",
+                            "連続セクションの試合・審判は同じコートへ配置してください。",
+                            rank_ref=f"{rank_key[0]}:{rank_key[1]}",
+                        )
+                    )
+                if left[2] != "match" or right[2] != "referee":
+                    diagnostics.append(
+                        _diagnostic(
+                            "SAME_RANK_CONSECUTIVE_ROLE_INVALID",
+                            "連続セクションでは試合から審判への担当だけが許可されます。",
+                            rank_ref=f"{rank_key[0]}:{rank_key[1]}",
+                        )
+                    )
+            elif right[0] > left[0] + 1 and right[2] != "match":
                 diagnostics.append(
                     _diagnostic(
-                        "SAME_RANK_ADJACENT_COURT_CHANGE",
-                        "連続セクションの試合・審判は同じコートへ配置してください。",
+                        "SAME_RANK_REFEREE_SOURCE_INVALID",
+                        "間隔を空けた次の担当をチーム審判にはできません。",
                         rank_ref=f"{rank_key[0]}:{rank_key[1]}",
                     )
                 )
@@ -457,14 +498,17 @@ def _validate_metrics(
         assignment = slot.referee_assignment
         if assignment is None or assignment.kind is not RefereeKind.TEAM:
             continue
-        previous = [
-            candidate
-            for candidate in occupied
-            if candidate.court_id == slot.court_id and candidate.section_no < slot.section_no
-        ]
-        if not previous or assignment.rank_ref is None:
+        source = next(
+            (
+                candidate
+                for candidate in occupied
+                if candidate.court_id == slot.court_id
+                and candidate.section_no == slot.section_no - 1
+            ),
+            None,
+        )
+        if source is None or assignment.rank_ref is None:
             continue
-        source = max(previous, key=lambda item: item.section_no)
         source_match = next(
             match for match in result.same_rank_matches if match.id == source.match_id
         )

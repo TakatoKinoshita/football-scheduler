@@ -22,6 +22,7 @@ describe("1日目リーグ入力", () => {
     expect(document.tournament.input).not.toHaveProperty("final_stage");
     expect(document.tournament.input.league).not.toHaveProperty("odd_split_policy");
     expect(document.tournament.input.referees).toMatchObject({
+      team_referees_required_after_first: true,
       day2_fallback: "organizer",
     });
     expect(document.tournament.input.referees).not.toHaveProperty("tournament_fallback");
@@ -50,6 +51,16 @@ describe("1日目リーグ入力", () => {
     });
     expect(request).not.toHaveProperty("day2");
     expect(document.tournament.input).toHaveProperty("day2");
+  });
+
+  it("既存のチーム審判任意設定を1日目API要求へ保持する", () => {
+    const document = createTournamentDocument();
+    const referees = document.tournament.input.referees as Record<string, unknown>;
+    referees.team_referees_required_after_first = false;
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).referees).toMatchObject({
+      team_referees_required_after_first: false,
+    });
   });
 
   it("順位決定トーナメントの名前をAPI要求へ保持する", () => {

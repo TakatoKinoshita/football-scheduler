@@ -417,6 +417,7 @@ def test_day2_creation_rejects_legacy_day2_action(
         ("TEAM_LIMIT_EXCEEDED", 413),
         ("SCHEDULE_SEARCH_TIMEOUT", 504),
         ("INSUFFICIENT_SLOTS", 422),
+        ("LEAGUE_REFEREE_UNAVAILABLE", 422),
         ("TOURNAMENT_REFEREE_UNAVAILABLE", 422),
         ("SAME_RANK_REFEREE_UNAVAILABLE", 422),
         ("SAME_RANK_SCHEDULE_SEARCH_TIMEOUT", 504),
