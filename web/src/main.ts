@@ -8,6 +8,7 @@ import {
   ScheduleApiError,
 } from "./api";
 import {
+  buildDay1ScheduleRequest,
   convertLegacyToEditableDocument,
   issuesFromApiDetails,
   isPlacementTournamentTeamCountSupported,
@@ -3908,6 +3909,16 @@ function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
   };
   const finalStageIssue = finalStageFields[error.code];
   if (finalStageIssue !== undefined) return [finalStageIssue];
+  if (error.code === "MANUAL_BLOCKS_NOT_ALLOWED") {
+    return [
+      {
+        field: "assignment-mode",
+        step: 2,
+        message:
+          "保存済みの手動割当てが現在の分け方と一致しません。チームの分け方を選び直してください。",
+      },
+    ];
+  }
   if (error.code === "INVALID_BLOCK_COUNT") {
     return [
       {
@@ -3926,7 +3937,6 @@ function apiFieldIssues(error: ScheduleApiError): FieldIssue[] {
     "DUPLICATE_TEAM_IN_MANUAL_BLOCKS",
     "TEAM_MISSING_FROM_MANUAL_BLOCKS",
     "MANUAL_BLOCK_SIZE_IMBALANCE",
-    "MANUAL_BLOCKS_NOT_ALLOWED",
   ]);
   if (manualCodes.has(error.code)) {
     const teamIds = Array.isArray(error.details?.team_ids)
@@ -4007,8 +4017,9 @@ generateButton.addEventListener("click", () => {
     ...(asObject(documentState.tournament.input.referees) ?? {}),
     day2_fallback: day2FallbackInput.value,
   };
+  const activeInput = buildDay1ScheduleRequest(documentState.tournament.input);
   const request: JsonObject = {
-    ...documentState.tournament.input,
+    ...activeInput,
     schema_version: SCHEMA_VERSION,
     request_kind: "schedule_creation",
     generation_scope: generationScope,
