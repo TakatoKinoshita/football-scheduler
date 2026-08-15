@@ -176,6 +176,34 @@ test("APIの詳細設定errorでも該当detailsを開いてfocus・強調する
   await expect(page.locator("#day2-breaks-error")).toContainText("2日目の休憩");
 });
 
+test("自動方式に残った手動割当てerrorは表示中の分け方をfocus・強調する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillValidTournament(page);
+  await page.unroute(GENERATE_API);
+  await page.route(GENERATE_API, async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "error",
+        diagnostics: [{
+          code: "MANUAL_BLOCKS_NOT_ALLOWED",
+          message: "手動以外の分け方では手動ブロック割当てを使用できません。",
+          details: {},
+        }],
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+
+  await expectGuidedTo(page, "assignment-mode", 2);
+  await expect(page.locator("#assignment-mode-error")).toContainText("保存済みの手動割当て");
+});
+
 test("手動割当てerrorのteam対象が不明でもfieldset自体へfocusする", async ({ page }) => {
   await mockExternalServices(page);
   await openApp(page);

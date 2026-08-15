@@ -206,6 +206,65 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
   expect(requests[0]).toHaveProperty("day2");
 });
 
+test("自動方式へ戻した後は非表示の手動割当てを両決勝方式の生成要求へ含めない", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await page.locator("#tournament-name").fill("16チーム生成確認大会");
+  await page.locator("#teams").fill(
+    Array.from({ length: 16 }, (_, index) => `チーム${String(index + 1)}`).join("\n"),
+  );
+  await page.locator("#courts").fill("Aコート\nBコート\nCコート");
+  await page.getByRole("button", { name: "次へ：日程設定・生成" }).click();
+  await page.locator("#block-count").selectOption("4");
+  await page.locator("#assignment-mode").selectOption("manual");
+  await page.getByLabel("チーム1", { exact: true }).selectOption("A");
+  await page.locator("#assignment-mode").selectOption("random");
+  await page.locator("#final-stage-format").selectOption("same_rank_league");
+
+  await page.unroute(GENERATE_API);
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route(GENERATE_API, async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "error",
+        diagnostics: [{ code: "TEST_STOP", message: "要求内容を確認しました。" }],
+      }),
+    });
+  });
+
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]).toMatchObject({
+    request_kind: "schedule_creation",
+    courts: [{ name: "Aコート" }, { name: "Bコート" }, { name: "Cコート" }],
+    league: { block_count: 4, assignment_mode: "random" },
+    final_stage: { format: "same_rank_league" },
+  });
+  expect(requests[0]!.teams).toHaveLength(16);
+  expect((requests[0]!.teams as Array<Record<string, unknown>>)[15]).toMatchObject({
+    name: "チーム16",
+  });
+  expect((requests[0]!.league as Record<string, unknown>)).not.toHaveProperty("manual_blocks");
+
+  await expect(page.getByRole("button", { name: "日程を生成する" })).toBeEnabled();
+  await page.locator("#final-stage-format").selectOption("placement_tournament");
+  await page.locator("#tournament-count").selectOption("2");
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]).toMatchObject({
+    request_kind: "schedule_creation",
+    league: { block_count: 4, assignment_mode: "random" },
+    final_stage: { format: "placement_tournament", tournament_count: 2 },
+  });
+  expect((requests[1]!.league as Record<string, unknown>)).not.toHaveProperty("manual_blocks");
+});
+
 test("順位決定トーナメントごとの名前を既定表示し、変更後の名前で生成を要求する", async ({
   page,
 }) => {
