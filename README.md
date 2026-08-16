@@ -128,17 +128,20 @@ npm run dev
 `day2_only`を使用する。成功時は両日の正規結果をまとめて返し、途中で失敗した場合は段階を含む
 診断だけを返すため、画面の保存状態を部分的な結果で置き換えない。
 `random`、`seeded_snake`、`manual`のブロック分けを利用でき、完成済み試合を含む従来の
-`ScheduleRequest` JSONも互換経路として受け付ける。旧PWA互換の順位確定入口として
-`league_standings`、`same_rank_league_results`、`tournament_results`を引き続き受け付けるが、
-現行画面のリーグ系順位と順位決定トーナメントの最終順位はこれらを呼び出さず、端末内でPython版と
-同じ保存形式を生成する。2日目の
-一括作成は任意の`league_standings`を持つ`day2_creation`として同じ保護されたAPIへ要求できる。
+`ScheduleRequest` JSONも互換経路として受け付ける。公開APIは日程・決勝計画の生成だけを扱い、
+`request_kind`が`league_standings`、`same_rank_league_results`、`tournament_results`である
+結果計算要求は受け付けない。1日目リーグ、2日目同順位リーグ、順位決定トーナメントの結果検証と
+順位確定は、通信やTurnstileを使わず端末内でPython版と同じ保存形式を生成する。Pythonの順位計算
+実装とJSON互換application境界は、生成処理の内部利用とクロス実装テストのため維持する。2日目の
+一括作成は任意の`league_standings`を持つ`day2_creation`として保護されたAPIへ要求できる。
 `day2_creation`は1つのTurnstile tokenで選択形式の計画と日程を順番に生成し、両方の独立検証が
 成功した場合だけ返すが、`day1_league`とともに通常画面では使用しない互換経路である。
 形式別の生成入口として`tournament_plan`、`day2_schedule`、
-`same_rank_league_plan`、`same_rank_day2_schedule`も受け付ける。旧PWAは2日目トーナメントの
-全結果検証と総合順位確定を`tournament_results`で要求できる。Turnstileのactionは
-`day2_creation`の`create_day2`を含め、各`request_kind`と一致する場合だけ受理する。
+`same_rank_league_plan`、`same_rank_day2_schedule`も受け付ける。Turnstileのactionは
+`day2_creation`の`create_day2`を含め、各生成用`request_kind`と一致する場合だけ受理する。
+結果計算APIの廃止前から開いたままの旧PWAは、更新通知を承認するか画面を再読み込みしてから
+結果を確定する。IndexedDBの大会データは更新のために削除しない。互換性判断は
+[ADR-0003](docs/architecture/adr-0003-local-results-api-retirement.md)を参照する。
 サーバー側へ大会データは永続保存しない。
 
 `manual`では「日程設定・生成」タブの1日目設定に全チームの割当て先を表示し、固定したいチームだけA、B…の各ブロックを

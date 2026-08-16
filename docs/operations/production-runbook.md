@@ -42,9 +42,11 @@ Cloudflare dashboardで次を確認する。
 - production branchは`main`として作成している。
 - Pages Functionsの利用上限到達時は`fail closed`である。
 - Turnstile widgetのhostnameにPagesの公開hostnameを登録している。現行画面から渡すactionは
-  `create_schedule`である。旧PWAを含む後方互換APIでは`calculate_tournament_results`、
-  `generate_schedule`、`calculate_standings`、`calculate_same_rank_results`、`create_day2`、
-  `generate_tournament`、`generate_day2_schedule`など、authorizerに定義したactionだけを許可する。
+  `create_schedule`である。後方互換APIでも`generate_schedule`、`create_day2`、
+  `generate_tournament`、`generate_same_rank_league`、`generate_day2_schedule`、
+  `generate_same_rank_day2_schedule`など、生成用としてauthorizerに定義したactionだけを許可する。
+  結果計算用の`calculate_standings`、`calculate_tournament_results`、
+  `calculate_same_rank_results`は許可しない。
 - Pages Writeだけを対象accountへ許可したAPI tokenを発行している。
 - `_routes.json`のincludeは`/api/*`だけである。
 
@@ -249,7 +251,9 @@ Issue #73のcatalog更新では、単一aggregatorが24・32チーム用3shard�
 
 PWAの更新通知は、同じ画面を開いている間に1回だけ表示する。利用者が更新を承認した場合は、
 入力を保存して待機中のService Workerを有効化してから再読込みする。更新を見送った場合は現在の
-画面を維持し、同じ更新について確認dialogを連続表示しない。
+画面を維持し、同じ更新について確認dialogを連続表示しない。結果計算API廃止前の旧PWAで更新を
+見送ると順位確定要求は拒否されるため、利用者へ画面の再読込みを案内する。大会データの正本である
+IndexedDBは更新時に消去しない。
 
 文書だけを変更したcommitでは本番artifactを再配信しない。この場合、`main`の最新SHAと公開中の
 `X-Release-Id`が異なることは意図した状態であり、次のコードreleaseで再び一致させる。
@@ -299,7 +303,8 @@ bootstrapで定義したECRの直近10 image保持とS3の30日expirationに委�
 
 browserはAPI keyを持たず、同一originのPages Functionだけを呼ぶ。Pages Functionは1 MB上限を
 確認し、origin確認secretとusage keyをAWSへ付与する。Lambda adapterでもdecoded body sizeを
-再確認する。Turnstile tokenは単回利用なのでLambda authorizerで1度だけ検証する。2日目作成は
+再確認する。結果入力と順位確定は端末内で行い、Pages Functionを呼ばない。Turnstile tokenは
+日程・決勝計画の生成要求にだけ付与し、単回利用なのでLambda authorizerで1度だけ検証する。2日目作成は
 `request_kind: "day2_creation"`とaction `create_day2`を使い、1 token・1 APIリクエストで
 トーナメント表と日程を生成する。既存の`tournament_plan`／`day2_schedule`は互換経路として残す。
 
@@ -309,7 +314,7 @@ CloudWatch Logsの保持期間は14日である。API Gateway access logはreque
 HTTP status、処理時間、error typeだけを記録する。大会名、チーム名、入力、結果、Turnstile
 token、secretは記録しない。Cloudflare側でもrequest body loggingを追加しない。
 
-次を確認する。
+次を生成APIについて確認する。
 
 - Cloudflare Pages: Functions request／error、日100,000回枠、deployment status
 - Lambda: `Errors`、`Duration` p95、`Throttles`、`ConcurrentExecutions`、最大メモリ
@@ -329,7 +334,7 @@ uv run python scripts/estimate_mvp_cost.py --usd-jpy 160 --tax-multiplier 1.10
 
 100%予算通知、濫用、情報漏えいの疑い、継続的な5xxのいずれかが発生した場合は、Pagesの
 静的画面を残したままAPI Gateway keyを無効化する。保存済み日程の閲覧・印刷は継続し、
-生成だけを停止する。
+結果入力・順位確定も端末内で継続する。停止するのは日程・決勝計画の生成だけとする。
 
 ```console
 aws apigateway update-api-key \

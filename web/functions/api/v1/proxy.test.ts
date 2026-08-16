@@ -127,24 +127,23 @@ describe("Cloudflare Pages API proxy", () => {
     });
   });
 
-  it("最終順位確定のTurnstile actionをAWSへ転送する", async () => {
-    const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(
-      new Response('{"status":"COMPLETE"}', { status: 200 }),
-    );
-
+  it.each([
+    "calculate_standings",
+    "calculate_tournament_results",
+    "calculate_same_rank_results",
+  ])("廃止した結果計算action %sはAWSへ転送しない", async (action) => {
+    const fetchMock = vi.fn<FetchImplementation>();
     const response = await proxyScheduleRequest(
-      request('{"request_kind":"tournament_results"}', {
-        "x-turnstile-action": "calculate_tournament_results",
-      }),
+      request("{}", { "x-turnstile-action": action }),
       environment,
       fetchMock,
     );
 
-    expect(response.status).toBe(200);
-    const [, options] = fetchMock.mock.calls[0] ?? [];
-    expect(new Headers(options?.headers).get("x-turnstile-action")).toBe(
-      "calculate_tournament_results",
-    );
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      diagnostics: [{ code: "BOT_CHECK_ACTION_REQUIRED" }],
+    });
   });
 
   it("2日目一括作成のTurnstile actionをAWSへ転送する", async () => {
@@ -187,7 +186,6 @@ describe("Cloudflare Pages API proxy", () => {
 
   it.each([
     ["same_rank_league_plan", "generate_same_rank_league"],
-    ["same_rank_league_results", "calculate_same_rank_results"],
     ["same_rank_day2_schedule", "generate_same_rank_day2_schedule"],
   ])("同順位リーグの%s actionをAWSへ転送する", async (requestKind, action) => {
     const fetchMock = vi.fn<FetchImplementation>().mockResolvedValue(

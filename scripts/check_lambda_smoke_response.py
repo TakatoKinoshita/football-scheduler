@@ -15,7 +15,6 @@ def main() -> int:
     parser.add_argument("response", type=Path)
     parser.add_argument("--release-id", required=True)
     profile = parser.add_mutually_exclusive_group()
-    profile.add_argument("--tournament-results", action="store_true")
     profile.add_argument("--sixteen-day2", action="store_true")
     profile.add_argument("--twenty-four-day2", action="store_true")
     profile.add_argument("--maximum-day2", action="store_true")
@@ -33,32 +32,6 @@ def main() -> int:
     if not isinstance(body, dict) or body.get("schema_version") != "0.2.0":
         print("Lambda応答のschema versionが一致しません。", file=sys.stderr)
         return 1
-    if args.tournament_results:
-        match_results = body.get("match_results")
-        standings = body.get("standings")
-        standing_rows = (
-            [row for row in standings if isinstance(row, dict)]
-            if isinstance(standings, list)
-            else []
-        )
-        ranks = [row.get("rank") for row in standing_rows]
-        team_ids = [row.get("team_id") for row in standing_rows]
-        if (
-            body.get("status") != "COMPLETE"
-            or not isinstance(match_results, list)
-            or len(match_results) != 8
-            or not isinstance(standings, list)
-            or len(standings) != 8
-            or len(standing_rows) != 8
-            or sorted(rank for rank in ranks if type(rank) is int) != list(range(1, 9))
-            or any(not isinstance(team_id, str) or not team_id for team_id in team_ids)
-            or len(set(team_ids)) != 8
-        ):
-            print("8チームの最終順位確定結果が不正です。", file=sys.stderr)
-            return 1
-        print("Lambda aliasの8チーム最終順位確定に合格しました。")
-        return 0
-
     day2_profile = next(
         (
             profile
