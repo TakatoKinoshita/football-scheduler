@@ -41,10 +41,10 @@ Cloudflare dashboardで次を確認する。
 - Workers & PagesのFree planを利用し、Direct Upload projectを作成済みである。
 - production branchは`main`として作成している。
 - Pages Functionsの利用上限到達時は`fail closed`である。
-- Turnstile widgetのhostnameにPagesの公開hostnameを登録している。画面から渡すactionは
-  `generate_schedule`、`calculate_standings`、`create_day2`、
-  `calculate_tournament_results`であり、後方互換APIでは`generate_tournament`と
-  `generate_day2_schedule`も許可する。
+- Turnstile widgetのhostnameにPagesの公開hostnameを登録している。現行画面から渡すactionは
+  `create_schedule`と`calculate_tournament_results`である。旧PWAを含む後方互換APIでは
+  `generate_schedule`、`calculate_standings`、`calculate_same_rank_results`、`create_day2`、
+  `generate_tournament`、`generate_day2_schedule`など、authorizerに定義したactionだけを許可する。
 - Pages Writeだけを対象accountへ許可したAPI tokenを発行している。
 - `_routes.json`のincludeは`/api/*`だけである。
 

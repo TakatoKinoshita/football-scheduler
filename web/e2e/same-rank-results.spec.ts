@@ -54,7 +54,7 @@ test("次試合を審判するaway順位枠を2日目同順位リーグ日程の
     '#day2-schedule-view [data-schedule-view="court"] tr[data-match-id="SR-1-M1"]',
   );
   await expect(courtRow.locator("td").nth(2)).toHaveText(
-    "Bブロック 1位 対 Aブロック 1位",
+    "Dブロック 1位 対 Aブロック 1位",
   );
 
   await page.locator("#day2-schedule-view-toggle").getByLabel("時間順").check();
@@ -62,11 +62,11 @@ test("次試合を審判するaway順位枠を2日目同順位リーグ日程の
     '#day2-schedule-view [data-schedule-view="time"] tr[data-match-id="SR-1-M1"]',
   );
   await expect(timeRow.locator("td").nth(3)).toHaveText(
-    "Bブロック 1位 対 Aブロック 1位",
+    "Dブロック 1位 対 Aブロック 1位",
   );
   await page.emulateMedia({ media: "print" });
   await expect(timeRow.locator("td").nth(3)).toHaveText(
-    "Bブロック 1位 対 Aブロック 1位",
+    "Dブロック 1位 対 Aブロック 1位",
   );
 
   await page.emulateMedia({ media: "screen" });
@@ -75,66 +75,22 @@ test("次試合を審判するaway順位枠を2日目同順位リーグ日程の
   const resolvedRow = page.locator(
     '#day2-schedule-view [data-schedule-view="time"] tr[data-match-id="SR-1-M1"]',
   );
-  await expect(resolvedRow.locator("td").nth(3)).toHaveText("チーム5 対 チーム1");
+  await expect(resolvedRow.locator("td").nth(3)).toHaveText("チーム13 対 チーム1");
   await expect(
     page.locator('#same-rank-results-input [data-match-id="SR-1-M1"] [data-field="teams"]'),
-  ).toHaveText("チーム1 対 チーム5");
+  ).toHaveText("チーム1 対 チーム13");
 });
 
 test("16チーム4ブロックの同順位リーグを再表示し、引き分け結果から総合順位を確定する", async ({
+  context,
   page,
 }) => {
   const fixture = sameRankWebFixture(16);
   await mockExternalServices(page);
+  const resultRequests: unknown[] = [];
   await page.route(GENERATE_API, async (route) => {
-    const request = route.request().postDataJSON() as {
-      request_kind?: string;
-      same_rank_plan?: {
-        groups: Array<{
-          id: string;
-          participants: Array<{ entry: unknown; team: { team_id: string } }>;
-        }>;
-      };
-      results?: Array<Record<string, unknown>>;
-    };
-    if (request.request_kind !== "same_rank_league_results" || request.same_rank_plan === undefined) {
-      await route.fallback();
-      return;
-    }
-    expect(route.request().headers()["x-turnstile-action"]).toBe("calculate_same_rank_results");
-    const standings = request.same_rank_plan.groups.flatMap((group) =>
-      group.participants.map((participant, index) => ({
-        rank: request.same_rank_plan!.groups
-          .slice(0, request.same_rank_plan!.groups.indexOf(group))
-          .reduce((total, item) => total + item.participants.length, 0) + index + 1,
-        group_id: group.id,
-        group_rank: index + 1,
-        team_id: participant.team.team_id,
-        entry: participant.entry,
-        played: 3,
-        wins: 0,
-        draws: 3,
-        losses: 0,
-        goals_for: 3,
-        goals_against: 3,
-        goal_difference: 0,
-        points: 3,
-        tie_break: "抽選",
-        head_to_head: null,
-        automatic: false,
-      })),
-    );
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        schema_version: "0.2.0",
-        status: "COMPLETE",
-        match_results: request.results,
-        standings,
-        draws: [],
-      }),
-    });
+    resultRequests.push(route.request().postDataJSON());
+    await route.abort("failed");
   });
   await openApp(page);
   await importDocument(page, fixture);
@@ -153,9 +109,14 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
     .locator("thead th")
     .allTextContents();
   expect(headers).toEqual(["試合", "時間", "コート", "対戦", "結果"]);
-  await expect(
-    page.locator('[data-testid="turnstile-widget-mock"][data-action="calculate_same_rank_results"]'),
-  ).toBeVisible();
+  await expect(page.locator("#tournament-results-turnstile-widget")).toBeHidden();
+  await expect(page.locator('[data-action="calculate_same_rank_results"]')).toHaveCount(0);
+
+  await page.evaluate(async () => navigator.serviceWorker.ready);
+  await page.reload();
+  await context.setOffline(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#tab-day2").click();
 
   const result = (fixture as { tournament: { result: Record<string, unknown> } }).tournament.result;
   const plan = result.same_rank_plan as { groups: Array<{ matches: Array<{ id: string }> }> };
@@ -177,6 +138,11 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
   await page.locator("#confirm-tournament-results").click();
   await expect(page.locator("#same-rank-standings-view")).toBeVisible();
+  await expect(page.getByRole("table", { name: "同順位リーグの総合最終順位" }).locator("tbody tr"))
+    .toHaveCount(16);
+  expect(resultRequests).toHaveLength(0);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#tab-day2").click();
   await expect(page.getByRole("table", { name: "同順位リーグの総合最終順位" }).locator("tbody tr"))
     .toHaveCount(16);
 
@@ -367,8 +333,9 @@ test("17チーム4ブロックの1チーム群と2種類の警告を再表示す
 
   await expect(page.locator("#same-rank-plan-view .same-rank-group-card")).toHaveCount(5);
   await expect(page.locator("#same-rank-plan-view .notice")).toHaveCount(2);
-  await expect(page.locator("#same-rank-plan-view")).toContainText("ブロック人数に端数があります");
-  await expect(page.locator("#same-rank-plan-view")).toContainText("1チームの順位を自動確定します");
+  await expect(page.locator("#same-rank-plan-view"))
+    .toContainText("ブロック人数が均等でないため");
+  await expect(page.locator("#same-rank-plan-view")).toContainText("1チームのため");
   await expect(page.locator("#same-rank-plan-view")).toContainText("試合を行わず順位を自動確定します");
 });
 
@@ -385,7 +352,8 @@ for (const policy of ["strict_same_rank", "merge_bottom"] as const) {
       await expect(cards.nth(index)).toContainText(`${String(expectedSizes[index])}チーム`);
     }
     await expect(page.locator("#same-rank-plan-view .notice")).toHaveCount(1);
-    await expect(page.locator("#same-rank-plan-view")).toContainText("ブロック人数に端数があります");
+    await expect(page.locator("#same-rank-plan-view"))
+      .toContainText("ブロック人数が均等でないため");
   });
 }
 
@@ -475,21 +443,13 @@ test("仮の同順位リーグは1日目順位確定後も対戦ID・配置・�
   page,
 }) => {
   const provisional = sameRankWebFixture(16, { resolved: false });
-  const resolved = sameRankWebFixture(16);
   const provisionalResult = provisional.tournament.result as Record<string, unknown>;
   const originalIdentity = sameRankScheduleIdentity(
     provisionalResult.day2_schedule as Record<string, unknown>,
   );
-  const standings = (resolved.tournament.result as Record<string, unknown>).league_standings;
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, provisional);
-  await page.unroute(GENERATE_API);
-  await page.route(GENERATE_API, async (route) => {
-    const request = route.request().postDataJSON() as { request_kind?: string };
-    expect(request.request_kind).toBe("league_standings");
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(standings) });
-  });
   await page.locator("#tab-day1").click();
   const rows = page.getByRole("table", { name: "1日目の試合結果入力" }).locator("tbody tr");
   const rowCount = await rows.count();
