@@ -72,6 +72,11 @@ class SameRankDay2ScheduleRequest(ContractModel):
             raise ValueError("チームIDは大会内で一意である必要があります")
         if len(set(court_ids)) != len(court_ids):
             raise ValueError("コートIDは大会内で一意である必要があります")
+        object.__setattr__(
+            self,
+            "referees",
+            self.referees.normalized_for_courts(len(self.courts)),
+        )
         planned_team_ids = {
             team_id for block in self.league_plan.blocks for team_id in block.team_ids
         }

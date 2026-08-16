@@ -36,6 +36,7 @@ from football_scheduler.placement_template_contract import (
     placement_entry_digest,
 )
 from football_scheduler.placement_template_generator import (
+    GENERATOR_VERSION,
     write_optimization_stage_checkpoint,
 )
 
@@ -48,7 +49,7 @@ def _entry(
     optimized: bool = False,
 ) -> PlacementTemplateEntry:
     provenance = PlacementTemplateProvenance(
-        generator_version="placement-template-generator-v8",
+        generator_version=GENERATOR_VERSION,
         python_version="3.14.2",
         ortools_version=LEGACY_ORTOOLS_VERSION,
         optimization_version=(LOWER_OBJECTIVE_OPTIMIZER_VERSION if optimized else None),

@@ -27,7 +27,7 @@ def test_lambda_image_installs_locked_dependencies_with_hashes() -> None:
     assert "--only-binary=:all:" in dockerfile
     assert "COPY src/football_scheduler /asset/football_scheduler" in dockerfile
     assert "load_placement_template_catalog" in dockerfile
-    assert "entries_by_id) == 1360" in dockerfile
+    assert "entries_by_id) == 160" in dockerfile
     assert "chmod -R a+rX /asset" in dockerfile
     assert "pip install" in dockerfile
     assert "pip install ." not in dockerfile

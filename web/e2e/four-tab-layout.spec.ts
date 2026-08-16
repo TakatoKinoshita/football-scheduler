@@ -84,10 +84,9 @@ test("入力と設定区画を決められたタブと順序に配置する", as
   await expect(settingsPanel.locator("#common-settings-heading")).toHaveText("共通設定");
   await expect(settingsPanel.locator("#common-advanced-settings summary"))
     .toHaveText("詳細設定を表示");
-  await expect(settingsPanel.locator("#organizer-capacity")).toBeHidden();
+  await expect(settingsPanel.locator("#organizer-capacity")).toHaveCount(0);
   await expect(settingsPanel.locator("#random-seed")).toBeHidden();
   await settingsPanel.locator("#common-advanced-settings summary").click();
-  await expect(settingsPanel.locator("#organizer-capacity")).toBeVisible();
   await expect(settingsPanel.locator("#random-seed")).toBeVisible();
   await expect(settingsPanel.locator("#block-count")).toBeVisible();
   const teamReferees = settingsPanel.locator("#team-referees");

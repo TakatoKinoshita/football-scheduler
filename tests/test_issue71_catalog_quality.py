@@ -11,6 +11,7 @@ from football_scheduler.placement_template_contract import (
     LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     PLACEMENT_OBJECTIVES,
     PlacementTemplateEntry,
+    PlacementTemplateKey,
 )
 from football_scheduler.placement_template_generator import (
     GENERATOR_VERSION,
@@ -36,6 +37,10 @@ def _objective_vector(entry: PlacementTemplateEntry) -> tuple[int, ...]:
     return tuple(item.value for item in entry.objectives)
 
 
+def _key_axis(key: PlacementTemplateKey) -> tuple[object, ...]:
+    return (key.pool_count, key.pool_size, key.court_count, key.day2_fallback)
+
+
 def test_issue71_catalog_is_not_worse_than_current_or_available_legacy() -> None:
     for path, expected_digest in (
         (CURRENT_FIXTURE, EXPECTED_FIXTURE_FILE_SHA256[CURRENT_FIXTURE.name]),
@@ -54,10 +59,19 @@ def test_issue71_catalog_is_not_worse_than_current_or_available_legacy() -> None
         for topology in LOWER_OBJECTIVE_TARGET_TOPOLOGIES
         for entry in load_shard(shard_file(CATALOG_DIRECTORY, topology)).entries
     )
-    assert len(final_entries) == 544
-    final_by_id = {entry.key.catalog_id: entry for entry in final_entries}
-    current_by_id = {record.key.catalog_id: record for record in current.records}
-    legacy_by_id = {record.key.catalog_id: record for record in legacy.records}
+    assert len(final_entries) == 64
+    final_by_id = {_key_axis(entry.key): entry for entry in final_entries}
+    current_by_id = {
+        _key_axis(record.key): record
+        for record in current.records
+        if record.key.organizer_capacity == record.key.court_count
+    }
+    legacy_by_id = {
+        _key_axis(record.key): record
+        for record in legacy.records
+        if record.key.organizer_capacity == record.key.court_count
+    }
+    assert len(current_by_id) == len(legacy_by_id) == 64
     assert set(final_by_id) == set(current_by_id) == set(legacy_by_id)
 
     for catalog_id, final in final_by_id.items():

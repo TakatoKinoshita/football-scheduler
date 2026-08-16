@@ -26,7 +26,9 @@ from pydantic import Field, model_validator
 from football_scheduler import day2_schedule
 from football_scheduler.models import ContractModel, Day2Fallback, Slot, SolverStatus
 from football_scheduler.placement_template_contract import (
+    LEGACY_PLACEMENT_RULESET_ID,
     PLACEMENT_OBJECTIVES,
+    PLACEMENT_RULESET_ID,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
     PlacementTemplateEntry,
     PlacementTemplateKey,
@@ -35,6 +37,7 @@ from football_scheduler.placement_template_contract import (
     PlacementTemplateSlot,
     PlacementTemplateStatus,
     canonical_json_bytes,
+    expected_placement_template_keys,
     placement_entry_digest,
     placement_referee_signature,
     sha256_hex,
@@ -150,12 +153,25 @@ class PlacementBaselineFixture(ContractModel):
         )
         if self.topologies != canonical_topologies:
             raise ValueError("baselineのtopologyは正規順にしてください")
+        ruleset_ids = {record.key.ruleset_id for record in self.records}
+        if len(ruleset_ids) > 1:
+            raise ValueError("baseline recordのrulesetが混在しています")
+        ruleset_id = next(iter(ruleset_ids), PLACEMENT_RULESET_ID)
         ids = [record.key.catalog_id for record in self.records]
         if ids != sorted(ids) or len(ids) != len(set(ids)):
             raise ValueError("baseline recordはcatalog ID順かつ一意にしてください")
-        expected = {
-            key.catalog_id for topology in self.topologies for key in topology_keys(topology)
-        }
+        if ruleset_id == PLACEMENT_RULESET_ID:
+            expected = {
+                key.catalog_id for topology in self.topologies for key in topology_keys(topology)
+            }
+        else:
+            if ruleset_id != LEGACY_PLACEMENT_RULESET_ID:
+                raise ValueError("baseline recordのrulesetに対応していません")
+            expected = {
+                key.catalog_id
+                for key in expected_placement_template_keys(ruleset_id=ruleset_id)
+                if (key.pool_count, key.pool_size) in self.topologies
+            }
         if not set(ids) <= expected or (self.complete and set(ids) != expected):
             raise ValueError("baseline recordのkey範囲が一致しません")
         if self.source is BaselineSource.LEGACY and (

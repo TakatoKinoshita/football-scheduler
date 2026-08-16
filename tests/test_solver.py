@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from itertools import pairwise
 
 import pytest
+from pydantic import ValidationError
 
 from football_scheduler import solver as solver_module
 from football_scheduler.fixtures import (
@@ -47,6 +48,18 @@ def test_smoke_fixture_is_optimal_and_json_serializable() -> None:
     assert result.metrics.league_team_referee_count_max == 0
     assert result.metrics.league_team_referee_count_difference == 0
     assert result.model_dump(mode="json")["status"] == "OPTIMAL"
+
+
+def test_schedule_request_requires_one_organizer_referee_per_court() -> None:
+    dumped = make_smoke_request().model_dump(mode="json")
+    dumped["referees"]["organizer_capacity"] = 1
+
+    with pytest.raises(ValidationError, match="使用コート数以上"):
+        ScheduleRequest.model_validate(dumped)
+
+    dumped["referees"]["organizer_capacity"] = 16
+    normalized = ScheduleRequest.model_validate(dumped)
+    assert normalized.referees.organizer_capacity == len(normalized.courts)
 
 
 def test_referee_counts_are_serialized_in_team_id_order() -> None:

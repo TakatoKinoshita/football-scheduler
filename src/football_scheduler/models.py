@@ -125,6 +125,15 @@ class RefereeSettings(ContractModel):
     team_referees_required_after_first: bool = True
     day2_fallback: Day2Fallback = Day2Fallback.ORGANIZER
 
+    def normalized_for_courts(self, court_count: int) -> Self:
+        """大会規則に従い、主催者審判能力を使用コート数へ正規化する。"""
+
+        if self.organizer_capacity < court_count:
+            raise ValueError("主催者審判能力は使用コート数以上にしてください")
+        if self.organizer_capacity == court_count:
+            return self
+        return self.model_copy(update={"organizer_capacity": court_count})
+
 
 class SolverSettings(ContractModel):
     max_time_seconds: Annotated[float, Field(gt=0, le=840)] = 30.0
@@ -158,6 +167,12 @@ class ScheduleRequest(ContractModel):
             raise ValueError("コートIDは大会内で一意である必要があります")
         if len(set(match_ids)) != len(match_ids):
             raise ValueError("試合IDは大会内で一意である必要があります")
+
+        object.__setattr__(
+            self,
+            "referees",
+            self.referees.normalized_for_courts(len(self.courts)),
+        )
 
         known_teams = set(team_ids)
         known_matches = set(match_ids)

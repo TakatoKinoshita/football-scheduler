@@ -3128,7 +3128,7 @@ export function parseTournamentJson(text: string): TournamentDocument {
 }
 
 export function serializeTournamentJson(document: TournamentDocument): string {
-  return `${JSON.stringify(document, null, 2)}\n`;
+  return `${JSON.stringify(normalizeDocument(document).document, null, 2)}\n`;
 }
 
 export function safeFileName(tournamentName: string): string {

@@ -21,7 +21,7 @@ COPY src/football_scheduler /asset/football_scheduler
 # Fail the image build if package-resource lookup, catalog digests, or coverage
 # differ from the runtime contract.
 RUN PYTHONPATH=/asset python -c \
-    "from football_scheduler.placement_template_runtime import load_placement_template_catalog; assert len(load_placement_template_catalog().entries_by_id) == 1360"
+    "from football_scheduler.placement_template_runtime import load_placement_template_catalog; assert len(load_placement_template_catalog().entries_by_id) == 160"
 
 # Git does not preserve read bits, and a restrictive checkout umask may leave
 # copied sources unreadable by Lambda's least-privileged runtime user.

@@ -175,7 +175,7 @@ secretが不一致になるため、旧値を安全に保持した手順を別�
 1. `main`から`operation: plan`を選び、`release_sha`と`change_set_arn`は空欄にする。
 2. 影響確認欄を選択し、Environment承認後に実行する。
 3. workflowは設定値とquotaを確認し、Python、Web、Pages Function、順位決定トーナメントの
-   template catalog全1,360キー、16チーム・2トーナメント、24チーム・3トーナメント、
+   template catalog全160キー、16チーム・2トーナメント、24チーム・3トーナメント、
    32チーム・2トーナメント、32チーム・4トーナメントの本番経路、SAM templateを検証する。
    catalog root SHA、利用可能数、証明済み実行不能数をActions summaryで確認する。
 4. commit SHAをtagにしたsolver imageをECRへpushし、SAM artifactをS3へuploadする。
@@ -230,7 +230,7 @@ IAM scope内に限定し、SAMやCloudFormationによる自動生成名の短縮
 変更したreleaseでは全5shardを事前に再生成し、新しいcommit SHAからPlanを作成する。以前のSHAで
 作成したchange setを再利用しない。
 
-Issue #73のcatalog更新では、単一aggregatorが24・32チーム用3shardとmanifestを確定した後、
+Issue #73の履歴上のv1 catalog更新では、単一aggregatorが24・32チーム用3shardとmanifestを確定した後、
 8・16チーム用2shardのraw file SHA-256と内部canonical digestが不変であること、および全1,360キーの
 `--check`が成功することをPRの完了条件にする。current／legacy比較や探索時間などの実測品質統計は
 `docs/architecture/issue-73-placement-quality-report.md`で確認する。Issue #73のPR作業には本番releaseを

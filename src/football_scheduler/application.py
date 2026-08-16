@@ -109,6 +109,7 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
         _validate_json_size(payload)
         if "fixture" not in payload:
             _require_supported_schema(payload)
+            payload = _normalize_public_organizer_capacity(payload)
         if payload.get("request_kind") == "league_standings":
             _validate_league_standings_limits(payload)
             return _to_json_object(
@@ -817,6 +818,36 @@ def _resolve_request(
             **dict(overrides),
         }
     return _json_round_trip(request), {}, None
+
+
+def _normalize_public_organizer_capacity(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """公開生成入力の主催者審判能力を検証し、実効値をコート数へ固定する。"""
+
+    normalized = deepcopy(dict(payload))
+    courts = normalized.get("courts")
+    referees = normalized.get("referees")
+    if (
+        not isinstance(courts, Sequence)
+        or isinstance(courts, (str, bytes, bytearray))
+        or not isinstance(referees, Mapping)
+    ):
+        return normalized
+    capacity = referees.get("organizer_capacity")
+    if isinstance(capacity, bool) or not isinstance(capacity, int):
+        return normalized
+    court_count = len(courts)
+    if capacity < court_count:
+        raise _RequestError(
+            "ORGANIZER_CAPACITY_BELOW_COURT_COUNT",
+            "主催者審判は使用する全コートを同時に担当できる前提です。主催者審判能力を使用コート数以上にしてください。",
+            organizer_capacity=capacity,
+            court_count=court_count,
+        )
+    normalized["referees"] = {
+        **dict(referees),
+        "organizer_capacity": court_count,
+    }
+    return normalized
 
 
 def _apply_solver_time_limit(request: Mapping[str, Any]) -> dict[str, Any]:
