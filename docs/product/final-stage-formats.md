@@ -41,6 +41,9 @@ final_stage:
 - schema `0.2.0`では`odd_split_policy`を使用しない。
 - schema `0.2.0`では2日目の審判フォールバックを
   `day2_fallback: organizer | strict`として保存し、`tournament_fallback`を使用しない。
+- schema `0.2.0`では互換性のため`organizer_capacity`を保存するが、その値は使用コート数以上を
+  必須とし、実効値は使用コート数とする。Webでは利用者へ入力させず、使用コート数から導出する。
+  公開生成APIは使用コート数未満をソルバー実行前に拒否し、超える値は使用コート数へ正規化する。
 
 ## 3. 順位決定トーナメント
 

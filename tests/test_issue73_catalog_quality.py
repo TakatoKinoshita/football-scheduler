@@ -12,6 +12,7 @@ from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
     PlacementOptimizationTargetManifest,
     PlacementTemplateEntry,
+    PlacementTemplateKey,
     placement_optimization_target_manifest_digest,
 )
 from football_scheduler.placement_template_generator import (
@@ -40,6 +41,10 @@ def _objective_vector(entry: PlacementTemplateEntry) -> tuple[int, ...]:
     return tuple(item.value for item in entry.objectives)
 
 
+def _key_axis(key: PlacementTemplateKey) -> tuple[object, ...]:
+    return (key.pool_count, key.pool_size, key.court_count, key.day2_fallback)
+
+
 def test_issue73_catalog_is_not_worse_than_current_or_available_legacy() -> None:
     for path, expected_digest in (
         (CURRENT_FIXTURE, EXPECTED_FIXTURE_FILE_SHA256[CURRENT_FIXTURE.name]),
@@ -66,11 +71,23 @@ def test_issue73_catalog_is_not_worse_than_current_or_available_legacy() -> None
         for topology in LARGE_LOWER_OBJECTIVE_TARGET_TOPOLOGIES
         for entry in load_shard(shard_file(CATALOG_DIRECTORY, topology)).entries
     )
-    assert len(final_entries) == 816
-    final_by_id = {entry.key.catalog_id: entry for entry in final_entries}
-    current_by_id = {record.key.catalog_id: record for record in current.records}
-    legacy_by_id = {record.key.catalog_id: record for record in legacy.records}
-    target_ids = {target.key.catalog_id for target in target_manifest.targets}
+    assert len(final_entries) == 96
+    final_by_id = {_key_axis(entry.key): entry for entry in final_entries}
+    current_by_id = {
+        _key_axis(record.key): record
+        for record in current.records
+        if record.key.organizer_capacity == record.key.court_count
+    }
+    legacy_by_id = {
+        _key_axis(record.key): record
+        for record in legacy.records
+        if record.key.organizer_capacity == record.key.court_count
+    }
+    target_ids = {
+        _key_axis(target.key)
+        for target in target_manifest.targets
+        if target.key.organizer_capacity == target.key.court_count
+    }
     expected_target_ids = {
         catalog_id
         for catalog_id, legacy_record in legacy_by_id.items()
@@ -80,6 +97,7 @@ def test_issue73_catalog_is_not_worse_than_current_or_available_legacy() -> None
         and legacy_record.objective_values < current_by_id[catalog_id].objective_values
     }
     assert target_ids == expected_target_ids
+    assert len(current_by_id) == len(legacy_by_id) == 96
     assert set(final_by_id) == set(current_by_id) == set(legacy_by_id)
 
     for catalog_id, final in final_by_id.items():
@@ -103,7 +121,9 @@ def test_issue73_catalog_is_not_worse_than_current_or_available_legacy() -> None
             )
         else:
             assert current_record.candidate is not None
-            assert final == current_record.candidate
+            assert final.slots == current_record.candidate.slots
+            assert final.objectives == current_record.candidate.objectives
+            assert final.referee_signature == current_record.candidate.referee_signature
 
 
 def test_issue73_does_not_rewrite_8_or_16_team_shards() -> None:

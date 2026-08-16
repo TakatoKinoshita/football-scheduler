@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from football_scheduler.day2_schedule import (
     Day2ScheduleRequest,
@@ -151,6 +152,19 @@ def test_schedule_assigns_every_pool_match_once_and_validates() -> None:
     assert report["valid"] is True, report
     assert all(match.phase == "placement_tournament" for match in result.tournament_matches)
     assert all(not hasattr(match, "preliminary") for match in result.tournament_matches)
+
+
+def test_day2_request_normalizes_organizer_capacity_and_rejects_shortage() -> None:
+    request, _plan = _request(court_count=2)
+    dumped = request.model_dump(mode="json")
+    dumped["referees"]["organizer_capacity"] = 16
+
+    normalized = Day2ScheduleRequest.model_validate(dumped)
+    assert normalized.referees.organizer_capacity == 2
+
+    dumped["referees"]["organizer_capacity"] = 1
+    with pytest.raises(ValidationError, match="使用コート数以上"):
+        Day2ScheduleRequest.model_validate(dumped)
 
 
 def test_all_pool_finals_use_organizer_and_primary_final_is_last() -> None:

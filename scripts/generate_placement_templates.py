@@ -20,6 +20,7 @@ from football_scheduler.placement_template_generator import (
     generate_topology_shard,
     load_manifest,
     merge_shards,
+    migrate_v1_catalog,
     optimize_issue73_targets,
     optimize_topology_lower_objectives,
     validate_catalog_hydration,
@@ -85,6 +86,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Issue #73 target manifestの24/32-team entryだけをoptimizer-v2で処理する",
     )
+    mode.add_argument(
+        "--migrate-v1",
+        action="store_true",
+        help="v1の能力値=コート数の160件をv2へ再包装し、全件を再監査する",
+    )
+    parser.add_argument(
+        "--source",
+        type=Path,
+        help="--migrate-v1の移行元catalog。既定値は--outputと同じdirectory",
+    )
     parser.add_argument("--target-manifest", type=Path)
     parser.add_argument("--current-baseline", type=Path)
     parser.add_argument("--legacy-baseline", type=Path)
@@ -111,12 +122,24 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--optimize-lower-objectivesには--topology 2x4/2x8が必要です")
     if args.optimize_large_lower_objectives and args.topology:
         parser.error("--optimize-large-lower-objectivesは--topologyを併用できません")
+    if args.migrate_v1 and args.topology:
+        parser.error("--migrate-v1は--topologyを併用できません")
+    if args.source is not None and not args.migrate_v1:
+        parser.error("--sourceは--migrate-v1と併用してください")
 
     output = args.output.resolve()
     try:
         if args.merge:
             manifest = merge_shards(output)
             print(f"manifestを生成しました: {output / 'manifest.json'}")
+            print(f"catalog SHA-256: {manifest.catalog_sha256}")
+            return 0
+
+        if args.migrate_v1:
+            source = (args.source or output).resolve()
+            manifest = migrate_v1_catalog(source, output)
+            print(f"v2 catalogへ移行しました: {output / 'manifest.json'}")
+            print(f"entries: {manifest.total_entry_count}")
             print(f"catalog SHA-256: {manifest.catalog_sha256}")
             return 0
 

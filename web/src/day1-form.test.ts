@@ -235,7 +235,7 @@ describe("1日目リーグ入力", () => {
       courts: document.tournament.input.courts,
       league: { block_count: 1, assignment_mode: "random" },
       day: { start_time: "10:00", game_duration_minutes: 30, margin_minutes: 5 },
-      referees: { organizer_capacity: 2, day2_fallback: "strict" },
+      referees: { organizer_capacity: 1, day2_fallback: "strict" },
       random_seed: 42,
     });
     expect(converted.tournament.input).not.toHaveProperty("final_stage");
@@ -249,6 +249,42 @@ describe("1日目リーグ入力", () => {
       "青空FC",
     );
     expect((document.tournament.input.day as Record<string, unknown>).start_time).toBe("10:00");
+  });
+
+  it("主催者審判数を使用コート数へ正規化し、生成済み結果は維持する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.courts = Array.from({ length: 16 }, (_, index) => ({
+      id: `court-${index + 1}`,
+      name: `${index + 1}コート`,
+    }));
+    (document.tournament.input.referees as Record<string, unknown>).organizer_capacity = 1;
+    document.tournament.result = { status: "OPTIMAL", slots: [] };
+
+    const normalized = normalizeDocument(document);
+
+    expect(normalized.migrated).toBe(true);
+    expect(normalized.document).not.toBe(document);
+    expect(
+      (normalized.document.tournament.input.referees as Record<string, unknown>)
+        .organizer_capacity,
+    ).toBe(16);
+    expect(normalized.document.tournament.result).toEqual(document.tournament.result);
+    expect(
+      (document.tournament.input.referees as Record<string, unknown>).organizer_capacity,
+    ).toBe(1);
+  });
+
+  it("API要求では保存値によらず主催者審判数を使用コート数にする", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.courts = [
+      { id: "court-a", name: "Aコート" },
+      { id: "court-b", name: "Bコート" },
+    ];
+    (document.tournament.input.referees as Record<string, unknown>).organizer_capacity = 16;
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).referees).toMatchObject({
+      organizer_capacity: 2,
+    });
   });
 
   it("完成済み試合を含む従来入力は互換モードで変更しない", () => {

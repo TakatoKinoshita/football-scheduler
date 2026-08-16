@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import ceil
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from football_scheduler.final_stage import FinalStageConfig
 from football_scheduler.league import (
@@ -63,6 +63,15 @@ class Day1LeagueScheduleRequest(ContractModel):
     referees: RefereeSettings
     random_seed: int = 20260803
     solver: SolverSettings = SolverSettings()
+
+    @model_validator(mode="after")
+    def normalize_referee_capacity(self) -> Self:
+        object.__setattr__(
+            self,
+            "referees",
+            self.referees.normalized_for_courts(len(self.courts)),
+        )
+        return self
 
 
 @dataclass(frozen=True, slots=True)

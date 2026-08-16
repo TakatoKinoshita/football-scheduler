@@ -5,6 +5,7 @@ import pytest
 from football_scheduler.models import Day2Fallback
 from football_scheduler.placement_template_contract import (
     LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+    LEGACY_PLACEMENT_RULESET_ID,
     PLACEMENT_OBJECTIVES,
     CanonicalMatchPosition,
     PlacementOptimizationTarget,
@@ -62,11 +63,21 @@ def _entry() -> PlacementTemplateEntry:
     return entry.model_copy(update={"sha256": placement_entry_digest(entry)})
 
 
-def test_expected_key_space_contains_all_1360_unique_keys() -> None:
+def test_expected_key_space_contains_all_160_unique_keys() -> None:
     keys = expected_placement_template_keys()
+
+    assert len(keys) == 160
+    assert len({key.catalog_id for key in keys}) == 160
+    assert all(key.organizer_capacity == key.court_count for key in keys)
+    assert all(":o" not in key.catalog_id for key in keys)
+
+
+def test_legacy_key_space_remains_readable_as_release_history() -> None:
+    keys = expected_placement_template_keys(ruleset_id=LEGACY_PLACEMENT_RULESET_ID)
 
     assert len(keys) == 1360
     assert len({key.catalog_id for key in keys}) == 1360
+    assert all(":o" in key.catalog_id for key in keys)
 
 
 def test_key_normalizes_capacity_above_court_count() -> None:
@@ -79,6 +90,17 @@ def test_key_normalizes_capacity_above_court_count() -> None:
     )
 
     assert key.organizer_capacity == 4
+
+
+def test_key_rejects_capacity_below_court_count() -> None:
+    with pytest.raises(ValueError, match="コート数以上"):
+        PlacementTemplateKey.normalized(
+            pool_count=2,
+            pool_size=16,
+            court_count=4,
+            organizer_capacity=3,
+            day2_fallback=Day2Fallback.ORGANIZER,
+        )
 
 
 def test_entry_digest_round_trips_through_contract() -> None:

@@ -29,8 +29,8 @@ from football_scheduler.placement_template_contract import (
 
 _RESOURCE_DIRECTORY = "placement_templates"
 _MANIFEST_FILE = "manifest.json"
-_EXPECTED_SHARD_ENTRY_COUNT = 272
-_EXPECTED_CATALOG_ENTRY_COUNT = 1360
+_EXPECTED_SHARD_ENTRY_COUNT = 32
+_EXPECTED_CATALOG_ENTRY_COUNT = 160
 
 CatalogFailureReason = Literal[
     "catalog_missing",
@@ -122,7 +122,7 @@ def _read_and_validate_catalog() -> PlacementTemplateCatalog:
         if reference.entry_count != _EXPECTED_SHARD_ENTRY_COUNT:
             raise PlacementTemplateCatalogError(
                 "catalog_coverage_mismatch",
-                "manifestのshard entry件数が272ではありません。",
+                "manifestのshard entry件数が32ではありません。",
             )
         if "/" in reference.file or "\\" in reference.file or reference.file in {".", ".."}:
             raise PlacementTemplateCatalogError(
@@ -140,7 +140,7 @@ def _read_and_validate_catalog() -> PlacementTemplateCatalog:
         if len(raw_entries) != _EXPECTED_SHARD_ENTRY_COUNT:
             raise PlacementTemplateCatalogError(
                 "catalog_coverage_mismatch",
-                "テンプレートshardのentry件数が272ではありません。",
+                "テンプレートshardのentry件数が32ではありません。",
             )
         for raw_entry in raw_entries:
             if not isinstance(raw_entry, dict):
@@ -191,7 +191,7 @@ def _read_and_validate_catalog() -> PlacementTemplateCatalog:
     ):
         raise PlacementTemplateCatalogError(
             "catalog_coverage_mismatch",
-            "テンプレートカタログが1360キーを完全に収録していません。",
+            "テンプレートカタログが160キーを完全に収録していません。",
         )
     return PlacementTemplateCatalog(
         manifest=manifest,

@@ -51,21 +51,20 @@ test("共通設定は初期・再読込み・JSON読込み後に閉じ、名称�
   await expect(page.locator("#common-advanced-settings")).not.toHaveAttribute("open", "");
 
   await page.locator("#common-advanced-settings summary").click();
-  await page.locator("#organizer-capacity").fill("3");
+  await page.locator("#random-seed").fill("3");
   await expect(page.locator("#save-state")).toHaveText("この端末に保存済み");
   await page.reload();
   await page.locator("#tab-schedule-settings").click();
   await expect(page.locator("#common-advanced-settings")).not.toHaveAttribute("open", "");
-  await expect(page.locator("#organizer-capacity")).toHaveValue("3");
+  await expect(page.locator("#random-seed")).toHaveValue("3");
 
   const imported = tournamentFixture();
-  imported.tournament.input.referees.organizer_capacity = 2;
   imported.tournament.input.referees.team_referees_required_after_first = false;
   imported.tournament.input.random_seed = 17;
   await importDocument(page, imported);
   await page.locator("#tab-schedule-settings").click();
   await expect(page.locator("#common-advanced-settings")).not.toHaveAttribute("open", "");
-  await expect(page.locator("#organizer-capacity")).toHaveValue("2");
+  await expect(page.locator("#organizer-capacity")).toHaveCount(0);
   await expect(page.locator("#team-referees")).not.toBeChecked();
   await expect(page.locator("#random-seed")).toHaveValue("17");
 });
@@ -116,7 +115,7 @@ test("共通設定内部の不備だけが閉じたdetailsを開いてfocusす�
   await fillValidTournament(page);
   const commonDetails = page.locator("#common-advanced-settings");
   await commonDetails.locator("summary").click();
-  await page.locator("#organizer-capacity").fill("");
+  await page.locator("#random-seed").fill("");
   await page.locator("#block-count").selectOption("");
   await commonDetails.locator("summary").click();
   await expect(commonDetails).not.toHaveAttribute("open", "");
@@ -124,8 +123,8 @@ test("共通設定内部の不備だけが閉じたdetailsを開いてfocusす�
   await page.getByRole("button", { name: "日程を生成する" }).click();
 
   await expect(commonDetails).toHaveAttribute("open", "");
-  await expectGuidedTo(page, "organizer-capacity", 2);
-  await expect(page.locator("#organizer-capacity-error")).toContainText("0以上の整数");
+  await expectGuidedTo(page, "random-seed", 2);
+  await expect(page.locator("#random-seed-error")).toContainText("整数で入力");
   await expect(page.locator("#block-count-error")).toContainText("選択してください");
 });
 

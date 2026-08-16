@@ -231,12 +231,6 @@ root.innerHTML = `
         <details id="common-advanced-settings" class="advanced-settings">
           <summary>詳細設定を表示</summary>
           <div class="form-grid">
-            <label class="field" for="organizer-capacity">
-              <span>同時に担当できる主催者審判数</span>
-              <input id="organizer-capacity" type="number" min="0" max="16" inputmode="numeric" />
-              <small>変更するまでは、使用コート数と同じ値になります。</small>
-              <span id="organizer-capacity-error" class="field-error" role="alert"></span>
-            </label>
             <label class="field" for="random-seed">
               <span>抽選番号</span>
               <input id="random-seed" type="number" step="1" inputmode="numeric" />
@@ -704,7 +698,6 @@ let day1ScheduleViewMode = loadScheduleViewMode("day1");
 let day2ScheduleViewMode = loadScheduleViewMode("day2");
 let tournamentBracketViewMode = loadTournamentBracketViewMode();
 let legacyCompatibility = false;
-let organizerCapacityTouched = false;
 let sameRankUnevenPolicyApplicable = false;
 let persistedApplicableSameRankPolicyPending = false;
 let turnstileToken = "";
@@ -739,7 +732,6 @@ const sameRankUnevenPolicyField = requiredElement<HTMLElement>("#same-rank-uneve
 const startTimeInput = requiredElement<HTMLInputElement>("#start-time");
 const gameDurationInput = requiredElement<HTMLInputElement>("#game-duration");
 const marginInput = requiredElement<HTMLInputElement>("#margin-minutes");
-const organizerCapacityInput = requiredElement<HTMLInputElement>("#organizer-capacity");
 const commonAdvancedSettings = requiredElement<HTMLDetailsElement>(
   "#common-advanced-settings",
 );
@@ -3090,7 +3082,6 @@ function setLegacyControlsDisabled(disabled: boolean): void {
     startTimeInput,
     gameDurationInput,
     marginInput,
-    organizerCapacityInput,
     maxSectionsInput,
     randomSeedInput,
     teamRefereesInput,
@@ -3266,9 +3257,6 @@ function render(): void {
   startTimeInput.value = typeof day?.start_time === "string" ? day.start_time : "09:30";
   gameDurationInput.value = String(day?.game_duration_minutes ?? 35);
   marginInput.value = String(day?.margin_minutes ?? 5);
-  organizerCapacityInput.value = String(
-    referees?.organizer_capacity ?? Math.max(1, lines(courtsInput.value).length),
-  );
   maxSectionsInput.value =
     typeof day?.max_sections === "number" ? String(day.max_sections) : "";
   randomSeedInput.value = String(input.random_seed ?? 20260803);
@@ -3376,7 +3364,7 @@ function updateDraft(invalidateResult = false): void {
             breaks: [],
           },
           referees: {
-            organizer_capacity: inputNumber(organizerCapacityInput),
+            organizer_capacity: courts.length,
             team_referees_required_after_first: teamRefereesInput.checked,
             day2_fallback:
               asObject(previous.tournament.input.referees)?.day2_fallback ?? "organizer",
@@ -3581,11 +3569,8 @@ function goToStep(step: WizardStep): boolean {
   return true;
 }
 
-function onConfigurationChanged(options: { courtsChanged?: boolean } = {}): void {
+function onConfigurationChanged(): void {
   if (legacyCompatibility) return;
-  if (options.courtsChanged && !organizerCapacityTouched) {
-    organizerCapacityInput.value = String(Math.max(1, lines(courtsInput.value).length));
-  }
   const selectedBlock = blockCountInput.value === "" ? undefined : Number(blockCountInput.value);
   if (teamsInput === document.activeElement) renderBlockCountOptions(selectedBlock);
   const hadResult = documentState.tournament.result !== undefined;
@@ -3599,7 +3584,7 @@ function onConfigurationChanged(options: { courtsChanged?: boolean } = {}): void
 
 nameInput.addEventListener("input", () => updateDraft(false));
 teamsInput.addEventListener("input", () => onConfigurationChanged());
-courtsInput.addEventListener("input", () => onConfigurationChanged({ courtsChanged: true }));
+courtsInput.addEventListener("input", () => onConfigurationChanged());
 for (const control of [
   blockCountInput,
   assignmentModeInput,
@@ -3620,11 +3605,6 @@ for (const control of [
 finalStageFormatInput.addEventListener("change", renderFinalStageControls);
 blockCountInput.addEventListener("change", renderFinalStageControls);
 teamsInput.addEventListener("input", renderFinalStageControls);
-organizerCapacityInput.addEventListener("input", () => {
-  organizerCapacityTouched = true;
-  onConfigurationChanged();
-});
-
 for (const stepButton of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
   stepButton.addEventListener("click", () => {
     const step = Number(stepButton.dataset.step) as WizardStep;
@@ -3701,7 +3681,6 @@ requiredElement<HTMLInputElement>("#import").addEventListener("change", (event) 
       documentState = mode.document;
       clearAllResultDrafts();
       legacyCompatibility = mode.legacyCompatibility;
-      organizerCapacityTouched = inferOrganizerCapacityTouched();
       currentStep = restoredWizardStep(documentState);
       return storage.replaceImported(documentState).then(() => {
         render();
@@ -3736,7 +3715,6 @@ requiredElement<HTMLButtonElement>("#convert-legacy-copy").addEventListener("cli
   documentState = convertLegacyToEditableDocument(documentState);
   clearAllResultDrafts();
   legacyCompatibility = false;
-  organizerCapacityTouched = inferOrganizerCapacityTouched();
   currentStep = 1;
   void storage.confirm(documentState).then(() => {
     render();
@@ -3761,7 +3739,6 @@ requiredElement<HTMLButtonElement>("#restore").addEventListener("click", () => {
     documentState = mode.document;
     clearAllResultDrafts();
     legacyCompatibility = mode.legacyCompatibility;
-    organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
     render();
     backupStatus.textContent = "ひとつ前の状態へ戻しました。";
@@ -3781,7 +3758,6 @@ requiredElement<HTMLButtonElement>("#delete").addEventListener("click", () => {
     documentState = createTournamentDocument();
     clearAllResultDrafts();
     legacyCompatibility = false;
-    organizerCapacityTouched = false;
     currentStep = 1;
     render();
     backupStatus.textContent =
@@ -3937,6 +3913,7 @@ generateButton.addEventListener("click", () => {
   }
   const referees = {
     ...(asObject(documentState.tournament.input.referees) ?? {}),
+    organizer_capacity: asObjectArray(documentState.tournament.input.courts).length,
     day2_fallback: day2FallbackInput.value,
   };
   const activeInput = buildDay1ScheduleRequest(documentState.tournament.input);
@@ -4236,14 +4213,6 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
   return turnstileLoadPromise;
 }
 
-function inferOrganizerCapacityTouched(): boolean {
-  const input = documentState.tournament.input;
-  const referees = asObject(input.referees);
-  const capacity = referees?.organizer_capacity;
-  const courtCount = asObjectArray(input.courts).length;
-  return typeof capacity === "number" && capacity !== Math.max(1, courtCount);
-}
-
 setupPwaUpdates(registerSW, {
   confirmRefresh: () =>
     window.confirm("新しい版を利用できます。入力を保存して画面を更新しますか？"),
@@ -4259,7 +4228,6 @@ void storage
     const mode = normalizeDocument(saved ?? createTournamentDocument());
     documentState = mode.document;
     legacyCompatibility = mode.legacyCompatibility;
-    organizerCapacityTouched = inferOrganizerCapacityTouched();
     currentStep = restoredWizardStep(documentState);
     try {
       if (mode.unsupportedFinalStageReset) clearAllResultDrafts();

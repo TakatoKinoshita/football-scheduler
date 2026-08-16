@@ -248,7 +248,7 @@ def test_zero_organizer_capacity_keeps_existing_diagnostic(
     assert result.diagnostics[0].code == "ORGANIZER_CAPACITY_INSUFFICIENT"
 
 
-def test_package_loader_validates_and_indexes_all_1360_entries(
+def test_package_loader_validates_and_indexes_all_160_entries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -307,7 +307,7 @@ def test_all_supported_tournaments_use_catalog_without_solver(
 
     catalog = template_runtime.load_placement_template_catalog()
 
-    assert len(catalog.entries_by_id) == 1360
+    assert len(catalog.entries_by_id) == 160
     assert all(catalog.entry_for(key).key == key for key in expected_placement_template_keys())
     template_runtime.clear_placement_template_catalog_cache()
 

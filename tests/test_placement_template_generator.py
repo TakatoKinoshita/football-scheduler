@@ -15,7 +15,9 @@ from football_scheduler.models import Day2Fallback, SolverStatus
 from football_scheduler.placement_template_ab import read_deterministic_gzip
 from football_scheduler.placement_template_contract import (
     PLACEMENT_OBJECTIVES,
+    PLACEMENT_RULESET_ID,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
+    TEMPLATE_FORMAT_VERSION,
     PlacementTemplateEntry,
     PlacementTemplateKey,
     PlacementTemplateShard,
@@ -31,7 +33,6 @@ from football_scheduler.placement_template_generator import (
     StabilizedPlacementTemplateSolver,
     UnprovenPlacementTemplateError,
     _source_proves_target_primary,
-    _strict_referee_capacity_lower_horizon,
     check_catalog,
     generate_template_entry,
     generate_topology_shard,
@@ -57,6 +58,18 @@ CURRENT_BASELINE = read_deterministic_gzip(
     / "placement-template-ab"
     / "current-pre-optimizer.json.gz"
 )
+
+
+def _migrate_reachable_v1_entry(entry: PlacementTemplateEntry) -> PlacementTemplateEntry:
+    key = entry.key.model_copy(update={"ruleset_id": PLACEMENT_RULESET_ID})
+    migrated = entry.model_copy(
+        update={"format_version": TEMPLATE_FORMAT_VERSION, "key": key, "sha256": ""}
+    )
+    return PlacementTemplateEntry.model_validate(
+        migrated.model_copy(update={"sha256": placement_entry_digest(migrated)}).model_dump(
+            mode="json"
+        )
+    )
 
 
 @dataclass
@@ -175,15 +188,16 @@ def _write_complete_shard(output: Path, topology: tuple[int, int]) -> PlacementT
     return shard
 
 
-def test_exact_key_space_is_five_topologies_and_1360_independent_keys() -> None:
+def test_exact_key_space_is_five_topologies_and_160_independent_keys() -> None:
     keys = expected_placement_template_keys()
 
-    assert len(keys) == 1360
-    assert len({key.catalog_id for key in keys}) == 1360
+    assert len(keys) == 160
+    assert len({key.catalog_id for key in keys}) == 160
     assert tuple(dict.fromkeys((key.pool_count, key.pool_size) for key in keys)) == (
         SUPPORTED_PLACEMENT_TOPOLOGIES
     )
-    assert all(len(topology_keys(topology)) == 272 for topology in SUPPORTED_PLACEMENT_TOPOLOGIES)
+    assert all(len(topology_keys(topology)) == 32 for topology in SUPPORTED_PLACEMENT_TOPOLOGIES)
+    assert all(key.organizer_capacity == key.court_count for key in keys)
 
 
 @pytest.mark.parametrize(
@@ -249,290 +263,43 @@ def test_catalog_hydration_uses_each_entry_horizon() -> None:
     assert validate_catalog_hydration((shard,)) == 1
 
 
-def test_strict_primary_proof_reuses_only_effectively_equivalent_extra_courts() -> None:
+def test_primary_proof_reuses_only_candidate_at_target_lower_horizon() -> None:
     source = PlacementTemplateKey(
         pool_count=2,
         pool_size=8,
+        court_count=2,
+        organizer_capacity=2,
+        day2_fallback=Day2Fallback.STRICT,
+    )
+    target = PlacementTemplateKey(
+        pool_count=2,
+        pool_size=8,
         court_count=3,
-        organizer_capacity=1,
+        organizer_capacity=3,
         day2_fallback=Day2Fallback.STRICT,
     )
-    target = source.model_copy(update={"court_count": 16})
 
-    assert _source_proves_target_primary(source, 15, target, 7) is True
-    assert (
-        _source_proves_target_primary(
-            source.model_copy(update={"court_count": 2}),
-            15,
-            target,
-            7,
-        )
-        is False
-    )
-    assert (
-        _source_proves_target_primary(
-            source,
-            15,
-            target.model_copy(update={"day2_fallback": Day2Fallback.ORGANIZER}),
-            7,
-        )
-        is False
-    )
-    assert (
-        _source_proves_target_primary(
-            source,
-            15,
-            target.model_copy(update={"organizer_capacity": 2}),
-            7,
-        )
-        is False
-    )
+    assert _source_proves_target_primary(source, 7, target, 7) is True
+    assert _source_proves_target_primary(source, 8, target, 7) is False
 
 
-@pytest.mark.parametrize(
-    ("pool_count", "pool_size", "court_count", "capacity_expected", "bound_expected"),
-    (
-        (2, 4, 2, 6, 6),
-        (3, 8, 2, 22, 22),
-        (3, 8, 3, 19, 19),
-        (4, 8, 3, 23, 23),
-        (2, 16, 2, 40, 40),
-        (2, 16, 3, 39, 39),
-    ),
-)
-def test_strict_capacity_bound_delays_new_courts_until_finals(
-    pool_count: int,
-    pool_size: int,
+@pytest.mark.parametrize("fallback", tuple(Day2Fallback))
+@pytest.mark.parametrize("court_count", (1, 4, 16))
+def test_current_bounds_only_accept_court_derived_capacity(
     court_count: int,
-    capacity_expected: int,
-    bound_expected: int,
+    fallback: Day2Fallback,
 ) -> None:
-    match_count = pool_count * pool_size * (pool_size.bit_length() - 1) // 2
-    dependency_bound = (pool_size.bit_length() - 1) * 2 - 1
-    earliest_final = max(dependency_bound, pool_size)
-
-    assert (
-        _strict_referee_capacity_lower_horizon(
-            match_count=match_count,
-            court_count=court_count,
-            organizer_capacity=1,
-            final_count=pool_count,
-            earliest_final_section=earliest_final,
-            ancestor_matches_per_final=pool_size - 2,
-        )
-        == capacity_expected
-    )
-    key = PlacementTemplateKey(
-        pool_count=pool_count,
-        pool_size=pool_size,
-        court_count=court_count,
-        organizer_capacity=1,
-        day2_fallback=Day2Fallback.STRICT,
-    )
-    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
-        bound_expected
-    )
-
-
-def test_strict_capacity_bound_counts_parallel_final_ancestor_deadlines() -> None:
-    assert (
-        _strict_referee_capacity_lower_horizon(
-            match_count=36,
-            court_count=4,
-            organizer_capacity=2,
-            final_count=3,
-            earliest_final_section=5,
-            ancestor_matches_per_final=6,
-        )
-        == 13
-    )
-
-
-def test_strict_section_relaxation_rejects_unopenable_court_profile() -> None:
-    key = PlacementTemplateKey(
-        pool_count=4,
-        pool_size=8,
-        court_count=8,
-        organizer_capacity=4,
-        day2_fallback=Day2Fallback.STRICT,
-    )
-
-    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == 10
-
-
-def test_strict_terminal_referee_frontier_rejects_three_pool_six_section_boundary() -> None:
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-    insufficient = PlacementTemplateKey(
-        pool_count=3,
-        pool_size=8,
-        court_count=9,
-        organizer_capacity=7,
-        day2_fallback=Day2Fallback.STRICT,
-    )
-    feasible = insufficient.model_copy(update={"organizer_capacity": 8})
-    extra_court = insufficient.model_copy(update={"court_count": 10})
-
-    assert solver.bounds(insufficient).lower_horizon == 7
-    assert solver.bounds(extra_court).lower_horizon == 7
-    assert solver.bounds(feasible).lower_horizon == 6
-
-
-def test_organizer_chain_proof_rejects_three_pool_seven_section_boundary() -> None:
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-    key = PlacementTemplateKey(
-        pool_count=3,
-        pool_size=8,
-        court_count=10,
-        organizer_capacity=2,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-
-    assert solver.bounds(key).lower_horizon == 8
-    assert solver.bounds(key.model_copy(update={"court_count": 16})).lower_horizon == 8
-
-
-def test_organizer_chain_proof_rejects_large_pool_eight_section_boundary() -> None:
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
     key = PlacementTemplateKey(
         pool_count=2,
-        pool_size=16,
-        court_count=16,
-        organizer_capacity=6,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-
-    assert solver.bounds(key).lower_horizon == 9
-    assert solver.bounds(key.model_copy(update={"organizer_capacity": 7})).lower_horizon == 9
-
-
-@pytest.mark.parametrize(
-    ("court_count", "organizer_capacity", "expected"),
-    (
-        (16, 5, 7),
-        (12, 6, 7),
-        (13, 6, 7),
-        (14, 6, 6),
-        (11, 7, 7),
-        (12, 7, 6),
-    ),
-)
-def test_organizer_frontier_proof_fixes_four_pool_six_section_boundary(
-    court_count: int,
-    organizer_capacity: int,
-    expected: int,
-) -> None:
-    key = PlacementTemplateKey(
-        pool_count=4,
-        pool_size=8,
+        pool_size=4,
         court_count=court_count,
-        organizer_capacity=organizer_capacity,
-        day2_fallback=Day2Fallback.ORGANIZER,
+        organizer_capacity=court_count,
+        day2_fallback=fallback,
     )
 
-    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
-        expected
-    )
+    bounds = StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key)
 
-
-@pytest.mark.parametrize(
-    ("pool_count", "pool_size", "court_count", "organizer_capacity", "expected"),
-    (
-        (2, 4, 2, 1, 5),
-        (3, 8, 4, 1, 11),
-        (4, 8, 3, 1, 17),
-        (2, 16, 2, 1, 33),
-        (4, 8, 10, 7, 7),
-        (2, 16, 9, 6, 9),
-    ),
-)
-def test_organizer_bound_accounts_for_opening_new_courts(
-    pool_count: int,
-    pool_size: int,
-    court_count: int,
-    organizer_capacity: int,
-    expected: int,
-) -> None:
-    key = PlacementTemplateKey(
-        pool_count=pool_count,
-        pool_size=pool_size,
-        court_count=court_count,
-        organizer_capacity=organizer_capacity,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-
-    assert StabilizedPlacementTemplateSolver(max_time_seconds=30).bounds(key).lower_horizon == (
-        expected
-    )
-
-
-def test_dense_strict_candidate_reaches_the_proven_opening_bound() -> None:
-    key = PlacementTemplateKey(
-        pool_count=3,
-        pool_size=8,
-        court_count=4,
-        organizer_capacity=1,
-        day2_fallback=Day2Fallback.STRICT,
-    )
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-
-    entry = generate_template_entry(key, solver=solver)
-
-    assert entry.used_sections == 18
-    assert entry.objectives[0].optimality_proven is True
-
-
-def test_large_organizer_witness_reaches_the_proven_opening_bound() -> None:
-    key = PlacementTemplateKey(
-        pool_count=2,
-        pool_size=16,
-        court_count=8,
-        organizer_capacity=1,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-
-    entry = generate_template_entry(key, solver=solver)
-
-    assert entry.used_sections == 12
-    assert entry.objectives[0].optimality_proven is True
-
-
-def test_organizer_section_first_candidate_avoids_full_referee_search() -> None:
-    key = PlacementTemplateKey(
-        pool_count=4,
-        pool_size=8,
-        court_count=10,
-        organizer_capacity=2,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-
-    attempt = solver.solve_horizon(key, 8)
-
-    assert attempt.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
-    assert attempt.schedule is not None
-    assert attempt.schedule.metrics.used_sections == 8
-
-
-@pytest.mark.parametrize(("court_count", "organizer_capacity"), ((12, 7), (14, 6)))
-def test_four_pool_organizer_boundary_witness_is_independently_audited(
-    court_count: int,
-    organizer_capacity: int,
-) -> None:
-    key = PlacementTemplateKey(
-        pool_count=4,
-        pool_size=8,
-        court_count=court_count,
-        organizer_capacity=organizer_capacity,
-        day2_fallback=Day2Fallback.ORGANIZER,
-    )
-    solver = StabilizedPlacementTemplateSolver(max_time_seconds=30)
-
-    attempt = solver.solve_horizon(key, 6)
-
-    assert attempt.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
-    assert attempt.schedule is not None
-    assert attempt.schedule.metrics.used_sections == 6
+    assert 3 <= bounds.lower_horizon <= bounds.upper_horizon
 
 
 def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(
@@ -548,9 +315,11 @@ def test_topology_generation_checkpoints_every_key_and_resume_skips_solver(
         solver=_MustNotRunSolver(),
     )
 
-    checkpoints = list((tmp_path / ".checkpoints" / "p2-s4").glob("*.json"))
-    assert len(solver.calls) == 272
-    assert len(checkpoints) == 272
+    checkpoints = list(
+        (tmp_path / ".checkpoints" / "placement-schedule-v2" / "p2-s4").glob("*.json")
+    )
+    assert len(solver.calls) == 32
+    assert len(checkpoints) == 32
     assert resumed.sha256 == first.sha256
     assert resumed.model_dump(mode="json") == first.model_dump(mode="json")
 
@@ -564,7 +333,7 @@ def test_single_aggregator_manifest_and_checks_use_parsed_json_digest(tmp_path: 
     manifest = merge_shards(tmp_path)
     checked = check_catalog(tmp_path)
 
-    assert manifest.total_entry_count == 1360
+    assert manifest.total_entry_count == 160
     assert [reference.sha256 for reference in manifest.shards] == [
         shards[topology].sha256 for topology in SUPPORTED_PLACEMENT_TOPOLOGIES
     ]
@@ -596,17 +365,20 @@ def test_single_aggregator_manifest_and_checks_use_parsed_json_digest(tmp_path: 
     )
     assert f"catalog SHA-256: {manifest.catalog_sha256}" in completed.stdout
     assert "available: 0" in completed.stdout
-    assert "proven_infeasible: 1360" in completed.stdout
+    assert "proven_infeasible: 160" in completed.stdout
 
 
 def test_absolute_bound_reaudit_promotes_only_a_true_prefix() -> None:
-    entry = next(
-        record.candidate
-        for record in CURRENT_BASELINE.records
-        if record.candidate is not None
-        and record.key.pool_size == 8
-        and tuple(value.value for value in record.candidate.objectives)[1:3] == (0, 0)
-        and not record.candidate.objectives[1].optimality_proven
+    entry = _migrate_reachable_v1_entry(
+        next(
+            record.candidate
+            for record in CURRENT_BASELINE.records
+            if record.candidate is not None
+            and record.key.organizer_capacity == record.key.court_count
+            and record.key.pool_size == 8
+            and tuple(value.value for value in record.candidate.objectives)[1:3] == (0, 0)
+            and not record.candidate.objectives[1].optimality_proven
+        )
     )
 
     reaudited = reaudit_absolute_lower_bound_proofs(entry)
@@ -623,10 +395,14 @@ def test_absolute_bound_reaudit_promotes_only_a_true_prefix() -> None:
 
 
 def test_lower_objective_optimization_checkpoints_and_resumes(tmp_path: Path) -> None:
-    source = next(
-        record.candidate
-        for record in CURRENT_BASELINE.records
-        if record.candidate is not None and record.key.pool_size == 4
+    source = _migrate_reachable_v1_entry(
+        next(
+            record.candidate
+            for record in CURRENT_BASELINE.records
+            if record.candidate is not None
+            and record.key.organizer_capacity == record.key.court_count
+            and record.key.pool_size == 4
+        )
     )
     optimizer = _KeepIncumbentOptimizer()
 

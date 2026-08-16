@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
 from importlib.metadata import version
-from itertools import combinations_with_replacement, pairwise
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -34,9 +34,12 @@ from football_scheduler.models import (
 )
 from football_scheduler.placement_template_contract import (
     LARGE_LOWER_OBJECTIVE_OPTIMIZER_VERSION,
+    LEGACY_PLACEMENT_RULESET_ID,
     LOWER_OBJECTIVE_OPTIMIZER_VERSION,
     PLACEMENT_OBJECTIVES,
+    PLACEMENT_RULESET_ID,
     SUPPORTED_PLACEMENT_TOPOLOGIES,
+    TEMPLATE_FORMAT_VERSION,
     CanonicalMatchPosition,
     CanonicalRefereeAssignment,
     OptimizationProofMethod,
@@ -65,7 +68,7 @@ from football_scheduler.validator import validate_day2_schedule
 
 Topology = tuple[int, int]
 
-GENERATOR_VERSION = "placement-template-generator-v8"
+GENERATOR_VERSION = "placement-template-generator-v9"
 DEFAULT_RANDOM_SEED = 20260803
 DEFAULT_MAX_TIME_SECONDS = 840.0
 CHECKPOINT_DIRECTORY = ".checkpoints"
@@ -84,16 +87,16 @@ _ISSUE73_WORKER_TARGET_MANIFEST: PlacementOptimizationTargetManifest | None = No
 # campaign preserves the latest large-topology catalog.
 UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
     (3, 8): (
-        "a8c425447529b7044fc35f9655d3e678c786ab26320536d5ad5e0dcda726a7f6",
-        "ffc05d6de33aee8a336aa26e181c0d1fad5c1e101a82b80d13ce682c5fd2dcfd",
+        "ec68928b62481d6839363038fc6b51857ebec478592854da2e1ee35553287f8b",
+        "fe2e3fb1e6afc452f74a21b8d4bc79c42be06fa4fceec8a92a8dc968a015f64c",
     ),
     (2, 16): (
-        "2336584da1bbf68eea8145b9f0654734e3a90a8ed8d560d0d24e36b48a33ecf1",
-        "7efcaefb7d4cad6c9ae8c5b695a1cb9b990c480134c676e116ac9ec17e82d02a",
+        "fde172c2472391626a647c4deb51b9e1ed6e95e81f5eca9229ee07aa1a460c20",
+        "7eb94bd746164cd6c74206b48bbb7f5e03ca0093cb53f1680266cfc4ebf44d8b",
     ),
     (4, 8): (
-        "8682c1e8e093799ead83c4c6fa25da3922e0292f4baef948f76d2e10338fa117",
-        "cf83b99ecf85d76d7ec3caddfa6b5c4e8283d101163a8f4ed95a8e77c1ade362",
+        "0f6eefe4b2621dfdf02c0b5735ce95a72612a9d7a229cfb631f4b920f11c8ba6",
+        "71cd300cf37ba43a89e391c3276782fd8e82a463c4a7b4b0e258f07b94994a1b",
     ),
 }
 
@@ -101,12 +104,12 @@ UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
 # catalog from Issue #71 byte-for-byte and semantically pinned throughout a run.
 ISSUE73_UNTOUCHED_SHARD_DIGESTS: Mapping[Topology, tuple[str, str]] = {
     (2, 4): (
-        "61dc331b0fb0e96171e9412d61181330bdd0e017c51c150a7ab88f82298e9115",
-        "9050f9844ec034b08dffa9acb74b4d45db454168ade33e5b1c28533e18f0bf2c",
+        "2623514d6d0821586f6559cbdc565e3631a396c1aa9d183587a038f91989b5d8",
+        "68b9d5620d14838987e9ab91412fdb872664460d3dafcfda1e3a2732471f6313",
     ),
     (2, 8): (
-        "3e4f1fedd96bc3cf8fc3b76a7279bacb9ff043105034a9af70fa6267cc1e55cb",
-        "1c1e80ede74d3c538a1dd57902f5d22de181a0970b8dbd4ffcf53ddb3ea32055",
+        "80eb15c7123d61eb1bd211eb7b08f8f9c937b8f1fc915dfad296d926bea47141",
+        "cbc8357fb0dfe591cd084eb179c8d7b35e9321d7b0ced03df5ae215a0c31bb2f",
     ),
 }
 
@@ -234,40 +237,12 @@ class StabilizedPlacementTemplateSolver:
             return cached
         request = self._base_request(key)
         match_count = sum(len(pool.matches) for pool in request.tournament_plan.pools)
-        # 第1セクションは主催者能力まで、それ以降はコート数まで配置できる。
-        first_section_capacity = min(key.court_count, key.organizer_capacity, match_count)
-        slot_bound = 1 + math.ceil(max(0, match_count - first_section_capacity) / key.court_count)
+        # v2では主催者審判能力がコート数と等しく、全コートを第1sectionから使える。
+        slot_bound = math.ceil(match_count / key.court_count)
         dependency_depth = key.pool_size.bit_length() - 1
         dependency_bound = dependency_depth * 2 - 1
-        court_opening_capacity = 0
-        court_opening_bound = 0
-        while court_opening_capacity < match_count:
-            court_opening_bound += 1
-            court_opening_capacity += min(
-                key.court_count,
-                court_opening_bound * key.organizer_capacity,
-            )
-        referee_capacity_bound = 0
-        if key.day2_fallback is Day2Fallback.STRICT:
-            earliest_final_section = max(
-                dependency_bound,
-                math.ceil((key.pool_size - 2) / key.organizer_capacity) + 2,
-            )
-            referee_capacity_bound = _strict_referee_capacity_lower_horizon(
-                match_count=match_count,
-                court_count=key.court_count,
-                organizer_capacity=key.organizer_capacity,
-                final_count=key.pool_count,
-                earliest_final_section=earliest_final_section,
-                ancestor_matches_per_final=key.pool_size - 2,
-            )
         # active sectionには最低1試合が必要なため、使用section数は試合数を超えない。
-        lower_horizon = max(
-            slot_bound,
-            dependency_bound,
-            court_opening_bound,
-            referee_capacity_bound,
-        )
+        lower_horizon = max(slot_bound, dependency_bound)
         path_model = day2_schedule._build_path_model(request.tournament_plan)
         while lower_horizon < match_count:
             status = _section_relaxation_status(
@@ -278,52 +253,6 @@ class StabilizedPlacementTemplateSolver:
             if status is not SolverStatus.INFEASIBLE:
                 break
             lower_horizon += 1
-        # 3x8を6sectionへ詰める境界では、主催者7・9コート以上だけが
-        # section緩和を通る一方、終端sectionの安全な審判供給元を
-        # 全列挙すると不足する。主催者8以上には6section witnessがある。
-        if (
-            key.day2_fallback is Day2Fallback.STRICT
-            and key.pool_count == 3
-            and key.pool_size == 8
-            and key.court_count >= 9
-            and key.organizer_capacity == 7
-        ):
-            lower_horizon = max(lower_horizon, 7)
-        # organizer主催者2の3x8は、匿名court-chainの全列挙で7sectionが
-        # 実行不能である。7section中に開ける理論上限14コートでも同じ
-        # 結果なので、それ以上の入力コート数にも適用できる。
-        if (
-            key.day2_fallback is Day2Fallback.ORGANIZER
-            and key.pool_count == 3
-            and key.pool_size == 8
-            and key.court_count >= 8
-            and key.organizer_capacity == 2
-        ):
-            lower_horizon = max(lower_horizon, 8)
-        # 2x16の8sectionでは、連続active制約によりsection 7にも
-        # round 4を置く必要がある。その8つのround 1祖先はすべて
-        # section 1に必要なので、organizer主催者7以下では実行不能となる。
-        if (
-            key.day2_fallback is Day2Fallback.ORGANIZER
-            and key.pool_count == 2
-            and key.pool_size == 16
-            and key.organizer_capacity <= 7
-        ):
-            lower_horizon = max(lower_horizon, 9)
-        # 4x8を6sectionへ詰めるorganizer境界は、強制される3ラウンドの
-        # 審判frontierを全列挙して確定している。主催者6では14コート、
-        # 主催者7では12コートが最初の実行可能構成になる。
-        if (
-            key.day2_fallback is Day2Fallback.ORGANIZER
-            and key.pool_count == 4
-            and key.pool_size == 8
-            and (
-                key.organizer_capacity <= 5
-                or (key.organizer_capacity == 6 and key.court_count <= 13)
-                or (key.organizer_capacity == 7 and key.court_count <= 11)
-            )
-        ):
-            lower_horizon = max(lower_horizon, 7)
         result = PlacementProblemBounds(
             lower_horizon=lower_horizon,
             upper_horizon=match_count,
@@ -432,65 +361,6 @@ class StabilizedPlacementTemplateSolver:
         return request
 
 
-def _strict_referee_capacity_lower_horizon(
-    *,
-    match_count: int,
-    court_count: int,
-    organizer_capacity: int,
-    final_count: int,
-    earliest_final_section: int,
-    ancestor_matches_per_final: int,
-) -> int:
-    """strictで各sectionに置ける試合数の楽観上限からhorizon下限を返す。"""
-
-    pool_size = ancestor_matches_per_final + 2
-    depth = pool_size.bit_length() - 1
-    initial_courts = min(court_count, organizer_capacity)
-    useful_openings = min(final_count, max(0, court_count - initial_courts))
-    for horizon in range(1, match_count + 1):
-        if horizon < earliest_final_section and useful_openings:
-            continue
-        for opening_sections in combinations_with_replacement(
-            range(earliest_final_section, horizon + 1),
-            useful_openings,
-        ):
-            if (
-                useful_openings == final_count
-                and opening_sections
-                and opening_sections[-1] != horizon
-            ):
-                continue
-            if any(
-                opening_sections.count(section) > organizer_capacity
-                for section in set(opening_sections)
-            ):
-                continue
-            capacity = initial_courts * horizon + sum(
-                horizon - opening_section + 1 for opening_section in opening_sections
-            )
-            if capacity < match_count:
-                continue
-            deadlines_fit = True
-            for section in range(1, horizon + 1):
-                required = 0
-                for opening_section in opening_sections:
-                    if opening_section <= section:
-                        required += 1
-                    for round_no in range(1, depth):
-                        deadline = opening_section - 2 * (depth - round_no)
-                        if deadline <= section:
-                            required += pool_size // (2**round_no)
-                available = initial_courts * section + sum(
-                    max(0, section - opening_section + 1) for opening_section in opening_sections
-                )
-                if required > available:
-                    deadlines_fit = False
-                    break
-            if deadlines_fit:
-                return horizon
-    return match_count
-
-
 def _section_relaxation_status(
     request: Day2ScheduleRequest,
     path_model: Any,
@@ -531,32 +401,13 @@ def _section_relaxation_status(
     for section in range(1, horizon + 1):
         section_count = sum(in_section[match_index, section] for match_index in range(match_count))
         model.add(section_count <= len(request.courts))
-        if request.referees.day2_fallback is Day2Fallback.STRICT:
-            cumulative_finals = sum(
-                in_section[final_index, earlier_section]
-                for final_index in final_indexes
-                for earlier_section in range(1, section + 1)
-            )
-            model.add(section_count <= request.referees.organizer_capacity + cumulative_finals)
-        else:
-            model.add(
-                section_count
-                <= min(
-                    len(request.courts),
-                    section * request.referees.organizer_capacity,
-                )
-            )
-        model.add(
-            sum(in_section[final_index, section] for final_index in final_indexes)
-            <= request.referees.organizer_capacity
-        )
 
     solver = day2_schedule._configured_solver(2.0, request.random_seed)
     return day2_schedule._status(solver.solve(model))
 
 
 def topology_keys(topology: Topology) -> tuple[PlacementTemplateKey, ...]:
-    """正本の1360キーから指定トポロジーの272キーを安定順で返す。"""
+    """正本の160キーから指定トポロジーの32キーを安定順で返す。"""
 
     if topology not in SUPPORTED_PLACEMENT_TOPOLOGIES:
         raise ValueError(f"未対応のトポロジーです: {topology[0]}x{topology[1]}")
@@ -565,8 +416,8 @@ def topology_keys(topology: Topology) -> tuple[PlacementTemplateKey, ...]:
         for key in expected_placement_template_keys()
         if (key.pool_count, key.pool_size) == topology
     )
-    if len(keys) != 272 or len({key.catalog_id for key in keys}) != 272:
-        raise PlacementTemplateIntegrityError("トポロジーのキー空間が272件ではありません")
+    if len(keys) != 32 or len({key.catalog_id for key in keys}) != 32:
+        raise PlacementTemplateIntegrityError("トポロジーのキー空間が32件ではありません")
     return keys
 
 
@@ -631,7 +482,7 @@ def generate_topology_shard(
     solver: PlacementTemplateSolver | None = None,
     validator: CandidateValidator = validate_day2_schedule,
 ) -> PlacementTemplateShard:
-    """272個のkey checkpointを集約し、1つの完全なtopology shardを書く。"""
+    """32個のkey checkpointを集約し、1つの完全なtopology shardを書く。"""
 
     if workers < 1:
         raise ValueError("workersは1以上にしてください")
@@ -666,7 +517,6 @@ def generate_topology_shard(
             pending,
             key=lambda key: (
                 key.court_count,
-                key.organizer_capacity,
                 0 if key.day2_fallback is Day2Fallback.STRICT else 1,
             ),
         )
@@ -752,6 +602,112 @@ def merge_shards(output_directory: Path) -> PlacementTemplateManifest:
     )
     manifest = manifest.model_copy(update={"catalog_sha256": manifest_digest(manifest)})
     manifest = PlacementTemplateManifest.model_validate(manifest.model_dump(mode="json"))
+    write_json_atomic(output_directory / MANIFEST_FILE, manifest.model_dump(mode="json"))
+    return manifest
+
+
+def migrate_v1_catalog(
+    source_directory: Path,
+    output_directory: Path,
+    *,
+    validator: CandidateValidator = validate_day2_schedule,
+) -> PlacementTemplateManifest:
+    """v1から能力値がコート数と等しい160件を抽出し、v2へ再包装・再監査する。"""
+
+    legacy_manifest = load_manifest(source_directory / MANIFEST_FILE)
+    if legacy_manifest.ruleset_id != LEGACY_PLACEMENT_RULESET_ID:
+        raise PlacementTemplateIntegrityError("移行元catalogはplacement-schedule-v1にしてください")
+    legacy_shards = tuple(
+        load_shard(shard_file(source_directory, topology))
+        for topology in SUPPORTED_PLACEMENT_TOPOLOGIES
+    )
+    migrated_shards: list[PlacementTemplateShard] = []
+    for legacy_shard in legacy_shards:
+        selected = tuple(
+            entry
+            for entry in legacy_shard.entries
+            if entry.key.organizer_capacity == entry.key.court_count
+        )
+        if len(selected) != 32:
+            raise PlacementTemplateIntegrityError(
+                f"{legacy_shard.pool_count}x{legacy_shard.pool_size}: "
+                "v2移行対象が32件ではありません"
+            )
+        migrated_entries: list[PlacementTemplateEntry] = []
+        for legacy_entry in selected:
+            if legacy_entry.status is not PlacementTemplateStatus.AVAILABLE:
+                raise PlacementTemplateIntegrityError(
+                    f"{legacy_entry.key.catalog_id}: v2移行対象がavailableではありません"
+                )
+            migrated_key = PlacementTemplateKey(
+                pool_count=legacy_entry.key.pool_count,
+                pool_size=legacy_entry.key.pool_size,
+                court_count=legacy_entry.key.court_count,
+                organizer_capacity=legacy_entry.key.court_count,
+                day2_fallback=legacy_entry.key.day2_fallback,
+            )
+            migrated_entry = _with_entry_digest(
+                legacy_entry.model_copy(
+                    update={
+                        "format_version": TEMPLATE_FORMAT_VERSION,
+                        "key": migrated_key,
+                        "provenance": legacy_entry.provenance.model_copy(
+                            update={"generator_version": GENERATOR_VERSION}
+                        ),
+                        "sha256": "",
+                    }
+                )
+            )
+            if (
+                migrated_entry.slots != legacy_entry.slots
+                or migrated_entry.objectives != legacy_entry.objectives
+                or migrated_entry.referee_signature != legacy_entry.referee_signature
+            ):
+                raise PlacementTemplateIntegrityError(
+                    f"{migrated_key.catalog_id}: v1から配置または目的値が変化しました"
+                )
+            migrated_entries.append(migrated_entry)
+        migrated_shard = PlacementTemplateShard(
+            pool_count=legacy_shard.pool_count,
+            pool_size=legacy_shard.pool_size,
+            entries=tuple(migrated_entries),
+        )
+        migrated_shard = migrated_shard.model_copy(
+            update={"sha256": placement_shard_digest(migrated_shard)}
+        )
+        migrated_shards.append(
+            PlacementTemplateShard.model_validate(migrated_shard.model_dump(mode="json"))
+        )
+
+    hydrated_count = validate_catalog_hydration(migrated_shards, validator=validator)
+    if hydrated_count != 160:
+        raise PlacementTemplateIntegrityError(
+            f"v2 catalogのhydrate・独立検証件数が160件ではありません: {hydrated_count}"
+        )
+    references = tuple(
+        PlacementTemplateShardReference(
+            pool_count=shard.pool_count,
+            pool_size=shard.pool_size,
+            file=shard_file(output_directory, (shard.pool_count, shard.pool_size)).name,
+            entry_count=len(shard.entries),
+            sha256=shard.sha256,
+        )
+        for shard in migrated_shards
+    )
+    manifest = PlacementTemplateManifest(
+        generator_version=GENERATOR_VERSION,
+        python_version=legacy_manifest.python_version,
+        ortools_version=legacy_manifest.ortools_version,
+        shards=references,
+    )
+    manifest = manifest.model_copy(update={"catalog_sha256": manifest_digest(manifest)})
+    manifest = PlacementTemplateManifest.model_validate(manifest.model_dump(mode="json"))
+
+    for shard in migrated_shards:
+        write_json_atomic(
+            shard_file(output_directory, (shard.pool_count, shard.pool_size)),
+            shard.model_dump(mode="json"),
+        )
     write_json_atomic(output_directory / MANIFEST_FILE, manifest.model_dump(mode="json"))
     return manifest
 
@@ -917,9 +873,12 @@ def shard_file(output_directory: Path, topology: Topology) -> Path:
 
 
 def checkpoint_file_name(key: PlacementTemplateKey) -> str:
+    capacity = (
+        f"-o{key.organizer_capacity}" if key.ruleset_id == LEGACY_PLACEMENT_RULESET_ID else ""
+    )
     return (
-        f"p{key.pool_count}-s{key.pool_size}-c{key.court_count}-"
-        f"o{key.organizer_capacity}-f{key.day2_fallback.value}.json"
+        f"p{key.pool_count}-s{key.pool_size}-c{key.court_count}"
+        f"{capacity}-f{key.day2_fallback.value}.json"
     )
 
 
@@ -1871,7 +1830,6 @@ def _derive_placement_template_entry(
             and entry.key.pool_count == target_key.pool_count
             and entry.key.pool_size == target_key.pool_size
             and entry.key.court_count <= target_key.court_count
-            and entry.key.organizer_capacity <= target_key.organizer_capacity
             and (
                 entry.key.day2_fallback is target_key.day2_fallback
                 or (
@@ -1882,7 +1840,6 @@ def _derive_placement_template_entry(
         ),
         key=lambda entry: (
             0 if entry.key.day2_fallback is target_key.day2_fallback else 1,
-            entry.key.organizer_capacity,
             entry.key.catalog_id,
         ),
     )
@@ -1941,18 +1898,8 @@ def _source_proves_target_primary(
     target_key: PlacementTemplateKey,
     target_lower_horizon: int,
 ) -> bool:
-    if source_used_sections == target_lower_horizon:
-        return True
-    # strictでは、あるコートの最初の実試合が非決勝戦なら、第1sectionで
-    # 主催者審判を割り当てる必要がある。それ以外に新しいコートを開けるのは
-    # 各poolの決勝だけなので、O + pool_countを超えるコートは実行可能集合を
-    # 広げない。コートIDを入れ替えてsource側へ正規化できる。
-    return (
-        source_key.day2_fallback is Day2Fallback.STRICT
-        and target_key.day2_fallback is Day2Fallback.STRICT
-        and source_key.organizer_capacity == target_key.organizer_capacity
-        and source_key.court_count >= source_key.organizer_capacity + source_key.pool_count
-    )
+    del source_key, target_key
+    return source_used_sections == target_lower_horizon
 
 
 def _validate_hydrated_candidate(
@@ -2116,7 +2063,12 @@ def _generate_entry_worker(
 
 
 def _checkpoint_directory(output_directory: Path, topology: Topology) -> Path:
-    return output_directory / CHECKPOINT_DIRECTORY / f"p{topology[0]}-s{topology[1]}"
+    return (
+        output_directory
+        / CHECKPOINT_DIRECTORY
+        / PLACEMENT_RULESET_ID
+        / f"p{topology[0]}-s{topology[1]}"
+    )
 
 
 def _read_json(path: Path) -> object:
@@ -2184,6 +2136,7 @@ __all__ = [
     "load_optimization_stage_checkpoint",
     "load_shard",
     "merge_shards",
+    "migrate_v1_catalog",
     "optimization_checkpoint_directory",
     "optimization_stage_checkpoint_file",
     "optimize_issue73_target_entry",

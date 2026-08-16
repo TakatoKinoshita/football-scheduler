@@ -1,46 +1,46 @@
 {
-  "catalog_sha256": "4964fad9b7bcc7e8fa1c45a69026bc94ab6c4d52f5218a0280fc093d5b25ce6f",
-  "format_version": 1,
-  "generator_version": "placement-template-generator-v8",
+  "catalog_sha256": "c2abda8df8acdb332a818685482b6dc66110d5894a1c4b2de5c38b408158ac4b",
+  "format_version": 2,
+  "generator_version": "placement-template-generator-v9",
   "ortools_version": "9.15.6755",
   "python_version": "3.14.2",
-  "ruleset_id": "placement-schedule-v1",
+  "ruleset_id": "placement-schedule-v2",
   "shards": [
     {
-      "entry_count": 272,
+      "entry_count": 32,
       "file": "placement-p2-s4.json",
       "pool_count": 2,
       "pool_size": 4,
-      "sha256": "9050f9844ec034b08dffa9acb74b4d45db454168ade33e5b1c28533e18f0bf2c"
+      "sha256": "68b9d5620d14838987e9ab91412fdb872664460d3dafcfda1e3a2732471f6313"
     },
     {
-      "entry_count": 272,
+      "entry_count": 32,
       "file": "placement-p2-s8.json",
       "pool_count": 2,
       "pool_size": 8,
-      "sha256": "1c1e80ede74d3c538a1dd57902f5d22de181a0970b8dbd4ffcf53ddb3ea32055"
+      "sha256": "cbc8357fb0dfe591cd084eb179c8d7b35e9321d7b0ced03df5ae215a0c31bb2f"
     },
     {
-      "entry_count": 272,
+      "entry_count": 32,
       "file": "placement-p3-s8.json",
       "pool_count": 3,
       "pool_size": 8,
-      "sha256": "ffc05d6de33aee8a336aa26e181c0d1fad5c1e101a82b80d13ce682c5fd2dcfd"
+      "sha256": "fe2e3fb1e6afc452f74a21b8d4bc79c42be06fa4fceec8a92a8dc968a015f64c"
     },
     {
-      "entry_count": 272,
+      "entry_count": 32,
       "file": "placement-p2-s16.json",
       "pool_count": 2,
       "pool_size": 16,
-      "sha256": "7efcaefb7d4cad6c9ae8c5b695a1cb9b990c480134c676e116ac9ec17e82d02a"
+      "sha256": "7eb94bd746164cd6c74206b48bbb7f5e03ca0093cb53f1680266cfc4ebf44d8b"
     },
     {
-      "entry_count": 272,
+      "entry_count": 32,
       "file": "placement-p4-s8.json",
       "pool_count": 4,
       "pool_size": 8,
-      "sha256": "cf83b99ecf85d76d7ec3caddfa6b5c4e8283d101163a8f4ed95a8e77c1ade362"
+      "sha256": "71cd300cf37ba43a89e391c3276782fd8e82a463c4a7b4b0e258f07b94994a1b"
     }
   ],
-  "total_entry_count": 1360
+  "total_entry_count": 160
 }

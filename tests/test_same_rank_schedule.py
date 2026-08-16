@@ -4,6 +4,7 @@ from copy import deepcopy
 from itertools import pairwise
 
 import pytest
+from pydantic import ValidationError
 
 from football_scheduler.league import LeaguePlan, generate_league_plan
 from football_scheduler.league_results import LeagueStandings, Standing
@@ -439,15 +440,17 @@ def test_insufficient_sections_is_reported_without_relaxing_constraints() -> Non
     assert result.diagnostics[0].details["theoretical_minimum_sections"] == 12
 
 
-def test_strict_referee_failure_is_infeasible_not_timeout() -> None:
-    request, _ = _request(max_sections=2, max_time_seconds=2, fallback="strict")
+def test_same_rank_request_normalizes_organizer_capacity_and_rejects_shortage() -> None:
+    request, _ = _request(court_count=2, max_sections=2, max_time_seconds=2, fallback="strict")
     dumped = request.model_dump(mode="json")
-    dumped["referees"]["organizer_capacity"] = 0
+    dumped["referees"]["organizer_capacity"] = 16
 
-    result = generate_same_rank_day2_schedule(SameRankDay2ScheduleRequest.model_validate(dumped))
+    normalized = SameRankDay2ScheduleRequest.model_validate(dumped)
+    assert normalized.referees.organizer_capacity == 2
 
-    assert result.status is SolverStatus.INFEASIBLE
-    assert result.diagnostics[0].code == "SAME_RANK_REFEREE_UNAVAILABLE"
+    dumped["referees"]["organizer_capacity"] = 1
+    with pytest.raises(ValidationError, match="使用コート数以上"):
+        SameRankDay2ScheduleRequest.model_validate(dumped)
 
 
 def test_search_timeout_is_unknown_and_reports_capacity_evidence() -> None:

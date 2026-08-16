@@ -100,7 +100,7 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
           breaks: [],
         },
         referees: {
-          organizer_capacity: 1,
+          organizer_capacity: 0,
           team_referees_required_after_first: true,
           day2_fallback: "organizer",
         },

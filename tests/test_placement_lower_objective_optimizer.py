@@ -15,8 +15,11 @@ from football_scheduler.day2_schedule import Day2Schedule, Day2ScheduleRequest
 from football_scheduler.models import Day2Fallback, SolverStatus
 from football_scheduler.placement_template_ab import read_deterministic_gzip
 from football_scheduler.placement_template_contract import (
+    LEGACY_PLACEMENT_RULESET_ID,
     PLACEMENT_OBJECTIVES,
+    TEMPLATE_FORMAT_VERSION,
     PlacementTemplateKey,
+    placement_entry_digest,
 )
 from football_scheduler.placement_template_generator import (
     StabilizedPlacementTemplateSolver,
@@ -49,8 +52,13 @@ def _template_schedule(
         day2_fallback=fallback,
     )
     if (pool_count, pool_size) in {(2, 4), (2, 8)}:
-        entry = CURRENT_BASELINE_BY_ID[key.catalog_id].candidate
+        legacy_key = key.model_copy(update={"ruleset_id": LEGACY_PLACEMENT_RULESET_ID})
+        entry = CURRENT_BASELINE_BY_ID[legacy_key.catalog_id].candidate
         assert entry is not None
+        migrated = entry.model_copy(
+            update={"format_version": TEMPLATE_FORMAT_VERSION, "key": key, "sha256": ""}
+        )
+        entry = migrated.model_copy(update={"sha256": placement_entry_digest(migrated)})
     else:
         entry = load_placement_template_catalog().entry_for(key)
     request, schedule = _hydrate_and_validate_entry(entry)
@@ -207,7 +215,7 @@ def test_legacy_incumbent_is_retained_when_all_new_stages_are_unknown(
     request, incumbent = _template_schedule(
         pool_size=4,
         court_count=3,
-        organizer_capacity=2,
+        organizer_capacity=3,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
     before = optimizer.placement_objective_vector(request, incumbent)
@@ -388,7 +396,7 @@ def test_max_gap_exact_completion_does_not_force_sum_gap(
     request, incumbent = _template_schedule(
         pool_count=3,
         pool_size=8,
-        court_count=5,
+        court_count=2,
         organizer_capacity=2,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
@@ -467,8 +475,8 @@ def test_max_gap_exact_completion_does_not_force_sum_gap(
 def test_section_lower_bound_is_proven_only_after_exact_completion() -> None:
     request, incumbent = _template_schedule(
         pool_size=4,
-        court_count=4,
-        organizer_capacity=2,
+        court_count=5,
+        organizer_capacity=5,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
     values = optimizer.placement_objective_vector(request, incumbent)
@@ -545,11 +553,11 @@ def test_fixed_section_candidate_is_retained_without_becoming_global_proof(
     request, incumbent = _template_schedule(
         pool_size=4,
         court_count=3,
-        organizer_capacity=2,
+        organizer_capacity=3,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
     before = optimizer.placement_objective_vector(request, incumbent)
-    assert before[4] == 6
+    assert before[4] == 8
 
     def full_exact_unknown(*_args: object, **_kwargs: object) -> optimizer._ExactOutcome:
         return optimizer._ExactOutcome(
@@ -586,7 +594,7 @@ def test_unproven_court_stage_runs_only_fixed_section_candidate_model(
     request, incumbent = _template_schedule(
         pool_size=4,
         court_count=3,
-        organizer_capacity=2,
+        organizer_capacity=3,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
     before = optimizer.placement_objective_vector(request, incumbent)
@@ -620,7 +628,7 @@ def test_unproven_wait_stage_uses_only_quarter_budget_for_candidate(
     request, incumbent = _template_schedule(
         pool_size=4,
         court_count=3,
-        organizer_capacity=2,
+        organizer_capacity=3,
     )
     path_model = day2_schedule._build_path_model(request.tournament_plan)
     values = optimizer.placement_objective_vector(request, incumbent)

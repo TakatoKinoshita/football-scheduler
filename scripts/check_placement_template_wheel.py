@@ -41,7 +41,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from football_scheduler.placement_template_runtime import load_placement_template_catalog
 catalog = load_placement_template_catalog()
-if len(catalog.entries_by_id) != 1360:
+if len(catalog.entries_by_id) != 160:
     raise SystemExit(f"catalog entry count mismatch: {len(catalog.entries_by_id)}")
 print(f"wheel catalog loaded: {len(catalog.entries_by_id)} entries")
 """

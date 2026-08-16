@@ -351,8 +351,26 @@ describe("大会JSONの入出力", () => {
       uneven_policy: "strict_same_rank",
     };
 
-    expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))
-      .toEqual(document);
+    const parsed = parseTournamentJson(
+      serializeTournamentJson(document as unknown as TournamentDocument),
+    );
+
+    expect(
+      (parsed.tournament.input.referees as Record<string, unknown>).organizer_capacity,
+    ).toBe(1);
+    expect(parsed).toEqual({
+      ...document,
+      tournament: {
+        ...document.tournament,
+        input: {
+          ...document.tournament.input,
+          referees: {
+            ...(document.tournament.input.referees as Record<string, unknown>),
+            organizer_capacity: 1,
+          },
+        },
+      },
+    });
   });
 
   it("設定したトーナメント名を生成計画と対応付けてJSON往復する", () => {
@@ -649,6 +667,7 @@ describe("大会JSONの入出力", () => {
     document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
     document.tournament.input.league = { block_count: 1, assignment_mode: "random" };
 
+    (document.tournament.input.referees as Record<string, unknown>).organizer_capacity = 1;
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
@@ -671,6 +690,7 @@ describe("大会JSONの入出力", () => {
       ],
     };
 
+    (document.tournament.input.referees as Record<string, unknown>).organizer_capacity = 1;
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 

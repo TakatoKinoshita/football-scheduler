@@ -60,6 +60,7 @@ export function isDay1LeagueInput(input: JsonObject): boolean {
 }
 
 export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
+  const courts = objectArray(input.courts);
   const league = { ...(objectValue(input.league) ?? {}) };
   if (league.assignment_mode !== "manual") delete league.manual_blocks;
   const finalStage = { ...(objectValue(input.final_stage) ?? {}) };
@@ -77,11 +78,14 @@ export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
     schema_version: input.schema_version,
     request_kind: input.request_kind,
     teams: input.teams,
-    courts: input.courts,
+    courts,
     league,
     final_stage: Object.keys(finalStage).length === 0 ? input.final_stage : finalStage,
     day: input.day,
-    referees: input.referees,
+    referees: {
+      ...(objectValue(input.referees) ?? {}),
+      organizer_capacity: courts.length,
+    },
     random_seed: input.random_seed,
     solver: input.solver,
   };
@@ -96,23 +100,38 @@ export function normalizeDocument(document: TournamentDocument): DocumentMode {
   }
   const input = document.tournament.input;
   if (isDay1LeagueInput(input)) {
-    const finalStage = objectValue(input.final_stage);
+    const courtCount = objectArray(input.courts).length;
+    const referees = objectValue(input.referees);
+    const capacityNeedsMigration = referees?.organizer_capacity !== courtCount;
+    const normalized = capacityNeedsMigration ? cloneDocument(document) : document;
+    if (capacityNeedsMigration) {
+      normalized.tournament.input.referees = {
+        ...(objectValue(normalized.tournament.input.referees) ?? {}),
+        organizer_capacity: courtCount,
+      };
+    }
+    const normalizedInput = normalized.tournament.input;
+    const finalStage = objectValue(normalizedInput.final_stage);
     const teamCount = objectArray(input.teams).length;
     if (
       finalStage?.format === "placement_tournament" &&
       !isPlacementTournamentTeamCountSupported(teamCount)
     ) {
-      const normalized = cloneDocument(document);
-      delete normalized.tournament.input.final_stage;
-      delete normalized.tournament.result;
+      const reset = capacityNeedsMigration ? normalized : cloneDocument(document);
+      delete reset.tournament.input.final_stage;
+      delete reset.tournament.result;
       return {
-        document: normalized,
-        migrated: false,
+        document: reset,
+        migrated: capacityNeedsMigration,
         legacyCompatibility: false,
         unsupportedFinalStageReset: true,
       };
     }
-    return { document, migrated: false, legacyCompatibility: false };
+    return {
+      document: normalized,
+      migrated: capacityNeedsMigration,
+      legacyCompatibility: false,
+    };
   }
 
   return { document, migrated: false, legacyCompatibility: true };
@@ -174,10 +193,7 @@ function createEditableDocumentFromLegacy(
         breaks: [],
       },
       referees: {
-        organizer_capacity:
-          typeof referees.organizer_capacity === "number"
-            ? referees.organizer_capacity
-            : Math.max(1, courts.length),
+        organizer_capacity: courts.length,
         team_referees_required_after_first:
           referees.team_referees_required_after_first !== false,
         day2_fallback:
@@ -434,15 +450,6 @@ export function validateDay1LeagueDocument(
       message: "最大セクション数は1から128までの整数で入力してください。",
     });
   }
-  const referees = objectValue(input.referees);
-  const capacity = numberValue(referees?.organizer_capacity);
-  if (capacity === undefined || !Number.isInteger(capacity) || capacity < 0) {
-    issues.push({
-      field: "organizer-capacity",
-      step: 2,
-      message: "同時に担当できる主催者審判数を0以上の整数で入力してください。",
-    });
-  }
   if (!Number.isInteger(input.random_seed)) {
     issues.push({
       field: "random-seed",
@@ -473,7 +480,6 @@ const API_FIELD_MAP: Array<
   ["day2.end_time", "day2-end-time", 2, "2日目の終了時刻"],
   ["day2.max_sections", "day2-max-sections", 2, "2日目の最大セクション数"],
   ["day2.breaks", "day2-breaks", 2, "2日目の休憩"],
-  ["referees.organizer_capacity", "organizer-capacity", 2, "主催者審判能力"],
   ["referees.team_referees_required_after_first", "team-referees", 2, "チーム審判"],
   ["referees.day2_fallback", "day2-fallback", 2, "2日目の審判フォールバック"],
   ["random_seed", "random-seed", 2, "抽選番号"],

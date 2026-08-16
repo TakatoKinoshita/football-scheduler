@@ -213,6 +213,24 @@ def test_direct_request_is_solved_and_independently_validated(
     assert received[0]["solver"]["max_time_seconds"] == 5
 
 
+def test_public_generation_normalizes_excess_organizer_capacity_to_court_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[dict[str, Any]] = []
+    request = _request()
+    request["referees"] = {**request["referees"], "organizer_capacity": 16}
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda value: received.append(value) or _ModelLike(_result()),
+    )
+
+    result = _handle_request(request)
+
+    assert result["status"] == "optimal"
+    assert received[0]["referees"]["organizer_capacity"] == 1
+
+
 def test_day1_league_request_generates_match_and_passes_independent_validation() -> None:
     result = _handle_request(_day1_league_request())
 
@@ -802,17 +820,27 @@ def test_day1_league_missing_day_returns_field_detail_without_running_solver(
     assert "表示された項目を確認" not in diagnostic["message"]
 
 
-def test_day1_league_reports_insufficient_organizer_capacity() -> None:
+def test_public_generation_rejects_organizer_capacity_below_court_count_before_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = _day1_league_request()
     request["referees"] = {
         "organizer_capacity": 0,
         "team_referees_required_after_first": False,
     }
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
 
     result = _handle_request(request)
 
-    assert result["status"] == "INFEASIBLE"
-    assert result["diagnostics"][0]["code"] == "SCHEDULE_INFEASIBLE"
+    assert result["status"] == "error"
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["code"] == "ORGANIZER_CAPACITY_BELOW_COURT_COUNT"
+    assert diagnostic["details"] == {"organizer_capacity": 0, "court_count": 1}
+    assert "使用コート数以上" in diagnostic["message"]
 
 
 def test_day1_league_reports_insufficient_slots() -> None:
@@ -1430,11 +1458,10 @@ def test_day2_creation_reports_schedule_failure_without_partial_result() -> None
     day1 = _handle_request(day1_request)
     request = _day2_creation_request(day1_request, day1)
     request["day"] = {**request["day"], "max_sections": 1}
-    request["referees"] = {**request["referees"], "organizer_capacity": 1}
 
     result = _handle_request(request)
 
-    assert result["status"] == "error"
+    assert result["status"] == "INFEASIBLE"
     assert result["diagnostics"][0]["details"]["operation_stage"] == "day2_schedule"
     assert "tournament_plan" not in result
     assert "day2_schedule" not in result

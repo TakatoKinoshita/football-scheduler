@@ -18,8 +18,12 @@ from football_scheduler.models import (
     SolverStatus,
 )
 
-TEMPLATE_FORMAT_VERSION: Literal[1] = 1
-PLACEMENT_RULESET_ID: Literal["placement-schedule-v1"] = "placement-schedule-v1"
+LEGACY_TEMPLATE_FORMAT_VERSION: Literal[1] = 1
+TEMPLATE_FORMAT_VERSION: Literal[2] = 2
+LEGACY_PLACEMENT_RULESET_ID: Literal["placement-schedule-v1"] = "placement-schedule-v1"
+PLACEMENT_RULESET_ID: Literal["placement-schedule-v2"] = "placement-schedule-v2"
+PlacementRulesetId = Literal["placement-schedule-v1", "placement-schedule-v2"]
+TemplateFormatVersion = Literal[1, 2]
 LOWER_OBJECTIVE_OPTIMIZER_VERSION: Literal["placement-lower-objective-optimizer-v1"] = (
     "placement-lower-objective-optimizer-v1"
 )
@@ -61,7 +65,7 @@ class PlacementTemplateStatus(StrEnum):
 
 
 class PlacementTemplateKey(ContractModel):
-    ruleset_id: Literal["placement-schedule-v1"] = PLACEMENT_RULESET_ID
+    ruleset_id: PlacementRulesetId = PLACEMENT_RULESET_ID
     pool_count: Annotated[int, Field(gt=0)]
     pool_size: Annotated[int, Field(gt=1)]
     court_count: Annotated[int, Field(ge=1, le=16)]
@@ -72,16 +76,19 @@ class PlacementTemplateKey(ContractModel):
     def validate_supported_key(self) -> Self:
         if (self.pool_count, self.pool_size) not in SUPPORTED_PLACEMENT_TOPOLOGIES:
             raise ValueError("未対応の順位決定トーナメント構成です")
-        if self.organizer_capacity > self.court_count:
-            raise ValueError("正規化済み主催者審判数はコート数以下にしてください")
+        if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID:
+            if self.organizer_capacity > self.court_count:
+                raise ValueError("v1の正規化済み主催者審判数はコート数以下にしてください")
+        elif self.organizer_capacity != self.court_count:
+            raise ValueError("v2の主催者審判数はコート数と同じ値にしてください")
         return self
 
     @property
     def catalog_id(self) -> str:
-        return (
-            f"{self.ruleset_id}:p{self.pool_count}:s{self.pool_size}:"
-            f"c{self.court_count}:o{self.organizer_capacity}:f{self.day2_fallback.value}"
-        )
+        prefix = f"{self.ruleset_id}:p{self.pool_count}:s{self.pool_size}:c{self.court_count}"
+        if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID:
+            prefix += f":o{self.organizer_capacity}"
+        return f"{prefix}:f{self.day2_fallback.value}"
 
     @classmethod
     def normalized(
@@ -93,13 +100,13 @@ class PlacementTemplateKey(ContractModel):
         organizer_capacity: int,
         day2_fallback: Day2Fallback,
     ) -> Self:
-        if organizer_capacity <= 0:
-            raise ValueError("主催者審判数が0の構成はテンプレート化しません")
+        if organizer_capacity < court_count:
+            raise ValueError("主催者審判数はコート数以上にしてください")
         return cls(
             pool_count=pool_count,
             pool_size=pool_size,
             court_count=court_count,
-            organizer_capacity=min(organizer_capacity, court_count),
+            organizer_capacity=court_count,
             day2_fallback=day2_fallback,
         )
 
@@ -158,7 +165,7 @@ class PlacementTemplateProvenance(ContractModel):
 
 
 class PlacementTemplateEntry(ContractModel):
-    format_version: Literal[1] = TEMPLATE_FORMAT_VERSION
+    format_version: TemplateFormatVersion = TEMPLATE_FORMAT_VERSION
     key: PlacementTemplateKey
     status: PlacementTemplateStatus
     used_sections: Annotated[int, Field(gt=0)] | None = None
@@ -170,6 +177,13 @@ class PlacementTemplateEntry(ContractModel):
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
+        expected_format = (
+            LEGACY_TEMPLATE_FORMAT_VERSION
+            if self.key.ruleset_id == LEGACY_PLACEMENT_RULESET_ID
+            else TEMPLATE_FORMAT_VERSION
+        )
+        if self.format_version != expected_format:
+            raise ValueError("テンプレートentryのformatとrulesetが一致しません")
         if self.status is PlacementTemplateStatus.AVAILABLE:
             if self.used_sections is None or not self.slots:
                 raise ValueError("利用可能テンプレートには配置が必要です")
@@ -352,8 +366,8 @@ class PlacementTemplateShardReference(ContractModel):
 
 
 class PlacementTemplateShard(ContractModel):
-    format_version: Literal[1] = TEMPLATE_FORMAT_VERSION
-    ruleset_id: Literal["placement-schedule-v1"] = PLACEMENT_RULESET_ID
+    format_version: TemplateFormatVersion = TEMPLATE_FORMAT_VERSION
+    ruleset_id: PlacementRulesetId = PLACEMENT_RULESET_ID
     pool_count: Annotated[int, Field(gt=0)]
     pool_size: Annotated[int, Field(gt=1)]
     entries: tuple[PlacementTemplateEntry, ...]
@@ -364,18 +378,31 @@ class PlacementTemplateShard(ContractModel):
         topology = (self.pool_count, self.pool_size)
         if topology not in SUPPORTED_PLACEMENT_TOPOLOGIES:
             raise ValueError("未対応のテンプレートshardです")
-        if len(self.entries) != 272:
-            raise ValueError("各トポロジーのshardには272キーが必要です")
+        expected_format = (
+            LEGACY_TEMPLATE_FORMAT_VERSION
+            if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID
+            else TEMPLATE_FORMAT_VERSION
+        )
+        expected_count = 272 if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID else 32
+        if self.format_version != expected_format:
+            raise ValueError("テンプレートshardのformatとrulesetが一致しません")
+        if len(self.entries) != expected_count:
+            raise ValueError(f"各トポロジーのshardには{expected_count}キーが必要です")
         entry_ids = [entry.key.catalog_id for entry in self.entries]
         if len(set(entry_ids)) != len(entry_ids):
             raise ValueError("テンプレートshardのキーが重複しています")
         if any((entry.key.pool_count, entry.key.pool_size) != topology for entry in self.entries):
             raise ValueError("テンプレートshardとentryのトポロジーが一致しません")
+        if any(
+            entry.key.ruleset_id != self.ruleset_id or entry.format_version != self.format_version
+            for entry in self.entries
+        ):
+            raise ValueError("テンプレートshardとentryのversionが一致しません")
         if any(not entry.sha256 for entry in self.entries):
             raise ValueError("テンプレートentryにSHA-256が必要です")
         expected_ids = {
             key.catalog_id
-            for key in expected_placement_template_keys()
+            for key in expected_placement_template_keys(ruleset_id=self.ruleset_id)
             if (key.pool_count, key.pool_size) == topology
         }
         if set(entry_ids) != expected_ids:
@@ -388,17 +415,25 @@ class PlacementTemplateShard(ContractModel):
 
 
 class PlacementTemplateManifest(ContractModel):
-    format_version: Literal[1] = TEMPLATE_FORMAT_VERSION
-    ruleset_id: Literal["placement-schedule-v1"] = PLACEMENT_RULESET_ID
+    format_version: TemplateFormatVersion = TEMPLATE_FORMAT_VERSION
+    ruleset_id: PlacementRulesetId = PLACEMENT_RULESET_ID
     generator_version: NonEmptyText
     python_version: NonEmptyText
     ortools_version: NonEmptyText
-    total_entry_count: Literal[1360] = 1360
+    total_entry_count: Annotated[int, Field(gt=0)] = 160
     shards: tuple[PlacementTemplateShardReference, ...]
     catalog_sha256: str = ""
 
     @model_validator(mode="after")
     def validate_coverage(self) -> Self:
+        expected_format = (
+            LEGACY_TEMPLATE_FORMAT_VERSION
+            if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID
+            else TEMPLATE_FORMAT_VERSION
+        )
+        expected_total = 1360 if self.ruleset_id == LEGACY_PLACEMENT_RULESET_ID else 160
+        if self.format_version != expected_format or self.total_entry_count != expected_total:
+            raise ValueError("manifestのformat、rulesetまたは総entry件数が一致しません")
         topologies = [(item.pool_count, item.pool_size) for item in self.shards]
         if tuple(topologies) != SUPPORTED_PLACEMENT_TOPOLOGIES:
             raise ValueError("manifestのshard順またはトポロジー範囲が一致しません")
@@ -413,9 +448,12 @@ class PlacementTemplateManifest(ContractModel):
         return self
 
 
-def expected_placement_template_keys() -> tuple[PlacementTemplateKey, ...]:
+def expected_placement_template_keys(
+    *, ruleset_id: PlacementRulesetId = PLACEMENT_RULESET_ID
+) -> tuple[PlacementTemplateKey, ...]:
     return tuple(
         PlacementTemplateKey(
+            ruleset_id=ruleset_id,
             pool_count=pool_count,
             pool_size=pool_size,
             court_count=court_count,
@@ -424,7 +462,11 @@ def expected_placement_template_keys() -> tuple[PlacementTemplateKey, ...]:
         )
         for pool_count, pool_size in SUPPORTED_PLACEMENT_TOPOLOGIES
         for court_count in range(1, 17)
-        for organizer_capacity in range(1, court_count + 1)
+        for organizer_capacity in (
+            range(1, court_count + 1)
+            if ruleset_id == LEGACY_PLACEMENT_RULESET_ID
+            else (court_count,)
+        )
         for fallback in Day2Fallback
     )
 
