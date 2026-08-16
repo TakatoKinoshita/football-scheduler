@@ -67,7 +67,7 @@ def test_base64_body_is_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     assert received == [payload]
 
 
-def test_completed_league_standings_return_http_200(
+def test_completed_generation_result_returns_http_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -186,31 +186,41 @@ def test_schedule_creation_rejects_legacy_generation_action(
     assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
 
 
-def test_tournament_results_action_returns_http_200(
+@pytest.mark.parametrize(
+    ("request_kind", "action"),
+    [
+        ("league_standings", "calculate_standings"),
+        ("tournament_results", "calculate_tournament_results"),
+        ("same_rank_league_results", "calculate_same_rank_results"),
+    ],
+)
+def test_retired_result_requests_are_rejected_before_application(
     monkeypatch: pytest.MonkeyPatch,
+    request_kind: str,
+    action: str,
 ) -> None:
     monkeypatch.setattr(
         api_handler.application,
         "handle_request",
-        lambda _: {"status": "COMPLETE", "match_results": [], "standings": []},
+        lambda _: pytest.fail("廃止した公開要求ではアプリケーションを呼び出してはなりません"),
     )
 
     response = api_handler.lambda_handler(
         _event(
-            '{"request_kind":"tournament_results"}',
-            headers={"x-turnstile-action": "calculate_tournament_results"},
+            json.dumps({"request_kind": request_kind}),
+            headers={"x-turnstile-action": action},
         ),
         object(),
     )
 
-    assert response["statusCode"] == 200
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"])["diagnostics"][0]["code"] == ("BOT_CHECK_ACTION_MISMATCH")
 
 
 @pytest.mark.parametrize(
     ("request_kind", "action"),
     [
         ("same_rank_league_plan", "generate_same_rank_league"),
-        ("same_rank_league_results", "calculate_same_rank_results"),
         ("same_rank_day2_schedule", "generate_same_rank_day2_schedule"),
     ],
 )

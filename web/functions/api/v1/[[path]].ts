@@ -3,11 +3,8 @@ const MAX_BODY_BYTES = 1_000_000;
 const TURNSTILE_ACTIONS = new Set([
   "create_schedule",
   "generate_schedule",
-  "calculate_standings",
   "generate_tournament",
-  "calculate_tournament_results",
   "generate_same_rank_league",
-  "calculate_same_rank_results",
   "generate_same_rank_day2_schedule",
   "create_day2",
   "generate_day2_schedule",
@@ -103,7 +100,7 @@ export async function proxyScheduleRequest(
     return errorResponse(
       400,
       "BOT_CHECK_ACTION_REQUIRED",
-      "この操作の安全確認をやり直してください。",
+      "この操作は現在のバージョンでは利用できません。画面を再読み込みしてからやり直してください。",
     );
   }
   const browserOrigin = request.headers.get("origin") ?? "";

@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  calculateSameRankStandings,
   API_PATH,
-  calculateTournamentStandings,
   createDay2,
   createSchedule,
   generateDay2Schedule,
@@ -167,32 +165,4 @@ describe("日程生成API", () => {
     expect(headers.get("x-turnstile-action")).toBe("create_schedule");
   });
 
-  it("最終順位確定も同じ保護されたAPIへ送る", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ status: "COMPLETE", standings: [] }), { status: 200 }),
-    );
-    const input = { request_kind: "tournament_results" };
-
-    await expect(calculateTournamentStandings(input, "token", fetchMock)).resolves.toMatchObject({
-      status: "COMPLETE",
-    });
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(input);
-    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
-      "calculate_tournament_results",
-    );
-  });
-
-  it("同順位リーグ結果をauthorizerと一致するactionで送る", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ status: "COMPLETE", standings: [] }), { status: 200 }),
-    );
-    const input = { request_kind: "same_rank_league_results" };
-
-    await expect(calculateSameRankStandings(input, "token", fetchMock)).resolves.toMatchObject({
-      status: "COMPLETE",
-    });
-    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-turnstile-action")).toBe(
-      "calculate_same_rank_results",
-    );
-  });
 });

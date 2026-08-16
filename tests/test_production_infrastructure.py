@@ -155,15 +155,34 @@ def test_public_pages_smoke_test_has_bounded_propagation_retry() -> None:
     assert 'grep "大会日程スケジューラー"' not in smoke_step
 
 
-def test_apply_smoke_confirms_eight_team_tournament_results() -> None:
+def test_apply_smoke_only_invokes_schedule_generation_requests() -> None:
     workflow = (_ROOT / ".github/workflows/production.yml").read_text(encoding="utf-8")
     lambda_smoke = workflow.split("      - name: Smoke-test new Lambda alias\n", maxsplit=1)[
         1
     ].split("\n      - name: Update Pages Function secrets", maxsplit=1)[0]
 
-    assert "--tournament-results" in lambda_smoke
-    assert "lambda-tournament-results-event.json" in lambda_smoke
-    assert "lambda-tournament-results-response.json" in lambda_smoke
+    assert "--tournament-results" not in lambda_smoke
+    assert "lambda-tournament-results" not in lambda_smoke
+    assert "--sixteen-day2" in lambda_smoke
+    assert "--twenty-four-day2" in lambda_smoke
+    assert "--maximum-day2" in lambda_smoke
+    assert "--maximum-four-day2" in lambda_smoke
+
+
+def test_generation_api_retains_abuse_and_cost_controls() -> None:
+    template = (_ROOT / "infra/production/template.yaml").read_text(encoding="utf-8")
+
+    assert "TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey" in template
+    assert "ORIGIN_VERIFY_VALUE: !Ref OriginVerifyValue" in template
+    assert "- usage_key: []" in template
+    assert "turnstile_authorizer: []" in template
+    assert "name: X-Api-Key" in template
+    assert "Quota:" in template
+    assert "Limit: 3000" in template
+    assert template.count("RateLimit: 0.2") >= 2
+    assert template.count("BurstLimit: 3") >= 2
+    assert "ApiAccessLogGroup:" in template
+    assert "SolverThrottleAlarm:" in template
 
 
 def test_production_workflow_separates_plan_from_apply() -> None:

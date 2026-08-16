@@ -6,16 +6,10 @@ const TIMEOUT_MILLISECONDS = 30_000;
 
 function turnstileAction(input: JsonObject): string {
   switch (input.request_kind) {
-    case "league_standings":
-      return "calculate_standings";
     case "tournament_plan":
       return "generate_tournament";
-    case "tournament_results":
-      return "calculate_tournament_results";
     case "same_rank_league_plan":
       return "generate_same_rank_league";
-    case "same_rank_league_results":
-      return "calculate_same_rank_results";
     case "same_rank_day2_schedule":
       return "generate_same_rank_day2_schedule";
     case "day2_creation":
@@ -118,35 +112,8 @@ export async function generateSchedule(
   }
 }
 
-/** 日程生成と同じ保護されたAPIで、保存済みのリーグ結果から順位を確定する。 */
-export function calculateLeagueStandings(
-  input: JsonObject,
-  turnstileToken: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<JsonObject> {
-  return generateSchedule(input, turnstileToken, fetchImplementation);
-}
-
 /** リーグ順位枠と任意の確定順位から、順序付きプールの完全順位決定表を生成する。 */
 export function generateTournamentPlan(
-  input: JsonObject,
-  turnstileToken: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<JsonObject> {
-  return generateSchedule(input, turnstileToken, fetchImplementation);
-}
-
-/** 入力済みの2日目試合結果を検証し、総合最終順位を確定する。 */
-export function calculateTournamentStandings(
-  input: JsonObject,
-  turnstileToken: string,
-  fetchImplementation: typeof fetch = fetch,
-): Promise<JsonObject> {
-  return generateSchedule(input, turnstileToken, fetchImplementation);
-}
-
-/** 同順位リーグの結果を検証し、グループ順位と総合順位を確定する。 */
-export function calculateSameRankStandings(
   input: JsonObject,
   turnstileToken: string,
   fetchImplementation: typeof fetch = fetch,

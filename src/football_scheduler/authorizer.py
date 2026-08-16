@@ -18,11 +18,8 @@ _EXPECTED_ACTIONS = frozenset(
     {
         "create_schedule",
         "generate_schedule",
-        "calculate_standings",
         "generate_tournament",
-        "calculate_tournament_results",
         "generate_same_rank_league",
-        "calculate_same_rank_results",
         "generate_same_rank_day2_schedule",
         "create_day2",
         "generate_day2_schedule",

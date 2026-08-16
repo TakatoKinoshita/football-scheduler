@@ -6,7 +6,6 @@ import pytest
 
 from football_scheduler.api_handler import lambda_handler
 from football_scheduler.schedule_creation import ScheduleCreationRequest
-from football_scheduler.tournament_results import TournamentResultsRequest
 from scripts.find_cloudflare_production_deployment import find_deployment_id
 from scripts.write_cloudflare_release_headers import write_release_id
 from scripts.write_lambda_smoke_event import (
@@ -14,7 +13,6 @@ from scripts.write_lambda_smoke_event import (
     build_maximum_four_day2_event,
     build_sixteen_day2_event,
     build_smoke_event,
-    build_tournament_results_event,
     build_twenty_four_day2_event,
 )
 
@@ -71,29 +69,6 @@ def test_lambda_smoke_event_includes_matching_turnstile_action() -> None:
     assert response["statusCode"] == 200
     assert body["status"] in {"OPTIMAL", "FEASIBLE"}
     assert body["validation"]["valid"] is True
-
-
-def test_tournament_results_event_confirms_all_eight_ranks() -> None:
-    event = build_tournament_results_event()
-    headers = event["headers"]
-
-    assert isinstance(headers, dict)
-    assert headers["x-turnstile-action"] == "calculate_tournament_results"
-    request = TournamentResultsRequest.model_validate_json(str(event["body"]))
-    assert request.model_fields_set == {
-        "schema_version",
-        "request_kind",
-        "tournament_plan",
-        "results",
-    }
-
-    response = lambda_handler(event, None)
-    body = json.loads(response["body"])
-    assert response["statusCode"] == 200
-    assert body["status"] == "COMPLETE"
-    assert len(body["match_results"]) == 8
-    assert [row["rank"] for row in body["standings"]] == list(range(1, 9))
-    assert len({row["team_id"] for row in body["standings"]}) == 8
 
 
 def test_maximum_day2_event_uses_exact_template_release_case() -> None:

@@ -15,11 +15,8 @@ MAX_HTTP_BODY_BYTES = 1_000_000
 _ACTION_BY_REQUEST_KIND = {
     "schedule_creation": "create_schedule",
     "day1_league": "generate_schedule",
-    "league_standings": "calculate_standings",
     "tournament_plan": "generate_tournament",
-    "tournament_results": "calculate_tournament_results",
     "same_rank_league_plan": "generate_same_rank_league",
-    "same_rank_league_results": "calculate_same_rank_results",
     "same_rank_day2_schedule": "generate_same_rank_day2_schedule",
     "day2_creation": "create_day2",
     "day2_schedule": "generate_day2_schedule",
@@ -269,7 +266,7 @@ def lambda_handler(event: Any, context: Any) -> dict[str, Any]:
             400,
             _error(
                 "BOT_CHECK_ACTION_MISMATCH",
-                "この操作の安全確認が一致しません。安全確認をやり直してください。",
+                "この操作は公開APIで利用できません。画面を再読み込みしてからやり直してください。",
             ),
         )
 

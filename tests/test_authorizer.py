@@ -65,17 +65,15 @@ def test_valid_proxy_header_and_turnstile_token_are_allowed(
     "action",
     [
         "create_schedule",
-        "calculate_standings",
+        "generate_schedule",
         "generate_tournament",
-        "calculate_tournament_results",
         "generate_same_rank_league",
-        "calculate_same_rank_results",
         "generate_same_rank_day2_schedule",
         "create_day2",
         "generate_day2_schedule",
     ],
 )
-def test_result_workflow_turnstile_actions_are_allowed(
+def test_generation_workflow_turnstile_actions_are_allowed(
     monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
     monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
@@ -104,6 +102,41 @@ def test_result_workflow_turnstile_actions_are_allowed(
     assert _effect(result) == "Allow"
 
 
+@pytest.mark.parametrize(
+    "action",
+    [
+        "calculate_standings",
+        "calculate_tournament_results",
+        "calculate_same_rank_results",
+    ],
+)
+def test_retired_result_actions_are_denied_before_turnstile(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    monkeypatch.setenv("ORIGIN_VERIFY_VALUE", "origin-secret")
+    monkeypatch.setattr(
+        authorizer,
+        "_verify_turnstile",
+        lambda *_: pytest.fail("廃止したactionではTurnstileを検証してはなりません"),
+    )
+
+    result = authorizer.lambda_handler(
+        _event(
+            **{
+                "X-Origin-Verify": "origin-secret",
+                "Origin": "https://schedule.example.jp",
+                "X-Turnstile-Token": "single-use-token",
+                "X-Turnstile-Action": action,
+            }
+        ),
+        object(),
+    )
+
+    assert _effect(result) == "Deny"
+    assert result["context"] == {"authorizationCode": "BOT_CHECK_ACTION_REQUIRED"}
+
+
 def test_turnstile_action_must_match_requested_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,7 +147,7 @@ def test_turnstile_action_must_match_requested_action(
         lambda *_: {
             "success": True,
             "hostname": "schedule.example.jp",
-            "action": "calculate_standings",
+            "action": "generate_tournament",
         },
     )
 
