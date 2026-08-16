@@ -42,7 +42,7 @@ Cloudflare dashboardで次を確認する。
 - production branchは`main`として作成している。
 - Pages Functionsの利用上限到達時は`fail closed`である。
 - Turnstile widgetのhostnameにPagesの公開hostnameを登録している。現行画面から渡すactionは
-  `create_schedule`と`calculate_tournament_results`である。旧PWAを含む後方互換APIでは
+  `create_schedule`である。旧PWAを含む後方互換APIでは`calculate_tournament_results`、
   `generate_schedule`、`calculate_standings`、`calculate_same_rank_results`、`create_day2`、
   `generate_tournament`、`generate_day2_schedule`など、authorizerに定義したactionだけを許可する。
 - Pages Writeだけを対象accountへ許可したAPI tokenを発行している。

@@ -22,57 +22,6 @@ type ResultInput = {
   penalty_score_away?: number;
 };
 
-function outcomeResponse(request: {
-  tournament_plan: {
-    pools: Array<{
-      pool_id: string;
-      placements: Array<{ rank: number; pool_rank: number; entry: unknown }>;
-    }>;
-  };
-  results: ResultInput[];
-}) {
-  const matchResults = request.results.map((result) => {
-    const penalty = result.regular_score_home === result.regular_score_away;
-    const homeWins = penalty
-      ? result.penalty_score_home! > result.penalty_score_away!
-      : result.regular_score_home > result.regular_score_away;
-    return {
-      ...result,
-      penalty_score_home: result.penalty_score_home ?? null,
-      penalty_score_away: result.penalty_score_away ?? null,
-      winner: homeWins ? "home" : "away",
-      winner_team_id: homeWins ? result.home_team_id : result.away_team_id,
-      loser_team_id: homeWins ? result.away_team_id : result.home_team_id,
-      decision: penalty ? "penalty_shootout" : "regular_time",
-    };
-  });
-  const finalTeams = [
-    "team-01",
-    "team-03",
-    "team-07",
-    "team-05",
-    "team-02",
-    "team-04",
-    "team-08",
-    "team-06",
-  ];
-  const standings = request.tournament_plan.pools.flatMap((pool) =>
-    pool.placements.map((placement) => ({
-      rank: placement.rank,
-      pool_id: pool.pool_id,
-      pool_rank: placement.pool_rank,
-      team_id: finalTeams[placement.rank - 1],
-      entry: placement.entry,
-    }))
-  );
-  return {
-    schema_version: "0.2.0",
-    status: "COMPLETE",
-    match_results: matchResults,
-    standings,
-  };
-}
-
 async function fillRegularResult(
   page: Page,
   matchId: string,
@@ -106,29 +55,28 @@ function tournamentResultEntry(page: Page, matchId: string) {
   );
 }
 
-test("2日目結果を依存順に入力し、PKを経て総合最終順位を保存・印刷できる", async ({
+test("2日目結果を依存順に入力し、PKを経て総合最終順位を端末内で保存・印刷できる", async ({
   page,
 }) => {
   await mockExternalServices(page);
+  let resultRequests = 0;
   await page.route(GENERATE_API, async (route) => {
-    const request = route.request().postDataJSON() as {
-      request_kind?: unknown;
-      tournament_plan?: unknown;
-      results?: unknown;
-    };
-    if (request.request_kind !== "tournament_results") {
-      await route.fallback();
-      return;
-    }
-    const response = outcomeResponse(request as Parameters<typeof outcomeResponse>[0]);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(response),
-    });
+    resultRequests += 1;
+    await route.abort("failed");
   });
   await openApp(page);
-  await importDocument(page, tournamentResultsFixture());
+  const currentFixture = structuredClone(issue75EightTeamDocument) as typeof issue75EightTeamDocument;
+  const currentResult = currentFixture.tournament.result as Record<string, unknown>;
+  delete currentResult.tournament_results;
+  delete currentResult.final_standings;
+  const friendlyNames = [
+    "青空FC", "みどりSC", "中央キッカーズ", "海浜ユナイテッド",
+    "赤松FC", "北星FC", "白波FC", "若葉FC",
+  ];
+  currentFixture.tournament.input.teams.forEach((team, index) => {
+    team.name = friendlyNames[index]!;
+  });
+  await importDocument(page, currentFixture);
 
   const resultHeaders = await page
     .getByRole("table", { name: "2日目の試合結果入力" })
@@ -142,10 +90,10 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     "結果",
   ]);
   const scheduledSemifinal = page.locator(
-    '#day2-schedule-view tr[data-match-id="PT-1-SF1"]',
+    '#day2-schedule-view tr[data-match-id="PT-1-RANK-1-4-M1"]',
   );
   const resultSemifinal = page.locator(
-    '#tournament-results-input tr[data-match-id="PT-1-SF1"]',
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"]',
   );
   await expect(resultSemifinal.locator("td").nth(0).locator(".match-display-number")).toHaveText(
     await scheduledSemifinal.locator("td").nth(0).innerText(),
@@ -160,14 +108,14 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await expect(page.locator("#day2-schedule-view")).not.toContainText("最大待ちセクション");
   await expect(page.locator("#day2-schedule-view")).not.toContainText("未証明の目的");
 
-  const finalRow = page.locator('#tournament-results-input tr[data-match-id="PT-1-FINAL"]');
+  const finalRow = page.locator('#tournament-results-input tr[data-match-id="PT-1-RANK-1-2-M1"]');
   await expect(finalRow).toContainText("前提試合の結果待ち");
   await expect(finalRow.locator("input")).toHaveCount(0);
   await expect(finalRow.locator('[data-field="waiting-message"]')).toHaveText("—");
 
-  await fillRegularResult(page, "PT-1-SF1", "1", "0");
+  await fillRegularResult(page, "PT-1-RANK-1-4-M1", "1", "0");
   const semifinalTwo = page.locator(
-    '#tournament-results-input tr[data-match-id="PT-1-SF2"]',
+    '#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M2"]',
   );
   const regular = semifinalTwo.locator('[data-field="regular-score"] input');
   await regular.nth(0).fill("1");
@@ -179,28 +127,20 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await penalty.nth(1).fill("3");
   await penalty.nth(1).press("Tab");
   await expect(
-    page.locator('#tournament-results-input tr[data-match-id="PT-1-SF2"]'),
+    page.locator('#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M2"]'),
   ).toContainText("保存済");
 
-  await expect(finalRow).toContainText("青空FC 対 赤松FC");
+  await expect(finalRow).toContainText("赤松FC 対 海浜ユナイテッド");
   const upperBracket = page.locator(
     '#tournament-plan-view .tournament-bracket[data-pool="placement-1"]',
   );
-  await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-SF2"]'),
-  ).toContainText("PK 4-3");
-  await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-SF2"] .bracket-winner-label'),
-  ).toContainText("勝者：赤松FC");
-  await expect(
-    upperBracket.locator('.bracket-match-node[data-match-id="PT-1-FINAL"]'),
-  ).toContainText("青空FC 対 赤松FC");
-  await fillRegularResult(page, "PT-2-SF1", "1", "0");
-  await fillRegularResult(page, "PT-1-PLACE3", "1", "0");
-  await fillRegularResult(page, "PT-2-SF2", "1", "0");
-  await fillRegularResult(page, "PT-1-FINAL", "2", "0");
-  await fillRegularResult(page, "PT-2-PLACE3", "1", "0");
-  await fillRegularResult(page, "PT-2-FINAL", "1", "0");
+  await expect(upperBracket).toBeVisible();
+  await fillRegularResult(page, "PT-2-RANK-5-8-M1", "1", "0");
+  await fillRegularResult(page, "PT-1-RANK-3-4-M1", "1", "0");
+  await fillRegularResult(page, "PT-2-RANK-5-8-M2", "1", "0");
+  await fillRegularResult(page, "PT-1-RANK-1-2-M1", "2", "0");
+  await fillRegularResult(page, "PT-2-RANK-7-8-M1", "1", "0");
+  await fillRegularResult(page, "PT-2-RANK-5-6-M1", "1", "0");
 
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
@@ -214,20 +154,16 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
     .locator("tbody tr");
   await expect(standingsRows).toHaveCount(8);
   await expect(standingsRows.first()).toContainText(
-    "1位第1順位帯青空FC",
+    "1位第1順位決定トーナメント赤松FC",
   );
   await expect(standingsRows.nth(4)).toContainText(
-    "5位第2順位帯みどりSC",
+    "5位第2順位決定トーナメント中央キッカーズ",
   );
   await expect(
     page.getByRole("table", { name: "検証済みの2日目試合結果" }),
-  ).toContainText("赤松FC 1 (PK 4-3) 1 北星FC");
-  await expect(upperBracket.locator(".bracket-terminal.confirmed")).toHaveCount(4);
-  await expect(upperBracket.locator('.bracket-terminal[data-rank="1"]')).toContainText(
-    "1位確定",
-  );
+  ).toContainText("海浜ユナイテッド 1 (PK 4-3) 1 青空FC");
   const correctedScore = page
-    .locator('#tournament-results-input tr[data-match-id="PT-1-SF1"] td')
+    .locator('#tournament-results-input tr[data-match-id="PT-1-RANK-1-4-M1"] td')
     .nth(4)
     .locator("input")
     .first();
@@ -236,17 +172,9 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   await expect(page.locator("#final-standings-view")).toHaveCount(0);
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
-  const recalculationResponse = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/schedules:generate") &&
-    response.request().method() === "POST",
-  );
   await page.locator("#confirm-tournament-results").click();
-  const response = await recalculationResponse;
-  expect({ status: response.status(), body: await response.text() }).toMatchObject({
-    status: 200,
-    body: expect.stringContaining('"status":"COMPLETE"'),
-  });
   await expect(standingsRows).toHaveCount(8);
+  expect(resultRequests).toBe(0);
 
   await page.reload();
   await expect(standingsRows).toHaveCount(8);
@@ -278,24 +206,14 @@ test("2日目結果を依存順に入力し、PKを経て総合最終順位を�
   expect(exported.tournament.result.final_standings).toBeDefined();
 });
 
-test("Issue #75の保存JSONを読み込み、余分な設定を送らず1〜8位を確定できる", async ({
+test("Issue #75の保存JSONを読み込み、結果APIを送らず1〜8位を確定できる", async ({
   page,
 }) => {
   await mockExternalServices(page);
-  let capturedRequest: Record<string, unknown> | undefined;
+  let resultRequests = 0;
   await page.route(GENERATE_API, async (route) => {
-    const request = route.request().postDataJSON() as Record<string, unknown>;
-    if (request.request_kind !== "tournament_results") {
-      await route.fallback();
-      return;
-    }
-    capturedRequest = request;
-    const response = outcomeResponse(request as Parameters<typeof outcomeResponse>[0]);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(response),
-    });
+    resultRequests += 1;
+    await route.abort("failed");
   });
   await openApp(page);
   await importDocument(page, structuredClone(issue75EightTeamDocument));
@@ -307,64 +225,69 @@ test("Issue #75の保存JSONを読み込み、余分な設定を送らず1〜8�
   await expect(page.locator("#tournament-results-status")).toContainText("総合最終順位を確定");
   await expect(page.getByRole("table", { name: "総合最終順位" }).locator("tbody tr"))
     .toHaveCount(8);
-  expect(Object.keys(capturedRequest ?? {})).toEqual([
-    "schema_version",
-    "request_kind",
-    "tournament_plan",
-    "results",
-  ]);
-  expect(capturedRequest).not.toHaveProperty("final_stage");
+  expect(resultRequests).toBe(0);
 });
 
-test("最終順位APIの得点診断を専用欄へ示し、保存結果を保持する", async ({
+test("オフラインで総合最終順位を確定し、再読込み後も復元できる", async ({
+  context,
   page,
 }) => {
   await mockExternalServices(page);
+  let resultRequests = 0;
   await page.route(GENERATE_API, async (route) => {
-    const request = route.request().postDataJSON() as { request_kind?: unknown };
-    if (request.request_kind !== "tournament_results") {
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      status: 400,
-      contentType: "application/json",
-      body: JSON.stringify({
-        schema_version: "0.2.0",
-        status: "error",
-        diagnostics: [{
-          code: "INPUT_SCHEMA_INVALID",
-          message: "得点欄に0以上の整数を入力してください。入力済みのほかの結果は保持されています。",
-          details: {
-            scope: "tournament_scores",
-            errors: [{
-              field: "results.0.regular_score_home",
-              message: "得点は0以上の整数で入力してください。",
-              type: "greater_than_equal",
-              match_id: "PT-1-RANK-1-4-M1",
-              score_field: "regular_score_home",
-            }],
-          },
-        }],
-      }),
-    });
+    resultRequests += 1;
+    await route.abort("failed");
   });
   await openApp(page);
   await importDocument(page, structuredClone(issue75EightTeamDocument));
-  await setTournamentResultWidth(page, 899);
-  const row = tournamentResultEntry(page, "PT-1-RANK-1-4-M1");
-  const score = row.locator("input.score-input").first();
+  await page.evaluate(async () => navigator.serviceWorker.ready);
+  await page.reload();
+  await context.setOffline(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#tab-day2").click();
+
+  await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
+  await page.locator("#confirm-tournament-results").click();
+  await expect(page.getByRole("table", { name: "総合最終順位" }).locator("tbody tr"))
+    .toHaveCount(8);
+  expect(resultRequests).toBe(0);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#tab-day2").click();
+  await expect(page.getByRole("table", { name: "総合最終順位" }).locator("tbody tr"))
+    .toHaveCount(8);
+});
+
+test("総合最終順位の保存失敗時は画面とIndexedDBの以前の状態を保持する", async ({
+  page,
+}) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await importDocument(page, structuredClone(issue75EightTeamDocument));
+  await page.evaluate(() => {
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey): IDBRequest {
+      const stored = value as {
+        document?: { tournament?: { result?: { final_standings?: unknown } } };
+      };
+      if (stored.document?.tournament?.result?.final_standings !== undefined) {
+        throw new DOMException("test quota", "QuotaExceededError");
+      }
+      return key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+    };
+  });
   await page.locator("#confirm-tournament-results").click();
 
   await expect(page.locator("#tournament-results-status")).toContainText(
-    "入力済みのほかの結果は保持されています",
+    "総合最終順位を保存できませんでした",
   );
-  await expect(score).toHaveValue("0");
-  await expect(score).toHaveAttribute("aria-invalid", "true");
-  await expect(row.locator(".tournament-result-error")).toContainText(
-    "得点は0以上の整数",
-  );
+  await expect(page.locator("#final-standings-view")).toHaveCount(0);
   await expect(page.locator("#tournament-results-progress")).toContainText("8 / 8試合");
+  await page.reload();
+  await expect(page.locator("#final-standings-view")).toHaveCount(0);
+  await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
 });
 
 test("順位決定トーナメントは899px以下をカード、900px以上を5列表にし、境界時だけ再描画する", async ({

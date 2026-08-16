@@ -1,7 +1,6 @@
 import { registerSW } from "virtual:pwa-register";
 
 import {
-  calculateTournamentStandings,
   createSchedule,
   ScheduleApiError,
 } from "./api";
@@ -33,6 +32,10 @@ import {
   calculateLocalSameRankStandings,
   LocalStandingsError,
 } from "./local-standings";
+import {
+  calculateLocalTournamentStandings,
+  LocalTournamentStandingsError,
+} from "./local-tournament-standings";
 import {
   analyzeManualBlocks,
   assignTeamToBlock,
@@ -121,7 +124,6 @@ import {
   resolveTournamentProgress,
   type TournamentMatchProgress,
 } from "./tournament-results";
-import { buildTournamentResultsRequest } from "./tournament-results-request";
 import {
   SCHEMA_VERSION,
   cloneDocument,
@@ -465,9 +467,6 @@ root.innerHTML = `
       <div id="tournament-results-confirmation" class="standings-confirmation no-print" hidden>
         <h3>総合最終順位を確定する</h3>
         <p id="tournament-results-progress">2日目の試合結果を確認しています。</p>
-        <div id="tournament-results-turnstile-widget" class="turnstile-box" aria-label="最終順位確定の安全確認">
-          安全確認を読み込んでいます。
-        </div>
         <button id="confirm-tournament-results" class="primary" type="button" disabled>総合最終順位を確定する</button>
         <p id="tournament-results-status" class="status-message" role="status" aria-live="polite"></p>
       </div>
@@ -711,12 +710,7 @@ let persistedApplicableSameRankPolicyPending = false;
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
 let turnstileSetupStarted = false;
-let tournamentResultsTurnstileToken = "";
-let tournamentResultsTurnstileWidgetId: string | undefined;
-let tournamentResultsTurnstileSetupStarted = false;
-let tournamentResultsTurnstileAction: string | undefined;
 let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
-let tournamentResultsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 const tournamentResultDrafts = new TournamentResultDraftController();
 const leagueResultDrafts = new ResultDraftController();
@@ -774,9 +768,6 @@ const day2FallbackInput = requiredElement<HTMLSelectElement>("#day2-fallback");
 const day2BreaksInput = requiredElement<HTMLTextAreaElement>("#day2-breaks");
 const tournamentResultsConfirmation = requiredElement<HTMLElement>(
   "#tournament-results-confirmation",
-);
-const tournamentResultsTurnstile = requiredElement<HTMLElement>(
-  "#tournament-results-turnstile-widget",
 );
 const tournamentResultsProgress = requiredElement<HTMLElement>("#tournament-results-progress");
 const tournamentResultsStatus = requiredElement<HTMLElement>("#tournament-results-status");
@@ -1249,7 +1240,7 @@ function withTournamentResults(results: JsonObject[]): TournamentDocument | unde
 async function saveFinalStandings(standings: JsonObject): Promise<void> {
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return;
-  documentState = {
+  const nextDocument: TournamentDocument = {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: {
@@ -1260,7 +1251,8 @@ async function saveFinalStandings(standings: JsonObject): Promise<void> {
   autosave.cancel();
   saveState.textContent = "保存しています…";
   try {
-    await storage.saveDraft(documentState);
+    await storage.saveDraft(nextDocument);
+    documentState = nextDocument;
     saveState.textContent = "この端末に保存済み";
   } catch (error) {
     saveState.textContent = "保存できませんでした";
@@ -1300,7 +1292,6 @@ function refreshTournamentResultsEnabled(): void {
   const result = asObject(documentState.tournament.result);
   const sameRankPlan = asObject(result?.same_rank_plan);
   if (sameRankPlan !== undefined) {
-    tournamentResultsTurnstile.hidden = true;
     let progress = { entered: 0, total: sameRankMatches(sameRankPlan).length, complete: false };
     if (sameRankParticipantResolution(sameRankPlan) === "resolved") {
       try {
@@ -1314,7 +1305,6 @@ function refreshTournamentResultsEnabled(): void {
     tournamentResultsButton.disabled = legacyCompatibility || !progress.complete;
     return;
   }
-  tournamentResultsTurnstile.hidden = false;
   const plan = asObject(result?.tournament_plan);
   let enteredCount = 0;
   let totalCount = 0;
@@ -1334,9 +1324,7 @@ function refreshTournamentResultsEnabled(): void {
     legacyCompatibility ||
     plan === undefined ||
     !complete ||
-    tournamentResultDrafts.hasPendingDrafts ||
-    !navigator.onLine ||
-    tournamentResultsTurnstileToken.length === 0;
+    tournamentResultDrafts.hasPendingDrafts;
 }
 
 interface ScheduleRowDetails {
@@ -2862,10 +2850,6 @@ function requestTournamentStandings(): void {
     refreshTournamentResultsEnabled();
     return;
   }
-  if (tournamentResultsTurnstileToken.length === 0) {
-    tournamentResultsStatus.textContent = "最終順位確定の安全確認を完了してください。";
-    return;
-  }
   let progress;
   try {
     progress = resolveTournamentProgress(plan, tournamentResults());
@@ -2881,12 +2865,11 @@ function requestTournamentStandings(): void {
     return;
   }
   tournamentResultsButton.disabled = true;
-  tournamentResultsStatusOwner = "calculation";
   tournamentResultsStatus.textContent = "2日目の全試合を検証し、総合最終順位を計算しています…";
-  void calculateTournamentStandings(
-    buildTournamentResultsRequest(plan, tournamentResults()),
-    tournamentResultsTurnstileToken,
-  )
+  void calculateLocalTournamentStandings({
+    tournamentPlan: plan,
+    results: tournamentResults(),
+  })
     .then(async (standings) => {
       await saveFinalStandings(standings);
       tournamentResultsStatus.textContent =
@@ -2894,34 +2877,21 @@ function requestTournamentStandings(): void {
       renderResult();
     })
     .catch((error: unknown) => {
-      if (error instanceof ScheduleApiError) {
-        showTournamentScoreApiIssues(error);
-      }
+      if (error instanceof LocalTournamentStandingsError) showTournamentScoreLocalIssue(error);
+      else saveState.textContent = "保存できませんでした";
       tournamentResultsStatus.textContent =
-        error instanceof ScheduleApiError
+        error instanceof LocalTournamentStandingsError
           ? error.message
-          : "総合最終順位を確定できませんでした。入力した結果は保存されています。";
+          : "総合最終順位を保存できませんでした。入力した結果は保持されています。端末の空き容量を確認してください。";
       refreshTournamentResultsEnabled();
     })
     .finally(() => {
-      tournamentResultsTurnstileToken = "";
       refreshTournamentResultsEnabled();
-      const api = turnstileApi();
-      if (tournamentResultsTurnstileWidgetId !== undefined && api !== undefined) {
-        try {
-          api.reset(tournamentResultsTurnstileWidgetId);
-        } catch {
-          tournamentResultsStatus.textContent =
-            "安全確認を再開できませんでした。画面を再読み込みしてください。";
-        }
-      }
     });
 }
 
-function showTournamentScoreApiIssues(error: ScheduleApiError): void {
-  if (error.code !== "INPUT_SCHEMA_INVALID" || error.details?.scope !== "tournament_scores") {
-    return;
-  }
+function showTournamentScoreLocalIssue(error: LocalTournamentStandingsError): void {
+  if (error.code !== "TOURNAMENT_RESULT_INVALID") return;
   const inputIndexByField = new Map([
     ["regular_score_home", 0],
     ["regular_score_away", 1],
@@ -2931,9 +2901,15 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
   let firstInvalidInput: HTMLInputElement | undefined;
   const resultsSection = window.document.querySelector<HTMLElement>("#tournament-results-input");
   if (resultsSection === null) return;
-  for (const issue of asObjectArray(error.details.errors)) {
-    const matchId = typeof issue.match_id === "string" ? issue.match_id : undefined;
-    const inputIndex = inputIndexByField.get(String(issue.score_field));
+  const matchId = typeof error.details.match_id === "string" ? error.details.match_id : undefined;
+  const reason = String(error.details.reason ?? "");
+  const fields = reason === "penalty_for_non_draw"
+    ? ["penalty_score_home", "penalty_score_away"]
+    : reason === "penalty_required" || reason === "penalty_still_tied"
+      ? ["penalty_score_home", "penalty_score_away"]
+      : ["regular_score_home"];
+  for (const field of fields) {
+    const inputIndex = inputIndexByField.get(field);
     if (matchId === undefined || inputIndex === undefined) continue;
     const row = [...resultsSection.querySelectorAll<HTMLElement>(".result-input-entry[data-match-id]")]
       .find((candidate) => candidate.dataset.matchId === matchId);
@@ -2946,9 +2922,7 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
       errorArea === undefined ||
       errorArea === null
     ) continue;
-    errorArea.textContent = typeof issue.message === "string"
-      ? issue.message
-      : "得点は0以上の整数で入力してください。";
+    errorArea.textContent = error.message;
     if (stateLabel !== undefined && stateLabel !== null) {
       stateLabel.dataset.state = "invalid";
       stateLabel.textContent = "要確認";
@@ -2978,7 +2952,6 @@ function requestSameRankStandings(plan: JsonObject): void {
     return;
   }
   tournamentResultsButton.disabled = true;
-  tournamentResultsStatusOwner = "calculation";
   tournamentResultsStatus.textContent = "同順位リーグの結果と総合順位を計算しています…";
   void calculateLocalSameRankStandings({
     sameRankPlan: plan,
@@ -4159,22 +4132,11 @@ function setupVisibleTurnstile(): void {
       const message = "安全確認を読み込めませんでした。通信状態を確認してください。";
       requiredElement<HTMLElement>("#turnstile-widget").textContent = message;
       requireTurnstileConfirmation(message);
-    } else if (
-      currentStep === 4 &&
-      !tournamentResultsConfirmation.hidden &&
-      asObject(documentState.tournament.result?.same_rank_plan) === undefined &&
-      !tournamentResultsTurnstileSetupStarted
-    ) {
-      const message = "安全確認を読み込めませんでした。入力結果はこの端末に保存されています。";
-      requiredElement<HTMLElement>("#tournament-results-turnstile-widget").textContent = message;
-      tournamentResultsStatus.textContent = message;
     }
     return;
   }
   if (currentStep === 2) {
     setupTurnstile();
-  } else if (currentStep === 4 && !tournamentResultsConfirmation.hidden) {
-    setupTournamentResultsTurnstile();
   }
 }
 
@@ -4272,91 +4234,6 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
   });
   turnstileLoadPromise = retryableAttempt;
   return turnstileLoadPromise;
-}
-
-function setupTournamentResultsTurnstile(): void {
-  const container = tournamentResultsTurnstile;
-  if (asObject(documentState.tournament.result?.same_rank_plan) !== undefined) {
-    container.hidden = true;
-    return;
-  }
-  container.hidden = false;
-  if (!turnstileSurfaceIsVisible(container, 4)) return;
-  const action = "calculate_tournament_results";
-  if (tournamentResultsTurnstileSetupStarted && tournamentResultsTurnstileAction === action) return;
-  tournamentResultsTurnstileSetupStarted = true;
-  tournamentResultsTurnstileAction = action;
-  tournamentResultsTurnstileToken = "";
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  if (!siteKey) {
-    container.textContent =
-      "安全確認の設定が完了していないため、総合最終順位を確定できません。";
-    tournamentResultsStatus.textContent = container.textContent;
-    return;
-  }
-  container.textContent = "安全確認を読み込んでいます。";
-  void loadTurnstileApi()
-    .then((api) => {
-      if (tournamentResultsTurnstileAction !== action) return;
-      if (!turnstileSurfaceIsVisible(container, 4)) {
-        tournamentResultsTurnstileSetupStarted = false;
-        return;
-      }
-      try {
-        if (tournamentResultsTurnstileWidgetId !== undefined) {
-          api.remove?.(tournamentResultsTurnstileWidgetId);
-          tournamentResultsTurnstileWidgetId = undefined;
-        }
-        container.replaceChildren();
-        tournamentResultsTurnstileWidgetId = api.render(container, {
-          sitekey: siteKey,
-          action,
-          callback: (token) => {
-            tournamentResultsTurnstileToken = token;
-            refreshTournamentResultsEnabled();
-            if (tournamentResultsStatusOwner === "turnstile") {
-              tournamentResultsStatus.textContent = token.length > 0
-                ? "安全確認が完了しました。"
-                : "安全確認を完了できませんでした。もう一度お試しください。";
-            }
-          },
-          "expired-callback": () => {
-            tournamentResultsTurnstileToken = "";
-            refreshTournamentResultsEnabled();
-            if (tournamentResultsStatusOwner === "turnstile") {
-              tournamentResultsStatus.textContent =
-                "安全確認の期限が切れました。もう一度確認してください。";
-            }
-          },
-          "error-callback": () => {
-            tournamentResultsTurnstileToken = "";
-            refreshTournamentResultsEnabled();
-            if (tournamentResultsStatusOwner === "turnstile") {
-              tournamentResultsStatus.textContent =
-                "安全確認を完了できませんでした。通信状態を確認してください。";
-            }
-          },
-        });
-      } catch {
-        tournamentResultsTurnstileSetupStarted = false;
-        tournamentResultsTurnstileWidgetId = undefined;
-        container.textContent =
-          "安全確認を初期化できませんでした。このタブを開き直してください。";
-        tournamentResultsStatus.textContent = container.textContent;
-      }
-    })
-    .catch((error: unknown) => {
-      if (tournamentResultsTurnstileAction !== action) return;
-      tournamentResultsTurnstileSetupStarted = false;
-      const initialized =
-        error instanceof Error && error.message === "Turnstile API is unavailable";
-      container.textContent = initialized
-        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
-        : "安全確認を読み込めませんでした。接続回復後に再試行します。";
-      tournamentResultsStatus.textContent = initialized
-        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
-        : "安全確認を読み込めませんでした。入力結果は保存済みです。接続回復後に再試行します。";
-    });
 }
 
 function inferOrganizerCapacityTouched(): boolean {

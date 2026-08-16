@@ -40,9 +40,9 @@ TypeScript／ViteのPWA、ブラウザ内自動保存、JSON入出力、オフ�
 本番API adapter、濫用対策のIaC、手動承認付きrelease経路も用意している。日別の結果タブでは
 生成した日程とブロック分けの閲覧、試合結果の入力、ブロック順位の確定、順位未確定時の仮決勝計画と
 順位決定トーナメントまたは同順位リーグの作成、順位未確定時を含む2日目の時刻・コート・審判配置まで利用できる。
-1日目リーグと2日目同順位リーグの結果検証・順位確定はブラウザ内で行うため、事前にPWAを読み込んだ
-端末では通信切断後も、結果入力、順位確定、IndexedDB保存、再読込みを継続できる。日程生成と
-順位決定トーナメントの総合順位確定は引き続きAPIとTurnstileを必要とする。
+1日目リーグ、2日目同順位リーグ、順位決定トーナメントの結果検証・順位確定はブラウザ内で行うため、
+事前にPWAを読み込んだ端末では通信切断後も、結果入力、順位確定、IndexedDB保存、再読込みを
+継続できる。日程生成は引き続きAPIとTurnstileを必要とする。
 1日目の日程表と結果入力、および2日目の同順位リーグ日程では、直後の同一コートの試合を審判するチームを対戦表示の左側へ揃える。
 これは表示と得点入力の並びだけを変更し、保存データのhome/awayと順位計算は変更しない。
 2日目の開催時刻と決勝方式は日程生成前に入力し、統合された生成操作で決勝計画と日程を続けて生成する。
@@ -129,14 +129,15 @@ npm run dev
 診断だけを返すため、画面の保存状態を部分的な結果で置き換えない。
 `random`、`seeded_snake`、`manual`のブロック分けを利用でき、完成済み試合を含む従来の
 `ScheduleRequest` JSONも互換経路として受け付ける。旧PWA互換の順位確定入口として
-`league_standings`と`same_rank_league_results`を引き続き受け付けるが、現行画面の1日目リーグと
-2日目同順位リーグの順位確定はこれらを呼び出さず、端末内でPython版と同じ保存形式を生成する。2日目の
+`league_standings`、`same_rank_league_results`、`tournament_results`を引き続き受け付けるが、
+現行画面のリーグ系順位と順位決定トーナメントの最終順位はこれらを呼び出さず、端末内でPython版と
+同じ保存形式を生成する。2日目の
 一括作成は任意の`league_standings`を持つ`day2_creation`として同じ保護されたAPIへ要求できる。
 `day2_creation`は1つのTurnstile tokenで選択形式の計画と日程を順番に生成し、両方の独立検証が
 成功した場合だけ返すが、`day1_league`とともに通常画面では使用しない互換経路である。
 形式別の生成入口として`tournament_plan`、`day2_schedule`、
-`same_rank_league_plan`、`same_rank_day2_schedule`も受け付ける。現行画面の2日目トーナメントの
-全結果検証と総合順位確定は`tournament_results`で要求する。Turnstileのactionは
+`same_rank_league_plan`、`same_rank_day2_schedule`も受け付ける。旧PWAは2日目トーナメントの
+全結果検証と総合順位確定を`tournament_results`で要求できる。Turnstileのactionは
 `day2_creation`の`create_day2`を含め、各`request_kind`と一致する場合だけ受理する。
 サーバー側へ大会データは永続保存しない。
 

@@ -109,7 +109,7 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
     .locator("thead th")
     .allTextContents();
   expect(headers).toEqual(["試合", "時間", "コート", "対戦", "結果"]);
-  await expect(page.locator("#tournament-results-turnstile-widget")).toBeHidden();
+  await expect(page.locator("#tournament-results-turnstile-widget")).toHaveCount(0);
   await expect(page.locator('[data-action="calculate_same_rank_results"]')).toHaveCount(0);
 
   await page.evaluate(async () => navigator.serviceWorker.ready);

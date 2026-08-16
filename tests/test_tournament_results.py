@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,9 @@ from football_scheduler.tournament_results import (
 
 _ISSUE_75_FIXTURE = (
     Path(__file__).resolve().parents[1] / "scripts/fixtures/tournament-results-8.json"
+)
+_GOLDEN_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "scripts/fixtures/tournament-results-golden.json"
 )
 
 
@@ -128,6 +133,56 @@ def _request(plan: TournamentPlan, results: list[dict[str, object]]) -> dict[str
     }
 
 
+def _golden_plan(team_count: int) -> TournamentPlan:
+    block_count = team_count // 2
+    teams = [{"id": f"T{index:02d}", "name": f"Team {index}"} for index in range(1, team_count + 1)]
+    blocks = [
+        {
+            "id": f"B{block + 1:02d}",
+            "team_ids": [f"T{block * 2 + 1:02d}", f"T{block * 2 + 2:02d}"],
+        }
+        for block in range(block_count)
+    ]
+    league = generate_league_plan(
+        {
+            "teams": teams,
+            "block_count": block_count,
+            "assignment_mode": "manual",
+            "manual_blocks": blocks,
+            "random_seed": 20260803,
+        }
+    )
+    standings = LeagueStandings(
+        standings=tuple(
+            Standing(
+                block_id=block.id,
+                rank=rank,
+                team_id=team_id,
+                played=1,
+                wins=int(rank == 1),
+                draws=0,
+                losses=int(rank == 2),
+                goals_for=int(rank == 1),
+                goals_against=int(rank == 2),
+                goal_difference=1 if rank == 1 else -1,
+                points=3 if rank == 1 else 0,
+                tie_break="golden fixture",
+            )
+            for block in league.blocks
+            for rank, team_id in enumerate(block.team_ids, 1)
+        ),
+        draws=(),
+    )
+    return generate_tournament_plan(
+        {
+            "request_kind": "tournament_plan",
+            "league_plan": league.model_dump(mode="json"),
+            "league_standings": standings.model_dump(mode="json"),
+            "final_stage": {"format": "placement_tournament", "tournament_count": 2},
+        }
+    )
+
+
 def test_results_cover_all_pools_and_overall_ranks() -> None:
     plan = _plan()
     supplied = _results(plan)
@@ -159,6 +214,84 @@ def test_issue_75_eight_team_request_matches_python_contract_and_all_ranks() -> 
     assert outcome.status == "COMPLETE"
     assert [standing.rank for standing in outcome.standings] == list(range(1, 9))
     assert len({standing.team_id for standing in outcome.standings}) == 8
+
+
+def test_versioned_golden_covers_four_eight_and_sixteen_team_pools() -> None:
+    fixture = json.loads(_GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+
+    assert fixture["schema_version"] == "1"
+    assert [case["pool_size"] for case in fixture["cases"]] == [4, 8, 16]
+    for case in fixture["cases"]:
+        plan = _golden_plan(case["team_count"])
+        results = _results(plan)
+        outcome = calculate_tournament_standings(_request(plan, results)).model_dump(mode="json")
+        canonical = json.dumps(
+            outcome,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        assert hashlib.sha256(canonical).hexdigest() == case["expected_sha256"]
+        for pool, expected_pool in zip(plan.pools, case["pools"], strict=True):
+            assert [
+                [seed.team_id, seed.block_id, seed.block_rank] for seed in pool.seeds
+            ] == expected_pool["seeds"]
+            assert [
+                entry.block_id
+                for entry in pool.logical_layout.opening_entry_order
+                if isinstance(entry, LeagueRankRef)
+            ] == expected_pool["opening_block_order"]
+
+    diagnostics = {item["case"]: item for item in fixture["diagnostics"]}
+    base = json.loads(_ISSUE_75_FIXTURE.read_text(encoding="utf-8"))
+    diagnostic_requests: dict[str, dict[str, object]] = {}
+    diagnostic_requests["duplicate_result"] = {
+        **base,
+        "results": [*base["results"], base["results"][0]],
+    }
+    diagnostic_requests["unknown_result"] = {
+        **base,
+        "results": [
+            *base["results"],
+            {**base["results"][0], "match_id": "PT-UNKNOWN"},
+        ],
+    }
+    diagnostic_requests["incomplete_results"] = {
+        **base,
+        "results": base["results"][1:],
+    }
+    diagnostic_requests["participant_mismatch"] = {
+        **base,
+        "results": [
+            {**base["results"][0], "home_team_id": "team-99"},
+            *base["results"][1:],
+        ],
+    }
+    diagnostic_requests["penalty_for_non_draw"] = {
+        **base,
+        "results": [
+            *base["results"][:2],
+            {
+                **base["results"][2],
+                "penalty_score_home": 3,
+                "penalty_score_away": 2,
+            },
+            *base["results"][3:],
+        ],
+    }
+    cyclic = json.loads(json.dumps(base))
+    cyclic_pool = cyclic["tournament_plan"]["pools"][0]
+    cyclic_pool["logical_layout"] = None
+    cyclic_match = cyclic_pool["matches"][0]
+    cyclic_match["home"] = {"type": "winner_of", "match_id": cyclic_match["id"]}
+    diagnostic_requests["dependency_cycle"] = cyclic
+
+    for case, request in diagnostic_requests.items():
+        with pytest.raises(TournamentResultsError) as exc_info:
+            calculate_tournament_standings(request)
+        assert exc_info.value.code == diagnostics[case]["code"]
+        if "reason" in diagnostics[case]:
+            assert exc_info.value.details["reason"] == diagnostics[case]["reason"]
 
 
 def test_penalty_shootout_is_kept_separate() -> None:

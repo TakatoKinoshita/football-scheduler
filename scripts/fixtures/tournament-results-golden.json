@@ -1,0 +1,64 @@
+{
+  "schema_version": "1",
+  "diagnostics": [
+    { "case": "duplicate_result", "code": "DUPLICATE_TOURNAMENT_RESULT" },
+    { "case": "unknown_result", "code": "UNKNOWN_TOURNAMENT_MATCH" },
+    { "case": "incomplete_results", "code": "TOURNAMENT_RESULTS_INCOMPLETE" },
+    { "case": "participant_mismatch", "code": "TOURNAMENT_RESULT_PARTICIPANT_MISMATCH" },
+    { "case": "penalty_for_non_draw", "code": "TOURNAMENT_RESULT_INVALID", "reason": "penalty_for_non_draw" },
+    { "case": "dependency_cycle", "code": "TOURNAMENT_DEPENDENCY_CYCLE" }
+  ],
+  "cases": [
+    {
+      "pool_size": 4,
+      "team_count": 8,
+      "block_count": 4,
+      "random_seed": 20260803,
+      "expected_sha256": "198e7d84f4fbe6a5c29f469c876200ebc0042a92117090f2d3ab9425d7deeb90",
+      "pools": [
+        {
+          "seeds": [["T01", "B01", 1], ["T03", "B02", 1], ["T05", "B03", 1], ["T07", "B04", 1]],
+          "opening_block_order": ["B01", "B04", "B02", "B03"]
+        },
+        {
+          "seeds": [["T06", "B03", 2], ["T02", "B01", 2], ["T08", "B04", 2], ["T04", "B02", 2]],
+          "opening_block_order": ["B03", "B02", "B01", "B04"]
+        }
+      ]
+    },
+    {
+      "pool_size": 8,
+      "team_count": 16,
+      "block_count": 8,
+      "random_seed": 20260803,
+      "expected_sha256": "17b9541c4d29165821b52708c02b02dc4e4558f8aa9f9756f198fefba50c5ab3",
+      "pools": [
+        {
+          "seeds": [["T09", "B05", 1], ["T01", "B01", 1], ["T03", "B02", 1], ["T05", "B03", 1], ["T15", "B08", 1], ["T13", "B07", 1], ["T07", "B04", 1], ["T11", "B06", 1]],
+          "opening_block_order": ["B05", "B06", "B01", "B08", "B02", "B07", "B03", "B04"]
+        },
+        {
+          "seeds": [["T14", "B07", 2], ["T16", "B08", 2], ["T06", "B03", 2], ["T12", "B06", 2], ["T02", "B01", 2], ["T10", "B05", 2], ["T08", "B04", 2], ["T04", "B02", 2]],
+          "opening_block_order": ["B07", "B02", "B08", "B04", "B03", "B05", "B06", "B01"]
+        }
+      ]
+    },
+    {
+      "pool_size": 16,
+      "team_count": 32,
+      "block_count": 16,
+      "random_seed": 20260803,
+      "expected_sha256": "7433ba09c7c8d1f1811e662ffa84ba1fe8598c8da208ef55de478bff9dd75517",
+      "pools": [
+        {
+          "seeds": [["T09", "B05", 1], ["T01", "B01", 1], ["T19", "B10", 1], ["T27", "B14", 1], ["T31", "B16", 1], ["T03", "B02", 1], ["T05", "B03", 1], ["T29", "B15", 1], ["T21", "B11", 1], ["T15", "B08", 1], ["T13", "B07", 1], ["T17", "B09", 1], ["T07", "B04", 1], ["T23", "B12", 1], ["T25", "B13", 1], ["T11", "B06", 1]],
+          "opening_block_order": ["B05", "B12", "B01", "B11", "B14", "B08", "B16", "B04", "B02", "B13", "B10", "B06", "B15", "B09", "B03", "B07"]
+        },
+        {
+          "seeds": [["T14", "B07", 2], ["T18", "B09", 2], ["T30", "B15", 2], ["T16", "B08", 2], ["T06", "B03", 2], ["T12", "B06", 2], ["T02", "B01", 2], ["T10", "B05", 2], ["T28", "B14", 2], ["T26", "B13", 2], ["T20", "B10", 2], ["T08", "B04", 2], ["T22", "B11", 2], ["T32", "B16", 2], ["T04", "B02", 2], ["T24", "B12", 2]],
+          "opening_block_order": ["B07", "B04", "B09", "B12", "B15", "B13", "B08", "B02", "B05", "B11", "B03", "B14", "B06", "B16", "B01", "B10"]
+        }
+      ]
+    }
+  ]
+}
