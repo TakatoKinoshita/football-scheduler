@@ -10,6 +10,9 @@ const FORBIDDEN_MARKERS = [
   "tournament-results-preview.html",
   "/tournament-results-preview.html",
   "TOURNAMENT_RESULTS_PREVIEW_FIXTURE_V1",
+  "print-preview.html",
+  "/print-preview.html",
+  "PRINT_PREVIEW_FIXTURE_V1",
 ];
 
 async function filesBelow(directory) {

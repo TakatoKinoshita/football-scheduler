@@ -10,6 +10,7 @@
     "lint": "tsc -b --pretty false",
     "preview": "vite preview",
     "preview:brackets": "node scripts/render-tournament-bracket-previews.mjs",
+    "preview:print": "node scripts/render-print-preview-pdfs.mjs",
     "preview:results": "node scripts/render-tournament-results-previews.mjs",
     "check:preview-isolation": "node scripts/check-preview-isolation.mjs",
     "test": "vitest run",

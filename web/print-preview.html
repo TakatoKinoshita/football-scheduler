@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>印刷プレビュー</title>
+  </head>
+  <body class="print-preview-body">
+    <header class="print-preview-controls preview-only">
+      <div>
+        <p class="eyebrow">LOCAL PRINT PREVIEW</p>
+        <h1>印刷用PDFレイアウト確認</h1>
+        <p id="print-preview-description"></p>
+      </div>
+      <label>
+        固定fixture
+        <select id="print-preview-fixture"></select>
+      </label>
+      <button type="button" onclick="window.print()">ブラウザで印刷</button>
+    </header>
+    <p id="print-preview-error" class="preview-error" role="alert"></p>
+    <div id="print-preview-host"></div>
+    <script type="module" src="/src/print-preview.ts"></script>
+  </body>
+</html>
