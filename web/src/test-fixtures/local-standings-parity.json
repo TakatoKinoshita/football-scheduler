@@ -1,0 +1,70 @@
+{
+  "fixture_version": 1,
+  "league_all_draws": {
+    "random_seed": 99,
+    "scores": [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]],
+    "expected": {
+      "schema_version": "0.2.0",
+      "status": "COMPLETE",
+      "standings": [
+        {"block_id":"A","rank":1,"team_id":"A","played":3,"wins":0,"draws":3,"losses":0,"goals_for":0,"goals_against":0,"goal_difference":0,"points":3,"tie_break":"直接対戦後の抽選","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+        {"block_id":"A","rank":2,"team_id":"C","played":3,"wins":0,"draws":3,"losses":0,"goals_for":0,"goals_against":0,"goal_difference":0,"points":3,"tie_break":"直接対戦後の抽選","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+        {"block_id":"A","rank":3,"team_id":"B","played":3,"wins":0,"draws":3,"losses":0,"goals_for":0,"goals_against":0,"goal_difference":0,"points":3,"tie_break":"直接対戦後の抽選","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+        {"block_id":"A","rank":4,"team_id":"D","played":3,"wins":0,"draws":3,"losses":0,"goals_for":0,"goals_against":0,"goal_difference":0,"points":3,"tie_break":"直接対戦後の抽選","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}}
+      ],
+      "draws": [
+        {
+          "block_id": "A",
+          "candidates": ["A", "B", "C", "D"],
+          "decided_order": ["A", "C", "B", "D"],
+          "random_seed": 99,
+          "candidate_values": [
+            {"team_id":"A","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+            {"team_id":"B","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+            {"team_id":"C","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}},
+            {"team_id":"D","head_to_head":{"points":3,"goal_difference":0,"goals_for":0}}
+          ]
+        }
+      ]
+    }
+  },
+  "league_missing_error": {
+    "expected": {
+      "code": "LEAGUE_RESULTS_INCOMPLETE",
+      "message": "すべてのリーグ試合の結果を入力してから順位を確定してください。",
+      "details": {
+        "missing_match_ids": ["LG-A-M1", "LG-A-M2", "LG-A-M3", "LG-A-M4", "LG-A-M5", "LG-A-M6"],
+        "missing_count": 6
+      }
+    }
+  },
+  "same_rank_all_draws": {
+    "random_seed": 41,
+    "scores": [[1, 1], [1, 1]],
+    "expected": {
+      "schema_version": "0.2.0",
+      "status": "COMPLETE",
+      "match_results": [
+        {"match_id":"SR-1-M1","home_team_id":"T1","away_team_id":"T2","regular_score_home":1,"regular_score_away":1,"outcome":"draw"},
+        {"match_id":"SR-2-M1","home_team_id":"T4","away_team_id":"T3","regular_score_home":1,"regular_score_away":1,"outcome":"draw"}
+      ],
+      "standings": [
+        {"rank":1,"group_id":"same-rank-1","group_rank":1,"team_id":"T2","entry":{"type":"league_rank","block_id":"B","rank":1},"played":1,"wins":0,"draws":1,"losses":0,"goals_for":1,"goals_against":1,"goal_difference":0,"points":1,"tie_break":"直接対戦後の抽選","head_to_head":{"points":1,"goal_difference":0,"goals_for":1},"automatic":false},
+        {"rank":2,"group_id":"same-rank-1","group_rank":2,"team_id":"T1","entry":{"type":"league_rank","block_id":"A","rank":1},"played":1,"wins":0,"draws":1,"losses":0,"goals_for":1,"goals_against":1,"goal_difference":0,"points":1,"tie_break":"直接対戦後の抽選","head_to_head":{"points":1,"goal_difference":0,"goals_for":1},"automatic":false},
+        {"rank":3,"group_id":"same-rank-2","group_rank":1,"team_id":"T4","entry":{"type":"league_rank","block_id":"A","rank":2},"played":1,"wins":0,"draws":1,"losses":0,"goals_for":1,"goals_against":1,"goal_difference":0,"points":1,"tie_break":"直接対戦後の抽選","head_to_head":{"points":1,"goal_difference":0,"goals_for":1},"automatic":false},
+        {"rank":4,"group_id":"same-rank-2","group_rank":2,"team_id":"T3","entry":{"type":"league_rank","block_id":"B","rank":2},"played":1,"wins":0,"draws":1,"losses":0,"goals_for":1,"goals_against":1,"goal_difference":0,"points":1,"tie_break":"直接対戦後の抽選","head_to_head":{"points":1,"goal_difference":0,"goals_for":1},"automatic":false}
+      ],
+      "draws": [
+        {"group_id":"same-rank-1","candidates":["T1","T2"],"decided_order":["T2","T1"],"random_seed":41,"candidate_values":[{"team_id":"T1","head_to_head":{"points":1,"goal_difference":0,"goals_for":1}},{"team_id":"T2","head_to_head":{"points":1,"goal_difference":0,"goals_for":1}}]},
+        {"group_id":"same-rank-2","candidates":["T3","T4"],"decided_order":["T4","T3"],"random_seed":41,"candidate_values":[{"team_id":"T3","head_to_head":{"points":1,"goal_difference":0,"goals_for":1}},{"team_id":"T4","head_to_head":{"points":1,"goal_difference":0,"goals_for":1}}]}
+      ]
+    }
+  },
+  "same_rank_penalty_error": {
+    "expected": {
+      "code": "SAME_RANK_PENALTY_NOT_ALLOWED",
+      "message": "同順位リーグではPK戦を行いません。通常得点だけを入力してください。",
+      "details": {"match_id": "SR-1-M1"}
+    }
+  }
+}

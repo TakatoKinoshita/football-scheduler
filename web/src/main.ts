@@ -1,9 +1,7 @@
 import { registerSW } from "virtual:pwa-register";
 
 import {
-  calculateSameRankStandings,
   calculateTournamentStandings,
-  calculateLeagueStandings,
   createSchedule,
   ScheduleApiError,
 } from "./api";
@@ -30,6 +28,11 @@ import {
   safeFileName,
   serializeTournamentJson,
 } from "./import-export";
+import {
+  calculateLocalLeagueStandings,
+  calculateLocalSameRankStandings,
+  LocalStandingsError,
+} from "./local-standings";
 import {
   analyzeManualBlocks,
   assignTeamToBlock,
@@ -428,9 +431,6 @@ root.innerHTML = `
       <div id="standings-confirmation" class="standings-confirmation no-print" hidden>
         <h3>順位を確定する</h3>
         <p id="league-results-progress">試合結果を確認しています。</p>
-        <div id="standings-turnstile-widget" class="turnstile-box" aria-label="順位確定の安全確認">
-          安全確認を読み込んでいます。
-        </div>
         <button id="confirm-standings" class="primary" type="button" disabled>順位を確定する</button>
         <p id="standings-status" class="status-message" role="status" aria-live="polite"></p>
       </div>
@@ -711,15 +711,11 @@ let persistedApplicableSameRankPolicyPending = false;
 let turnstileToken = "";
 let turnstileWidgetId: string | undefined;
 let turnstileSetupStarted = false;
-let standingsTurnstileToken = "";
-let standingsTurnstileWidgetId: string | undefined;
-let standingsTurnstileSetupStarted = false;
 let tournamentResultsTurnstileToken = "";
 let tournamentResultsTurnstileWidgetId: string | undefined;
 let tournamentResultsTurnstileSetupStarted = false;
 let tournamentResultsTurnstileAction: string | undefined;
 let turnstileLoadPromise: Promise<TurnstileApi> | undefined;
-let standingsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let tournamentResultsStatusOwner: "turnstile" | "calculation" = "turnstile";
 let generationStatusOwner: "turnstile" | "generation" = "turnstile";
 const tournamentResultDrafts = new TournamentResultDraftController();
@@ -778,6 +774,9 @@ const day2FallbackInput = requiredElement<HTMLSelectElement>("#day2-fallback");
 const day2BreaksInput = requiredElement<HTMLTextAreaElement>("#day2-breaks");
 const tournamentResultsConfirmation = requiredElement<HTMLElement>(
   "#tournament-results-confirmation",
+);
+const tournamentResultsTurnstile = requiredElement<HTMLElement>(
+  "#tournament-results-turnstile-widget",
 );
 const tournamentResultsProgress = requiredElement<HTMLElement>("#tournament-results-progress");
 const tournamentResultsStatus = requiredElement<HTMLElement>("#tournament-results-status");
@@ -1049,27 +1048,14 @@ function withLeagueResults(
   };
 }
 
-function saveLeagueResults(results: JsonObject[], standings?: JsonObject): boolean {
+async function saveLeagueResults(results: JsonObject[], standings?: JsonObject): Promise<boolean> {
   const changed = withLeagueResults(results, standings);
   if (changed === undefined) return false;
-  documentState = changed.document;
-  if (standings === undefined) {
-    clearTournamentResultDrafts();
-    sameRankResultDrafts.reset();
-    void storage.clearResultDrafts("same-rank-league");
-  }
+  autosave.cancel();
   saveState.textContent = "保存しています…";
-  autosave.schedule(
-    documentState,
-    () => {
-      saveState.textContent = "この端末に保存済み";
-    },
-    () => {
-      saveState.textContent = "保存できませんでした";
-      standingsStatus.textContent =
-        "試合結果を保存できませんでした。端末の空き容量を確認してください。";
-    },
-  );
+  await storage.saveDraft(changed.document);
+  documentState = changed.document;
+  saveState.textContent = "この端末に保存済み";
   return changed.invalidated;
 }
 
@@ -1231,7 +1217,7 @@ function withSameRankResults(results: JsonObject[]): TournamentDocument | undefi
 async function saveSameRankStandings(standings: JsonObject): Promise<void> {
   const result = asObject(documentState.tournament.result);
   if (result === undefined) return;
-  documentState = {
+  const nextDocument: TournamentDocument = {
     ...documentState,
     updatedAt: new Date().toISOString(),
     tournament: {
@@ -1240,7 +1226,8 @@ async function saveSameRankStandings(standings: JsonObject): Promise<void> {
     },
   };
   autosave.cancel();
-  await storage.saveDraft(documentState);
+  await storage.saveDraft(nextDocument);
+  documentState = nextDocument;
   saveState.textContent = "この端末に保存済み";
 }
 
@@ -1306,15 +1293,14 @@ function refreshLeagueResultsProgress(totalMatches: number): void {
   standingsButton.disabled =
     legacyCompatibility ||
     enteredCount !== totalMatches ||
-    totalMatches === 0 ||
-    !navigator.onLine ||
-    standingsTurnstileToken.length === 0;
+    totalMatches === 0;
 }
 
 function refreshTournamentResultsEnabled(): void {
   const result = asObject(documentState.tournament.result);
   const sameRankPlan = asObject(result?.same_rank_plan);
   if (sameRankPlan !== undefined) {
+    tournamentResultsTurnstile.hidden = true;
     let progress = { entered: 0, total: sameRankMatches(sameRankPlan).length, complete: false };
     if (sameRankParticipantResolution(sameRankPlan) === "resolved") {
       try {
@@ -1325,11 +1311,10 @@ function refreshTournamentResultsEnabled(): void {
     }
     tournamentResultsProgress.textContent =
       `入力済み ${String(progress.entered)} / ${String(progress.total)}試合`;
-    tournamentResultsButton.disabled =
-      legacyCompatibility || !progress.complete || !navigator.onLine ||
-      tournamentResultsTurnstileToken.length === 0;
+    tournamentResultsButton.disabled = legacyCompatibility || !progress.complete;
     return;
   }
+  tournamentResultsTurnstile.hidden = false;
   const plan = asObject(result?.tournament_plan);
   let enteredCount = 0;
   let totalCount = 0;
@@ -1778,7 +1763,6 @@ function renderResult(): void {
         },
         setSaveStatus: (message) => { saveState.textContent = message; },
         announce: (message) => {
-          standingsStatusOwner = "calculation";
           standingsStatus.textContent = message;
         },
         refreshCompletion: () => refreshLeagueResultsProgress(leagueMatches.length),
@@ -2836,47 +2820,30 @@ function requestLeagueStandings(): void {
   const result = asObject(documentState.tournament.result);
   const plan = resultLeaguePlan();
   if (result === undefined || plan === undefined) return;
-  if (standingsTurnstileToken.length === 0) {
-    standingsStatus.textContent = "順位確定の安全確認を完了してください。";
-    return;
-  }
   standingsButton.disabled = true;
-  standingsStatusOwner = "calculation";
   standingsStatus.textContent = "順位を計算しています…";
-  void calculateLeagueStandings(
-    {
-      schema_version: SCHEMA_VERSION,
-      request_kind: "league_standings",
-      league_plan: plan,
-      results: leagueResults(),
-      random_seed: documentState.tournament.input.random_seed ?? 20260803,
-    },
-    standingsTurnstileToken,
-  )
-    .then((standings) => {
-      saveLeagueResults(leagueResults(), standings);
+  void calculateLocalLeagueStandings({
+    leaguePlan: plan,
+    results: leagueResults(),
+    randomSeed: typeof documentState.tournament.input.random_seed === "number"
+      ? documentState.tournament.input.random_seed
+      : 20260803,
+  })
+    .then(async (standings) => {
+      await saveLeagueResults(leagueResults(), standings);
       standingsStatus.textContent = "順位を確定し、この端末へ保存しました。";
       renderResult();
     })
     .catch((error: unknown) => {
+      if (!(error instanceof LocalStandingsError)) saveState.textContent = "保存できませんでした";
       standingsStatus.textContent =
-        error instanceof ScheduleApiError
+        error instanceof LocalStandingsError
           ? error.message
-          : "順位を確定できませんでした。入力は保存されています。";
+          : "順位を保存できませんでした。入力は保持されています。端末の空き容量を確認してください。";
       refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
     })
     .finally(() => {
-      standingsTurnstileToken = "";
       refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
-      const api = turnstileApi();
-      if (standingsTurnstileWidgetId !== undefined && api !== undefined) {
-        try {
-          api.reset(standingsTurnstileWidgetId);
-        } catch {
-          standingsStatus.textContent =
-            "安全確認を再開できませんでした。画面を再読み込みしてください。";
-        }
-      }
     });
 }
 
@@ -2995,10 +2962,6 @@ function showTournamentScoreApiIssues(error: ScheduleApiError): void {
 }
 
 function requestSameRankStandings(plan: JsonObject): void {
-  if (tournamentResultsTurnstileToken.length === 0) {
-    tournamentResultsStatus.textContent = "最終順位確定の安全確認を完了してください。";
-    return;
-  }
   let progress;
   try {
     progress = sameRankProgress(plan, sameRankResults());
@@ -3017,15 +2980,10 @@ function requestSameRankStandings(plan: JsonObject): void {
   tournamentResultsButton.disabled = true;
   tournamentResultsStatusOwner = "calculation";
   tournamentResultsStatus.textContent = "同順位リーグの結果と総合順位を計算しています…";
-  void calculateSameRankStandings(
-    {
-      schema_version: SCHEMA_VERSION,
-      request_kind: "same_rank_league_results",
-      same_rank_plan: plan,
-      results: sameRankResults(),
-    },
-    tournamentResultsTurnstileToken,
-  )
+  void calculateLocalSameRankStandings({
+    sameRankPlan: plan,
+    results: sameRankResults(),
+  })
     .then(async (standings) => {
       await saveSameRankStandings(standings);
       tournamentResultsStatus.textContent =
@@ -3033,22 +2991,13 @@ function requestSameRankStandings(plan: JsonObject): void {
       renderResult();
     })
     .catch((error: unknown) => {
-      tournamentResultsStatus.textContent = error instanceof ScheduleApiError
+      if (!(error instanceof LocalStandingsError)) saveState.textContent = "保存できませんでした";
+      tournamentResultsStatus.textContent = error instanceof LocalStandingsError
         ? error.message
-        : "同順位リーグの総合順位を確定できませんでした。入力結果は保存されています。";
+        : "同順位リーグの総合順位を保存できませんでした。入力結果は保持されています。端末の空き容量を確認してください。";
     })
     .finally(() => {
-      tournamentResultsTurnstileToken = "";
       refreshTournamentResultsEnabled();
-      const api = turnstileApi();
-      if (tournamentResultsTurnstileWidgetId !== undefined && api !== undefined) {
-        try {
-          api.reset(tournamentResultsTurnstileWidgetId);
-        } catch {
-          tournamentResultsStatus.textContent =
-            "安全確認を再開できませんでした。画面を再読み込みしてください。";
-        }
-      }
     });
 }
 
@@ -4180,7 +4129,7 @@ function updateConnectionStatus(): void {
     connection.textContent = "オンライン：日程を生成できます";
     connection.className = "connection online";
   } else {
-    connection.textContent = "オフライン：保存済みの内容を確認できます";
+    connection.textContent = "オフライン：通信が必要な日程生成などは利用できません";
     connection.className = "connection offline";
   }
   refreshGenerateEnabled();
@@ -4211,16 +4160,9 @@ function setupVisibleTurnstile(): void {
       requiredElement<HTMLElement>("#turnstile-widget").textContent = message;
       requireTurnstileConfirmation(message);
     } else if (
-      currentStep === 3 &&
-      !standingsConfirmation.hidden &&
-      !standingsTurnstileSetupStarted
-    ) {
-      const message = "安全確認を読み込めませんでした。入力はこの端末に保存されています。";
-      requiredElement<HTMLElement>("#standings-turnstile-widget").textContent = message;
-      standingsStatus.textContent = message;
-    } else if (
       currentStep === 4 &&
       !tournamentResultsConfirmation.hidden &&
+      asObject(documentState.tournament.result?.same_rank_plan) === undefined &&
       !tournamentResultsTurnstileSetupStarted
     ) {
       const message = "安全確認を読み込めませんでした。入力結果はこの端末に保存されています。";
@@ -4231,8 +4173,6 @@ function setupVisibleTurnstile(): void {
   }
   if (currentStep === 2) {
     setupTurnstile();
-  } else if (currentStep === 3 && !standingsConfirmation.hidden) {
-    setupStandingsTurnstile();
   } else if (currentStep === 4 && !tournamentResultsConfirmation.hidden) {
     setupTournamentResultsTurnstile();
   }
@@ -4334,82 +4274,15 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
   return turnstileLoadPromise;
 }
 
-function setupStandingsTurnstile(): void {
-  const container = requiredElement<HTMLElement>("#standings-turnstile-widget");
-  if (!turnstileSurfaceIsVisible(container, 3) || standingsTurnstileSetupStarted) return;
-  standingsTurnstileSetupStarted = true;
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  if (!siteKey) {
-    container.textContent = "安全確認の設定が完了していないため、順位を確定できません。";
-    standingsStatus.textContent =
-      "安全確認の設定が完了していないため、順位を確定できません。";
+function setupTournamentResultsTurnstile(): void {
+  const container = tournamentResultsTurnstile;
+  if (asObject(documentState.tournament.result?.same_rank_plan) !== undefined) {
+    container.hidden = true;
     return;
   }
-  container.textContent = "安全確認を読み込んでいます。";
-  void loadTurnstileApi()
-    .then((api) => {
-      if (!turnstileSurfaceIsVisible(container, 3)) {
-        standingsTurnstileSetupStarted = false;
-        return;
-      }
-      try {
-        container.replaceChildren();
-        standingsTurnstileWidgetId = api.render(container, {
-          sitekey: siteKey,
-          action: "calculate_standings",
-          callback: (token) => {
-            standingsTurnstileToken = token;
-            if (standingsStatusOwner === "turnstile") {
-              standingsStatus.textContent =
-                token.length > 0
-                  ? "安全確認が完了しました。"
-                  : "安全確認を完了できませんでした。もう一度お試しください。";
-            }
-            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
-          },
-          "expired-callback": () => {
-            standingsTurnstileToken = "";
-            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
-            if (standingsStatusOwner === "turnstile") {
-              standingsStatus.textContent =
-                "安全確認の期限が切れました。もう一度確認してください。";
-            }
-          },
-          "error-callback": () => {
-            standingsTurnstileToken = "";
-            refreshLeagueResultsProgress(orderedLeagueMatches([]).length);
-            if (standingsStatusOwner === "turnstile") {
-              standingsStatus.textContent =
-                "安全確認を完了できませんでした。通信状態を確認してください。";
-            }
-          },
-        });
-      } catch {
-        standingsTurnstileSetupStarted = false;
-        container.textContent =
-          "安全確認を初期化できませんでした。このタブを開き直してください。";
-        standingsStatus.textContent = container.textContent;
-      }
-    })
-    .catch((error: unknown) => {
-      standingsTurnstileSetupStarted = false;
-      const initialized =
-        error instanceof Error && error.message === "Turnstile API is unavailable";
-      container.textContent = initialized
-        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
-        : "安全確認を読み込めませんでした。接続回復後に再試行します。";
-      standingsStatus.textContent = initialized
-        ? "安全確認を初期化できませんでした。このタブを開き直してください。"
-        : "安全確認を読み込めませんでした。入力は保存済みです。接続回復後に再試行します。";
-    });
-}
-
-function setupTournamentResultsTurnstile(): void {
-  const container = requiredElement<HTMLElement>("#tournament-results-turnstile-widget");
+  container.hidden = false;
   if (!turnstileSurfaceIsVisible(container, 4)) return;
-  const action = asObject(documentState.tournament.input.final_stage)?.format === "same_rank_league"
-    ? "calculate_same_rank_results"
-    : "calculate_tournament_results";
+  const action = "calculate_tournament_results";
   if (tournamentResultsTurnstileSetupStarted && tournamentResultsTurnstileAction === action) return;
   tournamentResultsTurnstileSetupStarted = true;
   tournamentResultsTurnstileAction = action;

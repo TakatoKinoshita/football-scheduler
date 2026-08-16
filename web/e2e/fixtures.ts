@@ -862,83 +862,93 @@ export function sameRankWebFixture(
   const teamByRank = new Map(
     standingsRows.map((row) => [`${row.block_id}:${String(row.rank)}`, row.team_id]),
   );
+  const roundRobin = (
+    groupId: string,
+    displayName: string,
+    participants: Array<{
+      entry: Record<string, unknown>;
+      team: Record<string, unknown> | null;
+    }>,
+  ): { matches: Array<Record<string, unknown>>; logicalRounds: Array<Record<string, unknown>> } => {
+    if (participants.length < 2) return { matches: [], logicalRounds: [] };
+    let rotating: Array<(typeof participants)[number] | null> = [...participants];
+    if (rotating.length % 2 === 1) rotating.push(null);
+    const matches: Array<Record<string, unknown>> = [];
+    const logicalRounds: Array<Record<string, unknown>> = [];
+    let matchNumber = 1;
+    for (let roundIndex = 0; roundIndex < rotating.length - 1; roundIndex += 1) {
+      const matchIds: string[] = [];
+      for (let pairIndex = 0; pairIndex < rotating.length / 2; pairIndex += 1) {
+        const left = rotating[pairIndex];
+        const right = rotating[rotating.length - pairIndex - 1];
+        if (left === null || left === undefined || right === null || right === undefined) continue;
+        const [home, away] = roundIndex % 2 === 0 ? [left, right] : [right, left];
+        const suffix = groupId.replace(/^same-rank-/u, "").toUpperCase();
+        const id = `SR-${suffix}-M${String(matchNumber)}`;
+        matches.push({
+          id,
+          phase: "same_rank_league",
+          group_id: groupId,
+          round: `${displayName} 第${String(roundIndex + 1)}ラウンド`,
+          round_no: roundIndex + 1,
+          home: home.entry,
+          away: away.entry,
+          home_team: home.team,
+          away_team: away.team,
+        });
+        matchIds.push(id);
+        matchNumber += 1;
+      }
+      if (matchIds.length > 0) {
+        logicalRounds.push({ group_id: groupId, round_no: roundIndex + 1, match_ids: matchIds });
+      }
+      rotating = [rotating[0]!, rotating[rotating.length - 1]!, ...rotating.slice(1, -1)];
+    }
+    return { matches, logicalRounds };
+  };
   const regularGroupCount = policy === "merge_bottom" && r > 0 ? q - 1 : q;
   const groups = Array.from({ length: regularGroupCount }, (_, index) => {
     const rank = index + 1;
+    const groupId = `same-rank-${String(rank)}`;
+    const displayName = `予選${String(rank)}位リーグ`;
     const participants = blocks.map((block) => {
       const entry = { type: "league_rank", block_id: block.id, rank };
       const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
       return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
     });
-    const matches: Array<Record<string, unknown>> = [];
-    for (let home = 0; home < participants.length; home += 1) {
-      for (let away = home + 1; away < participants.length; away += 1) {
-        const id = `SR-${String(rank)}-M${String(matches.length + 1)}`;
-        matches.push({
-          id,
-          phase: "same_rank_league",
-          group_id: `same-rank-${String(rank)}`,
-          round: `第${String(matches.length + 1)}ラウンド`,
-          round_no: matches.length + 1,
-          home: participants[home]!.entry,
-          away: participants[away]!.entry,
-          home_team: participants[home]!.team,
-          away_team: participants[away]!.team,
-        });
-      }
-    }
+    const { matches, logicalRounds } = roundRobin(groupId, displayName, participants);
     return {
-      id: `same-rank-${String(rank)}`,
-      display_name: `${String(rank)}位グループ`,
+      id: groupId,
+      display_name: displayName,
       source_block_ranks: [rank],
       overall_rank_range: [(rank - 1) * blockCount + 1, rank * blockCount],
       participants,
-      logical_rounds: matches.map((match, roundIndex) => ({
-        group_id: `same-rank-${String(rank)}`,
-        round_no: roundIndex + 1,
-        match_ids: [match.id],
-      })),
+      logical_rounds: logicalRounds,
       matches,
     };
   });
   if (r > 0 && policy === "strict_same_rank") {
     const rank = q + 1;
+    const groupId = `same-rank-${String(rank)}`;
+    const displayName = `予選${String(rank)}位リーグ`;
     const participants = blocks.slice(0, r).map((block) => {
       const entry = { type: "league_rank", block_id: block.id, rank };
       const teamId = teamByRank.get(`${block.id}:${String(rank)}`)!;
       return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
     });
-    const matches: Array<Record<string, unknown>> = [];
-    for (let home = 0; home < participants.length; home += 1) {
-      for (let away = home + 1; away < participants.length; away += 1) {
-        matches.push({
-          id: `SR-${String(rank)}-M${String(matches.length + 1)}`,
-          phase: "same_rank_league",
-          group_id: `same-rank-${String(rank)}`,
-          round: `第${String(matches.length + 1)}ラウンド`,
-          round_no: matches.length + 1,
-          home: participants[home]!.entry,
-          away: participants[away]!.entry,
-          home_team: participants[home]!.team,
-          away_team: participants[away]!.team,
-        });
-      }
-    }
+    const { matches, logicalRounds } = roundRobin(groupId, displayName, participants);
     groups.push({
-      id: `same-rank-${String(rank)}`,
-      display_name: `${String(rank)}位グループ`,
+      id: groupId,
+      display_name: displayName,
       source_block_ranks: [rank],
       overall_rank_range: [q * blockCount + 1, teamCount],
       participants,
-      logical_rounds: matches.map((match, index) => ({
-        group_id: `same-rank-${String(rank)}`,
-        round_no: index + 1,
-        match_ids: [match.id],
-      })),
+      logical_rounds: logicalRounds,
       matches,
     });
   } else if (r > 0) {
     const rank = q;
+    const displayName = `予選${String(q)}・${String(q + 1)}位リーグ`;
     const participants = [
       ...blocks.map((block) => ({ block, rank })),
       ...blocks.slice(0, r).map((block) => ({ block, rank: q + 1 })),
@@ -947,31 +957,18 @@ export function sameRankWebFixture(
       const teamId = teamByRank.get(`${block.id}:${String(participantRank)}`)!;
       return { entry, team: resolved ? { type: "concrete_team", team_id: teamId } : null };
     });
-    const matches: Array<Record<string, unknown>> = [];
-    for (let home = 0; home < participants.length; home += 1) {
-      for (let away = home + 1; away < participants.length; away += 1) {
-        matches.push({
-          id: `SR-BOTTOM-M${String(matches.length + 1)}`,
-          phase: "same_rank_league",
-          group_id: "same-rank-bottom",
-          round: `第${String(matches.length + 1)}ラウンド`,
-          round_no: matches.length + 1,
-          home: participants[home]!.entry,
-          away: participants[away]!.entry,
-          home_team: participants[home]!.team,
-          away_team: participants[away]!.team,
-        });
-      }
-    }
+    const { matches, logicalRounds } = roundRobin(
+      "same-rank-bottom",
+      displayName,
+      participants,
+    );
     groups.push({
       id: "same-rank-bottom",
-      display_name: "最下位統合グループ",
+      display_name: displayName,
       source_block_ranks: [q, q + 1],
       overall_rank_range: [(q - 1) * blockCount + 1, teamCount],
       participants,
-      logical_rounds: matches.map((match, index) => ({
-        group_id: "same-rank-bottom", round_no: index + 1, match_ids: [match.id],
-      })),
+      logical_rounds: logicalRounds,
       matches,
     });
   }
@@ -1047,10 +1044,28 @@ export function sameRankWebFixture(
       uneven_policy: policy, team_count: teamCount, block_count: blockCount,
       random_seed: 20260803, groups, automatic_standings: automaticStandings,
       warnings: r > 0 ? [
-        { code: "SAME_RANK_UNEVEN_BLOCKS", message: "ブロック人数に端数があります。", group_id: null, details: {} },
+        {
+          code: "SAME_RANK_UNEVEN_BLOCKS",
+          message: "ブロック人数が均等でないため、選択した端数処理で同順位グループを作成しました。",
+          group_id: null,
+          details: {
+            team_count: teamCount,
+            block_count: blockCount,
+            uneven_policy: policy,
+            block_sizes: blocks.map((block) => block.team_ids.length),
+            groups: groups.map((group) => ({
+              group_id: group.id,
+              participant_count: group.participants.length,
+              source_block_ranks: group.source_block_ranks,
+              overall_rank_range: group.overall_rank_range,
+            })),
+          },
+        },
         ...(policy === "strict_same_rank" && r === 1 ? [{
-          code: "SAME_RANK_SINGLETON_GROUP", message: "1チームの順位を自動確定します。",
-          group_id: `same-rank-${String(q + 1)}`, details: {},
+          code: "SAME_RANK_SINGLETON_GROUP",
+          message: "最下位グループが1チームのため、試合を行わず順位を自動確定します。",
+          group_id: `same-rank-${String(q + 1)}`,
+          details: { overall_rank: teamCount },
         }] : []),
       ] : [],
     },
