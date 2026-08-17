@@ -4,10 +4,15 @@ const leagueFixtures = [
   "day1-league-16",
   "day2-same-rank-16-provisional",
   "day2-same-rank-16-resolved",
+  "day1-league-32",
+  "day2-same-rank-32-provisional",
+  "day2-same-rank-32-resolved",
 ] as const;
 const tournamentFixtures = [
   "day2-tournament-16-provisional",
   "day2-tournament-16-resolved",
+  "day2-tournament-32-provisional",
+  "day2-tournament-32-resolved",
 ] as const;
 
 async function openPreview(page: Page, fixture: string): Promise<void> {
@@ -17,39 +22,76 @@ async function openPreview(page: Page, fixture: string): Promise<void> {
 
 for (const fixture of leagueFixtures) {
   test(`${fixture}は配布順でセクションを表示する`, async ({ page }) => {
+    const teamCount = fixture.includes("-32") ? 32 : 16;
     await openPreview(page, fixture);
     await expect(page.locator("body")).toHaveAttribute("data-preview-status", "ready");
     await expect(page.locator("#print-preview-error")).toBeEmpty();
     expect(await page.locator("[data-print-section]").evaluateAll((nodes) =>
       nodes.map((node) => (node as HTMLElement).dataset.printSection)
-    )).toEqual(["metadata", "groups", "schedule", "team-schedules"]);
-    await expect(page.locator("[data-print-court]")).toHaveCount(3);
-    await expect(page.locator("[data-participant-key]")).toHaveCount(16);
+    )).toEqual(["metadata", "league-overview", "schedule", "team-schedules"]);
+    await expect(page.locator("[data-print-court]")).toHaveCount(teamCount === 16 ? 3 : 4);
+    await expect(page.locator("[data-participant-key]")).toHaveCount(teamCount);
     await expect(page.locator('[data-print-section="schedule"] h2'))
-      .toHaveText(fixture === "day1-league-16" ? "1日目の日程表" : "2日目の日程表");
+      .toHaveText(fixture.includes("day1-league") ? "1日目の日程表" : "2日目の日程表");
+    await expect(page.locator('[data-print-section="league-overview"] h2'))
+      .toHaveText(fixture.includes("day1-league") ? "1日目の組合せ概要" : "2日目の組合せ概要");
+    await expect(page.locator("[data-summary-group-id]"))
+      .toHaveCount(fixture.includes("day1-league") ? teamCount / 4 : 4);
+    await expect(page.locator("[data-summary-group-id] li")).toHaveCount(teamCount);
   });
 }
 
 for (const fixture of tournamentFixtures) {
   test(`${fixture}はメタ情報、各トーナメント表、日程表の順で表示する`, async ({ page }) => {
+    const teamCount = fixture.includes("-32") ? 32 : 16;
     await openPreview(page, fixture);
     await expect(page.locator("body")).toHaveAttribute("data-preview-status", "ready");
     expect(await page.locator("[data-print-section]").evaluateAll((nodes) =>
       nodes.map((node) => (node as HTMLElement).dataset.printSection)
-    )).toEqual(["metadata", "tournament-pool", "tournament-pool", "schedule"]);
+    )).toEqual([
+      "metadata",
+      "tournament-overview",
+      "tournament-pool",
+      "tournament-pool",
+      "schedule",
+    ]);
+    await expect(page.locator('[data-print-section="tournament-overview"] h2'))
+      .toHaveText("2日目の組合せ概要");
+    await expect(page.locator("[data-summary-pool-id]")).toHaveCount(2);
+    await expect(page.locator("[data-summary-pool-id] li"))
+      .toHaveCount(teamCount);
     await expect(page.locator('[data-print-section="tournament-pool"]')).toHaveCount(2);
     await expect(page.locator(".tournament-bracket-svg")).toHaveCount(2);
     await expect(page.locator('[data-print-section="schedule"] h2')).toHaveText("2日目の日程表");
   });
 }
 
+for (const fixture of [
+  "day2-tournament-16-resolved",
+  "day2-tournament-32-resolved",
+] as const) {
+  test(`${fixture}はトーナメント表見出しを図と同居できる印刷サイズにする`, async ({ page }) => {
+    await openPreview(page, fixture);
+    await page.emulateMedia({ media: "print" });
+    const heading = page.locator('[data-print-section="tournament-pool"] > h2').first();
+    await expect(heading).toHaveText("第1順位決定トーナメント表");
+    expect(await heading.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)))
+      .toBeLessThanOrEqual(14);
+    expect(await heading.evaluate((element) => Number.parseFloat(getComputedStyle(element).marginBottom)))
+      .toBeLessThanOrEqual(6);
+    expect(await heading.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element.parentElement!).marginTop)
+    )).toBe(0);
+  });
+}
+
 test("仮参照と順位確定後チーム名を同じ表示モデル経路で切り替える", async ({ page }) => {
   await openPreview(page, "day2-same-rank-16-provisional");
-  await expect(page.locator('[data-group-id="rank-1"]')).toContainText("Aブロック 1位");
+  await expect(page.locator('[data-summary-group-id="rank-1"]')).toContainText("Aブロック 1位");
   await expect(page.locator('[data-print-court="court-a"]')).toContainText("ブロック");
 
   await openPreview(page, "day2-same-rank-16-resolved");
-  await expect(page.locator('[data-group-id="rank-1"]'))
+  await expect(page.locator('[data-summary-group-id="rank-1"]'))
     .toContainText("北町ジュニアフットボールクラブ");
   await expect(page.locator('[data-print-court="court-a"]')).not.toContainText("Aブロック 1位");
 });
@@ -64,6 +106,28 @@ test("印刷時は操作部と不要な監査文言を出さず、コート表�
     expect(await court.evaluate((element) => getComputedStyle(element).breakInside)).toBe("avoid");
   }
 });
+
+for (const fixture of ["day1-league-16", "day1-league-32"] as const) {
+  test(`${fixture}の日程表はカラム名と最終行下罫線を明瞭に印刷する`, async ({ page }) => {
+    await openPreview(page, fixture);
+    await page.emulateMedia({ media: "print" });
+    const firstCourt = page.locator("[data-print-court]").first();
+    const header = firstCourt.locator("th").first();
+    const table = firstCourt.locator("table");
+    const lastCell = firstCourt.locator("tbody tr").last().locator("td").last();
+    await expect(header).toHaveText("試合");
+    expect(await header.evaluate((element) => getComputedStyle(element).color))
+      .toBe("rgb(21, 32, 43)");
+    expect(await header.evaluate((element) => Number.parseInt(getComputedStyle(element).fontWeight)))
+      .toBeGreaterThanOrEqual(700);
+    expect(await table.evaluate((element) => getComputedStyle(element).borderBottomStyle))
+      .toBe("solid");
+    expect(await lastCell.evaluate((element) => getComputedStyle(element).borderBottomStyle))
+      .toBe("solid");
+    expect(await lastCell.evaluate((element) => getComputedStyle(element).borderBottomWidth))
+      .toBe("1px");
+  });
+}
 
 test("存在しないfixtureは日本語エラーを示して印刷内容を生成しない", async ({ page }) => {
   await openPreview(page, "does-not-exist");

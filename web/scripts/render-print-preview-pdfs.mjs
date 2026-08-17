@@ -14,6 +14,11 @@ const FIXTURE_IDS = [
   "day2-same-rank-16-resolved",
   "day2-tournament-16-provisional",
   "day2-tournament-16-resolved",
+  "day1-league-32",
+  "day2-same-rank-32-provisional",
+  "day2-same-rank-32-resolved",
+  "day2-tournament-32-provisional",
+  "day2-tournament-32-resolved",
 ];
 
 function option(name) {
