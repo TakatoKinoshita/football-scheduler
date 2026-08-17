@@ -8,7 +8,17 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const WEB_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FIXTURE_IDS = ["day1-league", "day2-same-rank", "day2-tournament"];
+const SCHEDULE_FIXTURE_IDS = ["day1-league", "day2-same-rank", "day2-tournament"];
+const LEAGUE_RESULTS_FIXTURE_IDS = [
+  "league-results-normal-2",
+  "league-results-direct-4",
+  "league-results-mini-league-4",
+  "league-results-residual-draw-5",
+  "league-results-all-draws-4",
+  "league-results-multiple-blocks-long-names",
+  "league-results-normal-8",
+  "league-results-normal-16",
+];
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -16,9 +26,15 @@ function option(name) {
 }
 
 function selectedFixtures() {
+  const fixtureSet = option("--fixture-set") ?? "schedule";
+  const fixtureIds = fixtureSet === "schedule"
+    ? SCHEDULE_FIXTURE_IDS
+    : fixtureSet === "league-results"
+      ? LEAGUE_RESULTS_FIXTURE_IDS
+      : (() => { throw new Error(`未対応のExcel fixture setです: ${fixtureSet}`); })();
   const requested = option("--fixture") ?? "all";
-  if (requested === "all") return FIXTURE_IDS;
-  if (!FIXTURE_IDS.includes(requested)) throw new Error(`未対応のExcel fixtureです: ${requested}`);
+  if (requested === "all") return fixtureIds;
+  if (!fixtureIds.includes(requested)) throw new Error(`未対応のExcel fixtureです: ${requested}`);
   return [requested];
 }
 
