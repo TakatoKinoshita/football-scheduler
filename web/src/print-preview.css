@@ -4,6 +4,8 @@
   color: #15202b;
 }
 
+.production-print-host { display: none; }
+
 .print-preview-controls {
   display: flex;
   align-items: end;
@@ -203,6 +205,12 @@
     margin: 0;
     padding: 0;
     box-shadow: none;
+  }
+  body[data-production-print-ready="true"] #app > :not(.production-print-host) {
+    display: none !important;
+  }
+  body[data-production-print-ready="true"] .production-print-host {
+    display: block !important;
   }
   .print-tournament-pool:has(.tournament-bracket.exploration.horizontal) {
     page: bracket-horizontal;
