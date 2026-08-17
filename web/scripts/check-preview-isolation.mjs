@@ -13,6 +13,9 @@ const FORBIDDEN_MARKERS = [
   "print-preview.html",
   "/print-preview.html",
   "PRINT_PREVIEW_FIXTURE_V1",
+  "excel-preview.html",
+  "/excel-preview.html",
+  "SCHEDULE_WORKBOOK_PREVIEW_V1",
 ];
 
 async function filesBelow(directory) {

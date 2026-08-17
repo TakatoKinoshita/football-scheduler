@@ -12,11 +12,14 @@ export interface PrintPreviewScheduleRow {
   matchId: string;
   displayNumber: string;
   sectionNo: number;
+  startTimeLabel: string;
   timeLabel: string;
+  courtId: string;
   courtName: string;
   homeLabel: string;
   awayLabel: string;
   refereeLabel: string;
+  categoryLabel: string;
 }
 
 export interface PrintPreviewCourtSchedule {
@@ -73,6 +76,7 @@ export interface PrintPreviewModel {
   groups: readonly PrintPreviewGroupModel[];
   scheduleHeading: string;
   courtSchedules: readonly PrintPreviewCourtSchedule[];
+  scheduleRows: readonly PrintPreviewScheduleRow[];
   participantSchedules: readonly PrintPreviewParticipantSchedule[];
   tournamentPools: readonly PrintPreviewTournamentPoolModel[];
   tournamentResults: readonly JsonObject[];
@@ -183,6 +187,20 @@ function validateFixture(fixture: PrintPreviewFixture): void {
   for (const match of fixture.matches) {
     assertParticipant(match.home, teamIds, matchIds, `試合「${match.id}」のホーム`);
     assertParticipant(match.away, teamIds, matchIds, `試合「${match.id}」のアウェー`);
+  }
+  for (const route of fixture.routes ?? []) {
+    assertParticipant(route.participant, teamIds, matchIds, "チーム別予定");
+    if (route.resolvedTeamId !== undefined && !teamIds.has(route.resolvedTeamId)) {
+      throw new PrintPreviewFixtureError(
+        `チーム別予定が未知のチーム「${route.resolvedTeamId}」を参照しています。`,
+      );
+    }
+    if (!matchIds.has(route.match_id) || !courtIds.has(route.court_id)) {
+      throw new PrintPreviewFixtureError("チーム別予定が未知の試合またはコートを参照しています。");
+    }
+    if (!Number.isInteger(route.section_no) || route.section_no < 1) {
+      throw new PrintPreviewFixtureError("チーム別予定のセクション番号が不正です。");
+    }
   }
   const scheduled = new Map<string, number>();
   for (const slot of fixture.slots) {
@@ -305,11 +323,20 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
       matchId: row.matchId,
       displayNumber: row.displayNumber,
       sectionNo: row.sectionNo,
+      startTimeLabel: row.startTime ?? row.timeLabel,
       timeLabel: row.timeLabel,
+      courtId: row.courtId,
       courtName: row.courtName,
       homeLabel: participantLabel(match.home, teamNames, presentation.displayNumberByMatchId),
       awayLabel: participantLabel(match.away, teamNames, presentation.displayNumberByMatchId),
       refereeLabel: refereeLabel(row.slot, teamNames, presentation.displayNumberByMatchId),
+      categoryLabel: match.category ?? (
+        fixture.scope === "day1-league"
+          ? "リーグ戦"
+          : fixture.scope === "day2-same-rank"
+            ? "同順位リーグ"
+            : "順位決定トーナメント"
+      ),
     };
   });
   const rowByMatchId = new Map(allRows.map((row) => [row.matchId, row]));
@@ -389,6 +416,7 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
     })),
     scheduleHeading: fixture.scope === "day1-league" ? "1日目の日程表" : "2日目の日程表",
     courtSchedules,
+    scheduleRows: allRows,
     participantSchedules: fixture.scope === "day2-tournament"
       ? []
       : participantSchedules(fixture, matchById, allRows),

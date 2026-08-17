@@ -21,6 +21,7 @@ export interface PrintPreviewMatch {
   id: string;
   home: PrintParticipant;
   away: PrintParticipant;
+  category?: string;
 }
 
 export interface PrintPreviewSlot {
@@ -34,6 +35,15 @@ export interface PrintPreviewGroup {
   id: string;
   name: string;
   members: readonly PrintParticipant[];
+}
+
+export interface PrintPreviewRoute {
+  participant: PrintParticipant;
+  resolvedTeamId?: string;
+  role: "match" | "referee";
+  match_id: string;
+  section_no: number;
+  court_id: string;
 }
 
 export interface PrintPreviewFixture {
@@ -58,6 +68,7 @@ export interface PrintPreviewFixture {
   groups: readonly PrintPreviewGroup[];
   matches: readonly PrintPreviewMatch[];
   slots: readonly PrintPreviewSlot[];
+  routes?: readonly PrintPreviewRoute[];
   tournamentPlan?: JsonObject;
   tournamentResults?: readonly JsonObject[];
   finalStandings?: JsonObject;

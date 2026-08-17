@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "preview:brackets": "node scripts/render-tournament-bracket-previews.mjs",
     "preview:print": "node scripts/render-print-preview-pdfs.mjs",
+    "preview:excel": "node scripts/render-schedule-workbooks.mjs",
     "preview:results": "node scripts/render-tournament-results-previews.mjs",
     "check:preview-isolation": "node scripts/check-preview-isolation.mjs",
     "test": "vitest run",
@@ -22,7 +23,9 @@
     "@playwright/test": "1.62.1",
     "@types/node": "^22.14.0",
     "fake-indexeddb": "^6.0.1",
+    "fflate": "^0.8.2",
     "jsdom": "^26.1.0",
+    "read-excel-file": "^9.3.10",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
     "vite-plugin-pwa": "^1.0.0",
@@ -31,5 +34,8 @@
   },
   "overrides": {
     "undici": "7.29.0"
+  },
+  "dependencies": {
+    "write-excel-file": "^4.1.1"
   }
 }
