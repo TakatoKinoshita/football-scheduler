@@ -50,10 +50,17 @@ export interface PrintPreviewFixture {
     margin_minutes: number;
     breaks: readonly { after_section: number; duration_minutes: number }[];
   };
+  sectionTimings?: readonly {
+    section_no: number;
+    start_time: string | null;
+    match_end: string | null;
+  }[];
   groups: readonly PrintPreviewGroup[];
   matches: readonly PrintPreviewMatch[];
   slots: readonly PrintPreviewSlot[];
   tournamentPlan?: JsonObject;
+  tournamentResults?: readonly JsonObject[];
+  finalStandings?: JsonObject;
   participantResolution: "provisional" | "resolved";
 }
 

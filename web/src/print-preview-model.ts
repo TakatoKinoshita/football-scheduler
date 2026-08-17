@@ -75,6 +75,8 @@ export interface PrintPreviewModel {
   courtSchedules: readonly PrintPreviewCourtSchedule[];
   participantSchedules: readonly PrintPreviewParticipantSchedule[];
   tournamentPools: readonly PrintPreviewTournamentPoolModel[];
+  tournamentResults: readonly JsonObject[];
+  finalStandings?: JsonObject;
   leagueOverview?: PrintPreviewLeagueOverview;
   tournamentOverview?: PrintPreviewTournamentOverview;
   teamNames: ReadonlyMap<string, string>;
@@ -160,14 +162,11 @@ function assertParticipant(
 }
 
 function validateFixture(fixture: PrintPreviewFixture): void {
-  if (fixture.teams.length !== 16 && fixture.teams.length !== 32) {
-    throw new PrintPreviewFixtureError("印刷fixtureのチーム数は16または32である必要があります。");
+  if (fixture.teams.length < 2 || fixture.teams.length > 32) {
+    throw new PrintPreviewFixtureError("印刷対象のチーム数は2から32である必要があります。");
   }
-  const expectedCourtCount = fixture.teams.length === 16 ? 3 : 4;
-  if (fixture.courts.length !== expectedCourtCount) {
-    throw new PrintPreviewFixtureError(
-      `${String(fixture.teams.length)}チーム印刷fixtureのコート数は${String(expectedCourtCount)}である必要があります。`,
-    );
+  if (fixture.courts.length < 1) {
+    throw new PrintPreviewFixtureError("印刷対象にコートがありません。");
   }
   const teamIds = new Set(fixture.teams.map((team) => team.id));
   const courtIds = new Set(fixture.courts.map((court) => court.id));
@@ -212,20 +211,18 @@ function validateFixture(fixture: PrintPreviewFixture): void {
       throw new PrintPreviewFixtureError(`試合「${match.id}」が日程に1回だけ配置されていません。`);
     }
   }
-  const expectedGroupCount = fixture.scope === "day1-league"
-    ? fixture.teams.length / 4
-    : fixture.scope === "day2-same-rank" ? 4 : 0;
-  if (fixture.groups.length !== expectedGroupCount) {
-    throw new PrintPreviewFixtureError(
-      `印刷fixtureのグループ数は${String(expectedGroupCount)}である必要があります。`,
-    );
+  if (fixture.scope !== "day2-tournament" && fixture.groups.length === 0) {
+    throw new PrintPreviewFixtureError("印刷対象のリーグにグループがありません。");
+  }
+  if (fixture.scope === "day2-tournament" && fixture.groups.length !== 0) {
+    throw new PrintPreviewFixtureError("トーナメント印刷対象にリーググループが混在しています。");
   }
   if (fixture.scope === "day2-tournament") {
     if (fixture.tournamentPlan === undefined) {
       throw new PrintPreviewFixtureError("トーナメント印刷fixtureに組合せがありません。");
     }
-    if (placementTournamentPools(fixture.tournamentPlan).length !== 2) {
-      throw new PrintPreviewFixtureError("トーナメント印刷fixtureは2つの順位帯を必要とします。");
+    if (placementTournamentPools(fixture.tournamentPlan).length === 0) {
+      throw new PrintPreviewFixtureError("トーナメント印刷対象に順位帯がありません。");
     }
   }
 }
@@ -294,7 +291,7 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
       dayId: fixture.scope === "day1-league" ? "day1" : "day2",
       courts: fixture.courts,
       slots: fixture.slots,
-      sectionTimings: [],
+      sectionTimings: fixture.sectionTimings ?? [],
       daySettings: fixture.daySettings,
     });
   } catch (error) {
@@ -325,12 +322,22 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
   if (Number.isNaN(savedAt.valueOf())) {
     throw new PrintPreviewFixtureError("印刷fixtureの保存日時が不正です。");
   }
+  let legacyOverallRankStart = 1;
   const tournamentPools = fixture.tournamentPlan === undefined
     ? []
     : placementTournamentPools(fixture.tournamentPlan).map((pool) => {
-        const range = Array.isArray(pool.data.overall_rank_range)
+        const participantCount = Number(pool.data.participant_count ?? 0);
+        const configuredRange = Array.isArray(pool.data.overall_rank_range)
           ? pool.data.overall_rank_range
           : [];
+        const range = configuredRange.length === 2
+          ? configuredRange
+          : pool.legacyField !== undefined && Number.isInteger(participantCount) && participantCount > 0
+            ? [legacyOverallRankStart, legacyOverallRankStart + participantCount - 1]
+            : [];
+        if (pool.legacyField !== undefined && Number.isInteger(participantCount) && participantCount > 0) {
+          legacyOverallRankStart += participantCount;
+        }
         const rankRangeLabel = range.length === 2
           ? `総合${String(range[0])}〜${String(range[1])}位`
           : "総合順位帯未設定";
@@ -356,7 +363,7 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
           name: pool.displayName,
           heading: `${pool.displayName}表`,
           rankRangeLabel,
-          participantCount: Number(pool.data.participant_count ?? participantEntries.length),
+          participantCount: participantCount > 0 ? participantCount : participantEntries.length,
           participantEntries,
           plan: fixture.tournamentPlan!,
         };
@@ -386,6 +393,8 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
       ? []
       : participantSchedules(fixture, matchById, allRows),
     tournamentPools,
+    tournamentResults: fixture.tournamentResults ?? [],
+    ...(fixture.finalStandings === undefined ? {} : { finalStandings: fixture.finalStandings }),
     ...(fixture.scope !== "day2-tournament"
       ? {
           leagueOverview: {

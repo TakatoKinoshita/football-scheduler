@@ -97,12 +97,23 @@ test("1日目は時間順を既定にし、コート別への切替を再読込�
   await expect(resultMatch.locator("td").nth(2)).toHaveText("Aコート");
   await expect(page.getByLabel("青空FC 対 みどりSC・青空FCの得点")).toHaveCount(1);
 
+  await page.evaluate(() => {
+    window.print = () => {
+      document.body.dataset.printInvoked = "true";
+    };
+  });
+  await page.getByRole("button", { name: "1日目を印刷" }).click();
   await page.emulateMedia({ media: "print" });
   await expect(toggle).toBeHidden();
-  await expect(teamDisclosure.locator(".team-schedule-grid")).toBeVisible();
-  await expect(page.locator('#result-content [data-schedule-view="court"]')).toBeVisible();
-  await expect(page.locator('#result-content [data-schedule-view="time"]')).toBeHidden();
+  await expect(page.locator("#production-print-host [data-print-section='team-schedules']"))
+    .toBeVisible();
+  await expect(page.locator("#production-print-host [data-print-court]")).toHaveCount(2);
+  await expect(page.locator("#production-print-host [data-print-section='schedule']"))
+    .toContainText("Aコート");
   await page.emulateMedia({ media: "screen" });
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await expect(blockDisclosure).toHaveAttribute("open", "");
+  await expect(teamDisclosure).not.toHaveAttribute("open", "");
 
   await expect(page.locator("#save-state")).toContainText("この端末に保存済み");
   await page.evaluate(async () => navigator.serviceWorker.ready);
@@ -402,7 +413,7 @@ test("決勝が最終でない新しいAPI応答を保存しない", async ({ pa
   await expect(page.locator("#day2-schedule-view")).toHaveCount(0);
 });
 
-test("標準ブラケットだけを順位帯ごとのA4横ページとして印刷できる", async ({ page }) => {
+test("トーナメント表だけを採用レイアウトで順位帯ごとの専用ページへ印刷できる", async ({ page }) => {
   await openScheduleViewFixture(page);
   await page.evaluate(() => {
     window.print = () => {
@@ -417,19 +428,21 @@ test("標準ブラケットだけを順位帯ごとのA4横ページとして印
 
   await page.emulateMedia({ media: "print" });
   await expect(page.locator("#day1-results-panel")).toBeHidden();
-  await expect(page.locator("#day2-results-panel")).toBeVisible();
-  await expect(page.locator("#tournament-plan-view .tournament-pool")).toHaveCount(2);
-  await expect(page.locator("#tournament-plan-view .tournament-bracket")).toHaveCount(2);
-  await expect(page.locator("#tournament-plan-view .tournament-bracket-sheet")).toHaveCount(2);
-  await expect(page.locator("#tournament-plan-view .seed-list")).toHaveCount(0);
+  await expect(page.locator("#day2-results-panel")).toBeHidden();
+  const printHost = page.locator("#production-print-host");
+  await expect(printHost).toBeVisible();
+  await expect(printHost.locator(".print-tournament-pool")).toHaveCount(2);
+  await expect(printHost.locator(".tournament-bracket")).toHaveCount(2);
+  await expect(printHost.locator(".tournament-bracket-sheet")).toHaveCount(2);
+  await expect(printHost.locator(".seed-list")).toHaveCount(0);
   await expect(page.locator("#day2-schedule-view")).toBeHidden();
   const printVisibility = await page
-    .locator("#tournament-plan-view .tournament-bracket-sheet")
+    .locator("#production-print-host .print-tournament-pool")
     .evaluateAll((sheets) => sheets.map((sheet) => ({
       page: getComputedStyle(sheet).page,
-      breakAfter: getComputedStyle(sheet).breakAfter,
+      breakInside: getComputedStyle(sheet).breakInside,
     })));
-  expect(printVisibility.every((style) => style.page === "bracket")).toBe(true);
+  expect(printVisibility.every((style) => style.breakInside === "avoid")).toBe(true);
 });
 
 test("mirroredな8チームは上下とも本番水平版となり、A4縦と局所スクロールを使う", async ({

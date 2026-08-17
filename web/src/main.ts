@@ -54,6 +54,12 @@ import {
 } from "./day2-finals";
 import { setupPwaUpdates } from "./pwa-update";
 import {
+  buildProductionPrintModel,
+  ProductionPrintError,
+  type ProductionPrintScope,
+} from "./print-document-model";
+import { renderPrintPreview } from "./print-preview-renderer";
+import {
   buildSchedulePresentation,
   loadScheduleViewMode,
   saveScheduleViewMode,
@@ -135,6 +141,7 @@ import {
 } from "./types";
 import { guideToInvalidField } from "./validation-guidance";
 import "./style.css";
+import "./print-preview.css";
 
 declare global {
   interface Window {
@@ -421,6 +428,7 @@ root.innerHTML = `
         </div>
         <button id="print" class="secondary no-print" type="button" disabled>1日目を印刷</button>
       </div>
+      <p id="day1-print-status" class="status-message no-print" role="status" aria-live="polite"></p>
       <div id="result-content" class="result-content empty">
         日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。
       </div>
@@ -455,6 +463,7 @@ root.innerHTML = `
           <button id="print-bracket" class="secondary" type="button" disabled hidden>トーナメント表だけ印刷</button>
         </div>
       </div>
+      <p id="day2-print-status" class="status-message no-print" role="status" aria-live="polite"></p>
       <div id="day2-result-content" class="result-content empty">
         日程を生成すると、決勝計画、日程表、チーム別予定をここで確認できます。
       </div>
@@ -488,6 +497,7 @@ root.innerHTML = `
     </section>
   </main>
   <footer class="no-print">大会データはこの端末だけに保存されます。定期的にファイルへ保存してください。</footer>
+  <div id="production-print-host" class="production-print-host" aria-hidden="true"></div>
 `;
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
@@ -745,6 +755,9 @@ const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
 const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
 const bracketPrintButton = requiredElement<HTMLButtonElement>("#print-bracket");
+const day1PrintStatus = requiredElement<HTMLElement>("#day1-print-status");
+const day2PrintStatus = requiredElement<HTMLElement>("#day2-print-status");
+const productionPrintHost = requiredElement<HTMLElement>("#production-print-host");
 const tournamentBracketVisible = true;
 const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
 const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmation");
@@ -4025,40 +4038,74 @@ generateButton.addEventListener("click", () => {
     });
 });
 
-printButton.addEventListener("click", () => {
-  document.body.dataset.printScope = "day1";
-  window.print();
-});
-day2PrintButton.addEventListener("click", () => {
-  document.body.dataset.printScope = "day2";
-  window.print();
-});
-bracketPrintButton.addEventListener("click", () => {
-  document.body.dataset.printScope = "bracket";
-  window.print();
-});
-const printOpenedDisclosures = new Set<HTMLDetailsElement>();
-function expandResultDisclosuresForPrint(): void {
-  for (const details of document.querySelectorAll<HTMLDetailsElement>(".result-disclosure")) {
-    if (details.open) continue;
-    details.open = true;
-    printOpenedDisclosures.add(details);
+let requestedPrintScope: ProductionPrintScope | undefined;
+let printFocusTarget: HTMLElement | null = null;
+
+function defaultPrintScope(): ProductionPrintScope | undefined {
+  if (currentStep === 3) return "day1";
+  if (currentStep === 4) return "day2";
+  return undefined;
+}
+
+function printStatus(scope: ProductionPrintScope): HTMLElement {
+  return scope === "day1" ? day1PrintStatus : day2PrintStatus;
+}
+
+function prepareProductionPrint(scope: ProductionPrintScope): void {
+  const model = buildProductionPrintModel(documentState, scope);
+  productionPrintHost.replaceChildren(
+    renderPrintPreview(model, scope === "bracket" ? "bracket-only" : "full"),
+  );
+  productionPrintHost.setAttribute("aria-hidden", "false");
+  document.body.dataset.printScope = scope;
+  document.body.dataset.productionPrintReady = "true";
+  printStatus(scope).textContent = "";
+}
+
+function restoreAfterProductionPrint(): void {
+  productionPrintHost.replaceChildren();
+  productionPrintHost.setAttribute("aria-hidden", "true");
+  delete document.body.dataset.productionPrintReady;
+  delete document.body.dataset.printScope;
+  requestedPrintScope = undefined;
+  const target = printFocusTarget;
+  printFocusTarget = null;
+  if (target?.isConnected === true) target.focus({ preventScroll: true });
+}
+
+function invokeProductionPrint(scope: ProductionPrintScope): void {
+  requestedPrintScope = scope;
+  printFocusTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  try {
+    prepareProductionPrint(scope);
+    window.print();
+  } catch (error) {
+    restoreAfterProductionPrint();
+    printStatus(scope).textContent = error instanceof ProductionPrintError
+      ? `印刷用データを準備できませんでした。${error.message}`
+      : "印刷用データを準備できませんでした。画面を再読み込みしてください。";
   }
 }
-function restoreResultDisclosuresAfterPrint(): void {
-  for (const details of printOpenedDisclosures) details.open = false;
-  printOpenedDisclosures.clear();
-}
-const printMedia = window.matchMedia("print");
-printMedia.addEventListener("change", (event) => {
-  if (event.matches) expandResultDisclosuresForPrint();
-  else restoreResultDisclosuresAfterPrint();
+
+printButton.addEventListener("click", () => invokeProductionPrint("day1"));
+day2PrintButton.addEventListener("click", () => invokeProductionPrint("day2"));
+bracketPrintButton.addEventListener("click", () => invokeProductionPrint("bracket"));
+window.addEventListener("beforeprint", () => {
+  const scope = requestedPrintScope ?? defaultPrintScope();
+  if (scope === undefined) return;
+  if (printFocusTarget === null && document.activeElement instanceof HTMLElement) {
+    printFocusTarget = document.activeElement;
+  }
+  try {
+    prepareProductionPrint(scope);
+  } catch (error) {
+    restoreAfterProductionPrint();
+    printStatus(scope).textContent = error instanceof ProductionPrintError
+      ? `印刷用データを準備できませんでした。${error.message}`
+      : "印刷用データを準備できませんでした。画面を再読み込みしてください。";
+  }
 });
-window.addEventListener("beforeprint", expandResultDisclosuresForPrint);
-window.addEventListener("afterprint", () => {
-  restoreResultDisclosuresAfterPrint();
-  delete document.body.dataset.printScope;
-});
+window.addEventListener("afterprint", restoreAfterProductionPrint);
 standingsButton.addEventListener("click", requestLeagueStandings);
 tournamentResultsButton.addEventListener("click", requestTournamentStandings);
 for (const control of [

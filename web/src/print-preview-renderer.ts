@@ -99,6 +99,8 @@ function renderTournamentPools(model: PrintPreviewModel): HTMLElement[] {
       pool: pool.poolId,
       teamNames: model.teamNames,
       scheduleByMatchId: model.scheduleByMatchId,
+      results: model.tournamentResults,
+      ...(model.finalStandings === undefined ? {} : { finalStandings: model.finalStandings }),
     };
     const selection = selectTournamentBracketPresentation(input, "horizontal");
     const bracket = buildTournamentBracketModel(input, selection.presentation.layout);
@@ -178,12 +180,21 @@ function renderLeagueOverview(model: PrintPreviewModel): HTMLElement {
   return section;
 }
 
-export function renderPrintPreview(model: PrintPreviewModel): HTMLElement {
+export function renderPrintPreview(
+  model: PrintPreviewModel,
+  mode: "full" | "bracket-only" = "full",
+): HTMLElement {
   const main = element("main", undefined, "print-document");
   main.id = "print-preview-output";
   main.dataset.fixtureId = model.fixtureId;
   main.dataset.printScope = model.scope;
   main.dataset.participantResolution = model.participantResolution;
+  main.dataset.printMode = mode;
+  if (mode === "bracket-only") {
+    main.classList.add("print-bracket-only");
+    main.append(...renderTournamentPools(model));
+    return main;
+  }
   main.append(renderMetadata(model));
   if (model.scope === "day2-tournament") {
     main.append(renderTournamentOverview(model), ...renderTournamentPools(model), renderSchedule(model));
