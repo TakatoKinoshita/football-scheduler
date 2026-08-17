@@ -3,6 +3,7 @@ import {
   type PrintPreviewFixture,
   type PrintPreviewGroup,
   type PrintPreviewMatch,
+  type PrintPreviewRoute,
   type PrintPreviewSlot,
   type PrintReferee,
 } from "./print-preview-fixtures";
@@ -211,6 +212,7 @@ function matches(
   values: readonly JsonObject[],
   resolution: "provisional" | "resolved",
   teamsByRank: ReadonlyMap<string, string>,
+  category: (match: JsonObject) => string,
 ): PrintPreviewMatch[] {
   return values.map((match) => {
     if (typeof match.id !== "string") {
@@ -220,6 +222,31 @@ function matches(
       id: match.id,
       home: matchParticipant(match, "home", resolution, teamsByRank),
       away: matchParticipant(match, "away", resolution, teamsByRank),
+      category: category(match),
+    };
+  });
+}
+
+function scheduledRoutes(schedule: JsonObject): PrintPreviewRoute[] {
+  return objects(schedule.team_schedules).map((route) => {
+    const source = participant(route.rank_ref);
+    if (
+      source === undefined
+      || (route.role !== "match" && route.role !== "referee")
+      || typeof route.match_id !== "string"
+      || !Number.isInteger(route.section_no)
+      || Number(route.section_no) < 1
+      || typeof route.court_id !== "string"
+    ) {
+      throw new ProductionPrintError("チーム別予定を読み取れません。");
+    }
+    return {
+      participant: source,
+      ...(typeof route.team_id === "string" ? { resolvedTeamId: route.team_id } : {}),
+      role: route.role,
+      match_id: route.match_id,
+      section_no: Number(route.section_no),
+      court_id: route.court_id,
     };
   });
 }
@@ -250,7 +277,12 @@ function day1Fixture(document: TournamentDocument, input: JsonObject, result: Js
     daySettings: daySettings(input, "day"),
     sectionTimings: sectionTimings(result),
     groups,
-    matches: matches(objects(plan.matches), "resolved", new Map()),
+    matches: matches(
+      objects(plan.matches),
+      "resolved",
+      new Map(),
+      (match) => typeof match.block_id === "string" ? `${match.block_id}ブロック` : "リーグ戦",
+    ),
     slots: scheduledSlots(result, "resolved", new Map()),
     participantResolution: "resolved",
   };
@@ -279,6 +311,10 @@ function sameRankFixture(
     }),
   }));
   const sourceMatches = objects(schedule.same_rank_matches);
+  const groupNames = new Map(objects(plan.groups).map((group, index) => [
+    typeof group.id === "string" ? group.id : `same-rank-${String(index + 1)}`,
+    typeof group.display_name === "string" ? group.display_name : `${String(index + 1)}位グループ`,
+  ]));
   return {
     id: "saved-day2-same-rank",
     description: "保存済み大会の2日目同順位リーグ",
@@ -294,8 +330,12 @@ function sameRankFixture(
       sourceMatches.length > 0 ? sourceMatches : objects(plan.groups).flatMap((group) => objects(group.matches)),
       resolution,
       teamsByRank,
+      (match) => typeof match.group_id === "string"
+        ? (groupNames.get(match.group_id) ?? match.group_id)
+        : "同順位リーグ",
     ),
     slots: scheduledSlots(schedule, resolution, teamsByRank),
+    routes: scheduledRoutes(schedule),
     participantResolution: resolution,
   };
 }
@@ -311,6 +351,9 @@ function tournamentFixture(
   const teamsByRank = rankedTeams(result);
   const scheduledMatches = objects(schedule.tournament_matches);
   const planMatches = placementTournamentPools(plan).flatMap((pool) => objects(pool.data.matches));
+  const poolNames = new Map(
+    placementTournamentPools(plan).map((pool) => [pool.poolId, pool.displayName]),
+  );
   return {
     id: "saved-day2-tournament",
     description: "保存済み大会の2日目順位決定トーナメント",
@@ -322,8 +365,16 @@ function tournamentFixture(
     daySettings: daySettings(input, "day2"),
     sectionTimings: sectionTimings(schedule),
     groups: [],
-    matches: matches(scheduledMatches.length > 0 ? scheduledMatches : planMatches, resolution, teamsByRank),
+    matches: matches(
+      scheduledMatches.length > 0 ? scheduledMatches : planMatches,
+      resolution,
+      teamsByRank,
+      (match) => typeof match.pool_id === "string"
+        ? (poolNames.get(match.pool_id) ?? match.pool_id)
+        : "順位決定トーナメント",
+    ),
     slots: scheduledSlots(schedule, resolution, teamsByRank),
+    routes: scheduledRoutes(schedule),
     tournamentPlan: plan,
     tournamentResults: objects(result.tournament_results),
     ...(object(result.final_standings) === undefined
@@ -333,16 +384,16 @@ function tournamentFixture(
   };
 }
 
-export function buildProductionPrintModel(
+export function buildProductionPrintFixture(
   document: TournamentDocument,
   scope: ProductionPrintScope,
-): PrintPreviewModel {
+): PrintPreviewFixture {
   const input = object(document.tournament.input);
   const result = object(document.tournament.result);
   if (input === undefined || result === undefined) {
     throw new ProductionPrintError("印刷できる保存済み日程がありません。");
   }
-  if (scope === "day1") return buildPrintPreviewModel(day1Fixture(document, input, result));
+  if (scope === "day1") return day1Fixture(document, input, result);
   const schedule = object(result.day2_schedule);
   if (schedule === undefined) throw new ProductionPrintError("印刷できる2日目日程がありません。");
   const sameRankPlan = object(result.same_rank_plan);
@@ -350,13 +401,18 @@ export function buildProductionPrintModel(
     if (scope === "bracket") {
       throw new ProductionPrintError("同順位リーグにはトーナメント表がありません。");
     }
-    return buildPrintPreviewModel(sameRankFixture(document, input, result, sameRankPlan, schedule));
+    return sameRankFixture(document, input, result, sameRankPlan, schedule);
   }
   const tournamentPlan = object(result.tournament_plan);
   if (tournamentPlan === undefined) {
     throw new ProductionPrintError("印刷できる2日目の組合せがありません。");
   }
-  return buildPrintPreviewModel(
-    tournamentFixture(document, input, result, tournamentPlan, schedule),
-  );
+  return tournamentFixture(document, input, result, tournamentPlan, schedule);
+}
+
+export function buildProductionPrintModel(
+  document: TournamentDocument,
+  scope: ProductionPrintScope,
+): PrintPreviewModel {
+  return buildPrintPreviewModel(buildProductionPrintFixture(document, scope));
 }

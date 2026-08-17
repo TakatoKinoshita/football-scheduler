@@ -268,6 +268,29 @@ URLとfixture markerの非混入も検査する。PDFはロケール`ja-JP`、�
 固定余白で生成し、fixture内の保存日時も固定している。タブ3・4の本番印刷ボタンも同じ表示モデルと
 印刷専用DOMを使用し、保存済み大会からオフラインで構築する。
 
+## 日程Excel workbookのローカル確認
+
+本番画面、IndexedDB、API、Turnstileへ接続せず、schema `0.2.0`の保存済み大会fixtureから
+時間順日程表、コート別日程表、チーム別予定の3sheetだけを持つ`.xlsx`を一括生成できる。
+
+```console
+cd web
+npm run preview:excel
+```
+
+出力先は実行ごとに作られる`/tmp/football-scheduler-excel-previews-*`で、生成した3ファイルの
+絶対パスを標準出力へ表示する。対象または出力先を限定する場合は次のように指定する。
+
+```console
+npm run preview:excel -- --fixture day2-same-rank
+npm run preview:excel -- --output-dir /tmp/football-scheduler-excel-review
+```
+
+ブラウザでは`npm run dev`のoriginで`/excel-preview.html`を開き、1日目リーグ、2日目同順位リーグ、
+2日目順位決定トーナメントのversion管理されたfixtureを切り替えられる。このページは本番build
+entryとService Workerの対象外である。workbook生成はDOMやIndexedDBに依存せず、利用者入力を
+数式、macro、外部linkとして出力しない。
+
 ## 固定fixtureの実行
 
 小さい疎通確認用fixtureは、次のように実行します。

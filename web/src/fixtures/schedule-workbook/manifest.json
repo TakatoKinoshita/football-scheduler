@@ -1,0 +1,23 @@
+{
+  "fixtureVersion": "1.0.0",
+  "fixtures": [
+    {
+      "id": "day1-league",
+      "description": "保存済み8チーム大会の1日目リーグ日程",
+      "scope": "day1",
+      "source": "issue75-eight-team-document"
+    },
+    {
+      "id": "day2-same-rank",
+      "description": "保存済み仮同順位リーグの2日目日程",
+      "scope": "day2",
+      "source": "python-same-rank-document"
+    },
+    {
+      "id": "day2-tournament",
+      "description": "保存済み8チーム大会の2日目順位決定トーナメント日程",
+      "scope": "day2",
+      "source": "issue75-eight-team-document"
+    }
+  ]
+}
