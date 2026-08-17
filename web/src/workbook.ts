@@ -2,6 +2,7 @@ export const XLSX_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export interface WorkbookCellStyle {
+  fontSize?: number;
   fontWeight?: "bold";
   textColor?: string;
   backgroundColor?: string;
@@ -18,6 +19,7 @@ export interface WorkbookCellStyle {
   align?: "left" | "center" | "right";
   alignVertical?: "top" | "center" | "bottom";
   wrap?: boolean;
+  height?: number;
   columnSpan?: number;
 }
 
@@ -30,6 +32,16 @@ export interface WorkbookSheet {
   name: string;
   columns: readonly { width: number }[];
   rows: readonly (readonly WorkbookCell[])[];
+  orientation?: "landscape";
+  stickyRowsCount?: number;
+  stickyColumnsCount?: number;
+  zoomScale?: number;
+  print?: {
+    fitToWidth?: number;
+    fitToHeight?: number;
+    repeatRows?: readonly [number, number];
+    repeatColumns?: readonly [number, number];
+  };
 }
 
 export interface WorkbookFile {

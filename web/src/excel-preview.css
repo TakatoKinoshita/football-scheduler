@@ -21,3 +21,93 @@
 .excel-preview-panel select { max-width: 100%; }
 .excel-preview-file { padding: 0.75rem; background: #edf6f2; overflow-wrap: anywhere; }
 .excel-preview-error:not(:empty) { color: #8c1d18; }
+
+.excel-preview-workbook {
+  display: grid;
+  gap: 2rem;
+  max-width: 1600px;
+  margin: 2rem auto 0;
+}
+
+.excel-preview-sheet {
+  box-sizing: border-box;
+  overflow-x: auto;
+  padding: 1.25rem;
+  border: 1px solid #bdccc5;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 8px 30px rgb(23 79 63 / 10%);
+}
+
+.excel-preview-sheet-title {
+  margin: 0 0 0.75rem;
+  color: #174f3f;
+  font-size: 1rem;
+}
+
+.excel-preview-sheet table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: #17211e;
+  font: 10pt "Yu Gothic", "Noto Sans JP", sans-serif;
+}
+
+.excel-preview-sheet td {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0.28rem 0.2rem;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.excel-preview-sheet .excel-preview-blank-row {
+  padding: 0;
+  border: 0;
+}
+
+@page {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+@media print {
+  .excel-preview-body {
+    min-height: auto;
+    padding: 0;
+    background: #fff;
+  }
+
+  .excel-preview-panel { display: none; }
+
+  .excel-preview-workbook {
+    display: block;
+    max-width: none;
+    margin: 0;
+  }
+
+  .excel-preview-sheet {
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    break-after: page;
+  }
+
+  .excel-preview-sheet:last-child { break-after: auto; }
+  .excel-preview-sheet-title { display: none; }
+
+  .excel-preview-sheet table {
+    min-width: 0;
+    font-size: 8pt;
+  }
+
+  .excel-preview-sheet[data-column-count="26"] table { font-size: 6.2pt; }
+
+  .excel-preview-sheet td {
+    padding: 0.8mm 0.45mm;
+    break-inside: avoid;
+  }
+}

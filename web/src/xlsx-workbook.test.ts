@@ -72,6 +72,7 @@ describe("ブラウザ内xlsx生成", () => {
       .join("\n");
     expect(worksheetXml).not.toMatch(/<f(?:\s|>)/u);
     expect(worksheetXml).not.toContain("<hyperlink");
+
   });
 
   it("ブロック別リーグ結果を1ブロック1sheetで再読込みし、数値型と安全な文字列を保持する", async () => {
@@ -82,11 +83,12 @@ describe("ブラウザ内xlsx生成", () => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     const sheets = await readXlsxFile(Buffer.from(bytes));
     expect(sheets.map((sheet) => sheet.sheet)).toEqual(["東地区_予選", "東地区_予選 (2)"]);
-    expect(sheets[0]?.data[4]?.slice(0, 5)).toEqual([
+    expect(sheets[0]?.data[4]?.every((value) => value === null)).toBe(true);
+    expect(sheets[0]?.data[5]?.slice(0, 5)).toEqual([
       "チーム", expect.stringContaining("=先頭記号"), "Aチーム2", "Aチーム3", "Aチーム4",
     ]);
-    expect(typeof sheets[0]?.data[5]?.[5]).toBe("number");
-    expect(sheets[0]?.data[5]?.[0]).toEqual(expect.stringContaining("=先頭記号"));
+    expect(typeof sheets[0]?.data[6]?.[5]).toBe("number");
+    expect(sheets[0]?.data[6]?.[0]).toEqual(expect.stringContaining("=先頭記号"));
 
     const files = unzipSync(bytes);
     const paths = Object.keys(files);
@@ -97,6 +99,26 @@ describe("ブラウザ内xlsx生成", () => {
       .join("\n");
     expect(worksheetXml).not.toMatch(/<f(?:\s|>)/u);
     expect(worksheetXml).not.toContain("<hyperlink");
+
+    const firstSheetXml = new TextDecoder().decode(files["xl/worksheets/sheet1.xml"]!);
+    expect(firstSheetXml).not.toContain("<pane");
+    expect(firstSheetXml).toContain('<pageSetUpPr fitToPage="1" autoPageBreaks="0"/>');
+    expect(firstSheetXml).toMatch(/<pageSetup\b[^>]*paperSize="9"/u);
+    expect(firstSheetXml).toMatch(/<pageSetup\b[^>]*orientation="landscape"/u);
+    expect(firstSheetXml).toMatch(/<pageSetup\b[^>]*fitToWidth="1"/u);
+    expect(firstSheetXml).toMatch(/<pageSetup\b[^>]*fitToHeight="0"/u);
+    expect(firstSheetXml).toMatch(/<row\b[^>]*r="6"[^>]*ht="42"[^>]*customHeight="1"/u);
+    expect(firstSheetXml).toContain('<mergeCell ref="B1:M1"/>');
+    expect(firstSheetXml).toContain('<mergeCell ref="B2:M2"/>');
+    expect(firstSheetXml).toContain('<mergeCell ref="B3:M3"/>');
+    expect(firstSheetXml).toContain('<mergeCell ref="A4:M4"/>');
+    const workbookXml = new TextDecoder().decode(files["xl/workbook.xml"]!);
+    expect(workbookXml).toContain(
+      '<definedName name="_xlnm.Print_Titles" localSheetId="0">\'東地区_予選\'!$6:$6,\'東地区_予選\'!$A:$A</definedName>',
+    );
+    expect(workbookXml).toContain(
+      '<definedName name="_xlnm.Print_Titles" localSheetId="1">\'東地区_予選 (2)\'!$6:$6,\'東地区_予選 (2)\'!$A:$A</definedName>',
+    );
   });
 
   it("最大規模相当の行数を実用時間内でBlobへ変換する", async () => {

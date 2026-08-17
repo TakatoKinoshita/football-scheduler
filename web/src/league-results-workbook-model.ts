@@ -15,20 +15,20 @@ const SCHEMA_VERSION = "0.2.0";
 const META_LABEL_STYLE: WorkbookCellStyle = {
   fontWeight: "bold",
   textColor: "#FFFFFF",
-  backgroundColor: "#174F3F",
-  borderColor: "#174F3F",
+  backgroundColor: "#3F3F3F",
+  borderColor: "#3F3F3F",
   borderStyle: "thin",
 };
 const META_VALUE_STYLE: WorkbookCellStyle = {
-  borderColor: "#AAB8B2",
+  borderColor: "#A6A6A6",
   borderStyle: "thin",
   wrap: true,
 };
 const HEADER_STYLE: WorkbookCellStyle = {
   fontWeight: "bold",
   textColor: "#FFFFFF",
-  backgroundColor: "#28705B",
-  borderColor: "#174F3F",
+  backgroundColor: "#4A4A4A",
+  borderColor: "#303030",
   borderStyle: "thin",
   align: "center",
   alignVertical: "center",
@@ -36,28 +36,65 @@ const HEADER_STYLE: WorkbookCellStyle = {
 };
 const TEAM_STYLE: WorkbookCellStyle = {
   fontWeight: "bold",
-  backgroundColor: "#DDECE6",
-  borderColor: "#AAB8B2",
+  backgroundColor: "#F2F2F2",
+  borderColor: "#B3B3B3",
   borderStyle: "thin",
   alignVertical: "center",
   wrap: true,
 };
+const MATRIX_HEADER_STYLE: WorkbookCellStyle = {
+  ...TEAM_STYLE,
+  backgroundColor: "#F2F2F2",
+  align: "center",
+};
+const MATRIX_ROW_HEADER_STYLE: WorkbookCellStyle = {
+  ...MATRIX_HEADER_STYLE,
+  align: "left",
+};
 const DATA_STYLE: WorkbookCellStyle = {
-  borderColor: "#AAB8B2",
+  borderColor: "#B3B3B3",
   borderStyle: "thin",
   align: "center",
   alignVertical: "center",
   wrap: true,
 };
+const AGGREGATE_START_STYLE: WorkbookCellStyle = {
+  ...DATA_STYLE,
+  leftBorderColor: "#4A4A4A",
+  leftBorderStyle: "medium",
+};
+const POINTS_STYLE: WorkbookCellStyle = {
+  ...DATA_STYLE,
+  fontWeight: "bold",
+  backgroundColor: "#F0F0F0",
+};
+const RANK_STYLE: WorkbookCellStyle = {
+  ...DATA_STYLE,
+  fontWeight: "bold",
+  backgroundColor: "#E2E2E2",
+  leftBorderColor: "#4A4A4A",
+  leftBorderStyle: "medium",
+  rightBorderColor: "#4A4A4A",
+  rightBorderStyle: "medium",
+};
 const SELF_STYLE: WorkbookCellStyle = {
   ...DATA_STYLE,
-  backgroundColor: "#E5E7E6",
-  textColor: "#67716D",
+  backgroundColor: "#D9D9D9",
+  textColor: "#666666",
+};
+const LEGEND_STYLE: WorkbookCellStyle = {
+  fontSize: 9,
+  backgroundColor: "#F5F5F5",
+  borderColor: "#B3B3B3",
+  borderStyle: "thin",
+  alignVertical: "center",
+  wrap: true,
+  height: 24,
 };
 const DRAW_TITLE_STYLE: WorkbookCellStyle = {
   fontWeight: "bold",
-  backgroundColor: "#DDECE6",
-  borderColor: "#AAB8B2",
+  backgroundColor: "#E6E6E6",
+  borderColor: "#B3B3B3",
   borderStyle: "thin",
 };
 
@@ -811,17 +848,28 @@ function metadataRows(
   tournamentName: string,
   blockName: string,
   savedAt: string,
+  tableColumnCount: number,
 ): WorkbookCell[][] {
+  const row = (label: string, value: string): WorkbookCell[] => [
+    textCell(label, META_LABEL_STYLE),
+    textCell(value, { ...META_VALUE_STYLE, columnSpan: tableColumnCount - 1 }),
+    ...Array.from({ length: tableColumnCount - 2 }, () => null),
+  ];
   return [
-    [textCell("大会名", META_LABEL_STYLE), textCell(tournamentName, META_VALUE_STYLE)],
-    [textCell("ブロック", META_LABEL_STYLE), textCell(blockName, META_VALUE_STYLE)],
-    [textCell("保存日時", META_LABEL_STYLE), textCell(savedAt, META_VALUE_STYLE)],
-    [],
+    row("大会名", tournamentName),
+    row("ブロック", blockName),
+    row("保存日時", savedAt),
+    [
+      textCell(
+        "見方：各対戦セルは行側チーム視点（○ 勝ち／△ 引分／● 敗け、— 自己対戦、空欄 未実施）",
+        { ...LEGEND_STYLE, columnSpan: tableColumnCount },
+      ),
+      ...Array.from({ length: tableColumnCount - 1 }, () => null),
+    ],
   ];
 }
 
 const AGGREGATE_HEADERS = [
-  "試合",
   "勝",
   "分",
   "敗",
@@ -830,63 +878,113 @@ const AGGREGATE_HEADERS = [
   "失点",
   "得失点差",
   "順位",
-  "順位決定根拠",
-  "直接対戦内勝点",
-  "直接対戦内得失点差",
-  "直接対戦内得点",
 ] as const;
 
 function headerRow(teamNames: readonly string[]): WorkbookCell[] {
-  return ["チーム", ...teamNames, ...AGGREGATE_HEADERS].map((label) =>
-    textCell(label, HEADER_STYLE)
-  );
+  const labels = ["チーム", ...teamNames, ...AGGREGATE_HEADERS];
+  const aggregateStart = teamNames.length + 1;
+  const rankColumn = labels.length - 1;
+  return labels.map((label, index) => textCell(label, {
+    ...(index < aggregateStart ? MATRIX_HEADER_STYLE : HEADER_STYLE),
+    height: 42,
+    ...(index === aggregateStart
+      ? { leftBorderColor: "#FFFFFF", leftBorderStyle: "medium" as const }
+      : {}),
+    ...(index === rankColumn
+      ? {
+          leftBorderColor: "#FFFFFF",
+          leftBorderStyle: "medium" as const,
+          rightBorderColor: "#FFFFFF",
+          rightBorderStyle: "medium" as const,
+        }
+      : {}),
+  }));
 }
 
 function standingCells(standing: Standing): WorkbookCell[] {
-  const headToHead = standing.headToHead;
   return [
-    standing.played,
-    standing.wins,
-    standing.draws,
-    standing.losses,
-    standing.points,
-    standing.goalsFor,
-    standing.goalsAgainst,
-    standing.goalDifference,
-    standing.rank,
-  ].map((value) => numberCell(value, DATA_STYLE)).concat([
-    textCell(standing.tieBreak, DATA_STYLE),
-    headToHead === null ? textCell("—", SELF_STYLE) : numberCell(headToHead.points, DATA_STYLE),
-    headToHead === null
-      ? textCell("—", SELF_STYLE)
-      : numberCell(headToHead.goalDifference, DATA_STYLE),
-    headToHead === null ? textCell("—", SELF_STYLE) : numberCell(headToHead.goalsFor, DATA_STYLE),
-  ]);
+    numberCell(standing.wins, AGGREGATE_START_STYLE),
+    numberCell(standing.draws, DATA_STYLE),
+    numberCell(standing.losses, DATA_STYLE),
+    numberCell(standing.points, POINTS_STYLE),
+    numberCell(standing.goalsFor, DATA_STYLE),
+    numberCell(standing.goalsAgainst, DATA_STYLE),
+    numberCell(standing.goalDifference, DATA_STYLE),
+    numberCell(standing.rank, RANK_STYLE),
+  ];
+}
+
+function tieBreakRows(
+  block: LeagueBlock,
+  standings: ReadonlyMap<string, Standing>,
+  teamNames: ReadonlyMap<string, string>,
+): WorkbookCell[][] {
+  const rows = block.teamIds
+    .map((teamId) => standings.get(teamId)!)
+    .filter((standing) => standing.headToHead !== null)
+    .sort((left, right) => left.rank - right.rank);
+  if (rows.length === 0) return [];
+  return [
+    [],
+    [
+      textCell("順位決定記録（直接対戦・抽選）", { ...DRAW_TITLE_STYLE, columnSpan: 6 }),
+      null,
+      null,
+      null,
+      null,
+      null,
+    ],
+    ["順位", "チーム", "順位決定根拠", "直接対戦内勝点", "直接対戦内得失点差", "直接対戦内得点"]
+      .map((label) => textCell(label, HEADER_STYLE)),
+    ...rows.map((standing): WorkbookCell[] => [
+      numberCell(standing.rank, RANK_STYLE),
+      textCell(teamNames.get(standing.teamId)!, TEAM_STYLE),
+      textCell(standing.tieBreak, DATA_STYLE),
+      numberCell(standing.headToHead!.points, DATA_STYLE),
+      numberCell(standing.headToHead!.goalDifference, DATA_STYLE),
+      numberCell(standing.headToHead!.goalsFor, DATA_STYLE),
+    ]),
+  ];
 }
 
 function drawRows(
   blockId: string,
   draws: readonly DrawRecord[],
   teamNames: ReadonlyMap<string, string>,
+  tableColumnCount: number,
 ): WorkbookCell[][] {
   const blockDraws = draws.filter((draw) => draw.blockId === blockId);
   if (blockDraws.length === 0) return [];
-  const rows: WorkbookCell[][] = [[], [textCell("抽選記録", DRAW_TITLE_STYLE)]];
+  const valueCells = (value: string, height = 24): WorkbookCell[] => [
+    textCell(value, {
+      ...META_VALUE_STYLE,
+      height,
+      columnSpan: tableColumnCount - 1,
+    }),
+    ...Array.from({ length: tableColumnCount - 2 }, () => null),
+  ];
+  const rows: WorkbookCell[][] = [
+    [],
+    [
+      textCell("抽選記録", { ...DRAW_TITLE_STYLE, columnSpan: tableColumnCount }),
+      ...Array.from({ length: tableColumnCount - 1 }, () => null),
+    ],
+  ];
   for (const [index, draw] of blockDraws.entries()) {
     if (index > 0) rows.push([]);
     rows.push(
       [textCell("抽選番号", META_LABEL_STYLE), numberCell(draw.randomSeed, META_VALUE_STYLE)],
       [
         textCell("候補", META_LABEL_STYLE),
-        textCell(draw.candidates.map((teamId) => teamNames.get(teamId)!).join("、"), META_VALUE_STYLE),
+        ...valueCells(draw.candidates.map((teamId) => teamNames.get(teamId)!).join("、")),
       ],
       [
         textCell("確定順", META_LABEL_STYLE),
-        textCell(
+        ...valueCells(
           draw.decidedOrder
             .map((teamId, order) => `${String(order + 1)}. ${teamNames.get(teamId)!}`)
             .join(" → "),
-          META_VALUE_STYLE,
+          34,
         ),
       ],
     );
@@ -905,6 +1003,7 @@ function blockSheet(
       .filter((match) => match.blockId === block.id)
       .map((match) => [pairKey(match.homeTeamId, match.awayTeamId), match]),
   );
+  const tableColumnCount = 1 + block.teamIds.length + AGGREGATE_HEADERS.length;
   const matrixRows = block.teamIds.map((teamId): WorkbookCell[] => {
     const standing = data.standings.get(teamId)!;
     const opponents = block.teamIds.map((opponentId): WorkbookCell => {
@@ -912,25 +1011,41 @@ function blockSheet(
       const match = pairMatches.get(pairKey(teamId, opponentId))!;
       return textCell(scoreLabel(teamId, match, data.results.get(match.id)!), DATA_STYLE);
     });
-    return [textCell(teamNames.get(teamId)!, TEAM_STYLE), ...opponents, ...standingCells(standing)];
+    return [
+      textCell(teamNames.get(teamId)!, { ...MATRIX_ROW_HEADER_STYLE, height: 34 }),
+      ...opponents,
+      ...standingCells(standing),
+    ];
   });
+  const matrixWidth = block.teamIds.length >= 12 ? 9 : block.teamIds.length >= 8 ? 10 : 12;
   return {
     name: block.displayName,
     columns: [
-      { width: 24 },
-      ...block.teamIds.map(() => ({ width: 14 })),
-      ...[8, 7, 7, 7, 9, 8, 8, 11, 8, 24, 15, 18, 15].map((width) => ({ width })),
+      { width: 22 },
+      ...block.teamIds.map(() => ({ width: matrixWidth })),
+      ...[6, 6, 6, 8, 7, 7, 9, 7].map((width) => ({ width })),
     ],
     rows: [
       ...metadataRows(
         document.tournament.name.trim() || "名称未設定の大会",
         block.displayName,
         savedAtLabel(document.updatedAt),
+        tableColumnCount,
       ),
+      [],
       headerRow(block.teamIds.map((teamId) => teamNames.get(teamId)!)),
       ...matrixRows,
-      ...drawRows(block.id, data.draws, teamNames),
+      ...tieBreakRows(block, data.standings, teamNames),
+      ...drawRows(block.id, data.draws, teamNames, tableColumnCount),
     ],
+    orientation: "landscape",
+    zoomScale: block.teamIds.length <= 4 ? 1 : block.teamIds.length <= 8 ? 0.85 : 0.65,
+    print: {
+      fitToWidth: 1,
+      fitToHeight: 0,
+      repeatRows: [6, 6],
+      repeatColumns: [1, 1],
+    },
   };
 }
 
