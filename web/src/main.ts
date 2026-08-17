@@ -60,6 +60,12 @@ import {
 } from "./print-document-model";
 import { renderPrintPreview } from "./print-preview-renderer";
 import {
+  downloadScheduleWorkbook,
+  ScheduleWorkbookDownloadError,
+  scheduleWorkbookAvailable,
+  type ScheduleWorkbookDownloadScope,
+} from "./schedule-workbook-download";
+import {
   buildSchedulePresentation,
   loadScheduleViewMode,
   saveScheduleViewMode,
@@ -426,9 +432,14 @@ root.innerHTML = `
           <h2 id="results-heading">1日目の日程とリーグ結果</h2>
           <p id="result-summary">まだ生成結果はありません。</p>
         </div>
-        <button id="print" class="secondary no-print" type="button" disabled>1日目を印刷</button>
+        <div class="button-row no-print">
+          <button id="print" class="secondary" type="button" disabled>1日目を印刷</button>
+          <button id="excel-day1" class="secondary" type="button" disabled>エクセルに出力</button>
+        </div>
       </div>
       <p id="day1-print-status" class="status-message no-print" role="status" aria-live="polite"></p>
+      <p class="muted no-print">時間順日程表・コート別日程表・チーム別予定を1つのExcelへ出力します。</p>
+      <p id="day1-excel-status" class="status-message no-print" role="status" aria-live="polite"></p>
       <div id="result-content" class="result-content empty">
         日程を生成すると、ブロック分け、日程表、チーム別予定をここで確認できます。
       </div>
@@ -461,9 +472,12 @@ root.innerHTML = `
         <div class="button-row no-print">
           <button id="print-day2" class="secondary" type="button" disabled>2日目を印刷</button>
           <button id="print-bracket" class="secondary" type="button" disabled hidden>トーナメント表だけ印刷</button>
+          <button id="excel-day2" class="secondary" type="button" disabled>エクセルに出力</button>
         </div>
       </div>
       <p id="day2-print-status" class="status-message no-print" role="status" aria-live="polite"></p>
+      <p class="muted no-print">時間順日程表・コート別日程表・チーム別予定を1つのExcelへ出力します。</p>
+      <p id="day2-excel-status" class="status-message no-print" role="status" aria-live="polite"></p>
       <div id="day2-result-content" class="result-content empty">
         日程を生成すると、決勝計画、日程表、チーム別予定をここで確認できます。
       </div>
@@ -755,8 +769,12 @@ const generateButton = requiredElement<HTMLButtonElement>("#generate");
 const printButton = requiredElement<HTMLButtonElement>("#print");
 const day2PrintButton = requiredElement<HTMLButtonElement>("#print-day2");
 const bracketPrintButton = requiredElement<HTMLButtonElement>("#print-bracket");
+const day1ExcelButton = requiredElement<HTMLButtonElement>("#excel-day1");
+const day2ExcelButton = requiredElement<HTMLButtonElement>("#excel-day2");
 const day1PrintStatus = requiredElement<HTMLElement>("#day1-print-status");
 const day2PrintStatus = requiredElement<HTMLElement>("#day2-print-status");
+const day1ExcelStatus = requiredElement<HTMLElement>("#day1-excel-status");
+const day2ExcelStatus = requiredElement<HTMLElement>("#day2-excel-status");
 const productionPrintHost = requiredElement<HTMLElement>("#production-print-host");
 const tournamentBracketVisible = true;
 const goDay2Area = requiredElement<HTMLElement>("#go-day2-area");
@@ -1435,6 +1453,10 @@ function renderResult(): void {
   day2PrintButton.disabled = true;
   bracketPrintButton.disabled = true;
   bracketPrintButton.hidden = true;
+  day1ExcelButton.disabled = true;
+  day2ExcelButton.disabled = true;
+  day1ExcelStatus.textContent = "";
+  day2ExcelStatus.textContent = "";
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
     content.textContent =
@@ -1784,6 +1806,7 @@ function renderResult(): void {
   }
 
   printButton.disabled = false;
+  refreshScheduleWorkbookDownloadButtons();
 }
 
 function renderLeagueStandings(content: HTMLElement, standings: JsonObject, teamNames: Map<string, string>): void {
@@ -4036,6 +4059,50 @@ generateButton.addEventListener("click", () => {
         );
       }
     });
+});
+
+let activeScheduleWorkbookDownload: ScheduleWorkbookDownloadScope | undefined;
+
+function scheduleWorkbookStatus(scope: ScheduleWorkbookDownloadScope): HTMLElement {
+  return scope === "day1" ? day1ExcelStatus : day2ExcelStatus;
+}
+
+function refreshScheduleWorkbookDownloadButtons(): void {
+  const busy = activeScheduleWorkbookDownload !== undefined;
+  day1ExcelButton.disabled = busy || !scheduleWorkbookAvailable(documentState, "day1");
+  day2ExcelButton.disabled = busy || !scheduleWorkbookAvailable(documentState, "day2");
+  day1ExcelButton.toggleAttribute("aria-busy", activeScheduleWorkbookDownload === "day1");
+  day2ExcelButton.toggleAttribute("aria-busy", activeScheduleWorkbookDownload === "day2");
+}
+
+async function invokeScheduleWorkbookDownload(scope: ScheduleWorkbookDownloadScope): Promise<void> {
+  if (activeScheduleWorkbookDownload !== undefined) return;
+  const status = scheduleWorkbookStatus(scope);
+  activeScheduleWorkbookDownload = scope;
+  refreshScheduleWorkbookDownloadButtons();
+  status.dataset.state = "generating";
+  status.textContent = "Excelを作成しています。完了までお待ちください…";
+  try {
+    const snapshot = cloneDocument(documentState);
+    const result = await downloadScheduleWorkbook(snapshot, scope);
+    status.dataset.state = "success";
+    status.textContent = `Excelを出力しました。「${result.fileName}」の保存先を確認してください。`;
+  } catch (error) {
+    status.dataset.state = "error";
+    status.textContent = error instanceof ScheduleWorkbookDownloadError
+      ? `Excelを作成できませんでした。${error.message}`
+      : "Excelを作成できませんでした。保存済み日程を確認し、もう一度お試しください。";
+  } finally {
+    activeScheduleWorkbookDownload = undefined;
+    refreshScheduleWorkbookDownloadButtons();
+  }
+}
+
+day1ExcelButton.addEventListener("click", () => {
+  void invokeScheduleWorkbookDownload("day1");
+});
+day2ExcelButton.addEventListener("click", () => {
+  void invokeScheduleWorkbookDownload("day2");
 });
 
 let requestedPrintScope: ProductionPrintScope | undefined;
