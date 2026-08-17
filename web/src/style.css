@@ -241,6 +241,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .standings-confirmation { margin-top: 1rem; padding: 1rem; background: #fff8e8; border: 2px solid #e8c77a; border-radius: .5rem; }
 .standings-confirmation h3 { margin: 0; color: var(--green); }
 .standings-confirmation > p { margin: .35rem 0 .8rem; }
+.league-results-export { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d6b96f; }
+.league-results-export h4 { margin: 0; color: var(--green); }
+.league-results-export > p { margin: .35rem 0 .8rem; }
 .next-day-callout { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; padding: 1rem; background: var(--green-light); border: 2px solid #83a995; border-radius: .5rem; }
 .next-day-callout h3, .next-day-callout p { margin: 0; }
 .next-day-callout p { color: var(--muted); }
