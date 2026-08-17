@@ -43,6 +43,9 @@ TypeScript／ViteのPWA、ブラウザ内自動保存、JSON入出力、オフ�
 1日目リーグ、2日目同順位リーグ、順位決定トーナメントの結果検証・順位確定はブラウザ内で行うため、
 事前にPWAを読み込んだ端末では通信切断後も、結果入力、順位確定、IndexedDB保存、再読込みを
 継続できる。日程生成は引き続きAPIとTurnstileを必要とする。
+タブ3・4の「エクセルに出力」から、保存済みの対象日について時間順日程表、コート別日程表、
+チーム別予定の3sheetを1つの`.xlsx`へ端末内生成できる。画面の表示切替には依存せず、PWAと日程を
+事前に保存済みならオフラインでも利用できる。Excel出力はAPI、Turnstile、サーバー側保存を使用しない。
 1日目の日程表と結果入力、および2日目の同順位リーグ日程では、直後の同一コートの試合を審判するチームを対戦表示の左側へ揃える。
 これは表示と得点入力の並びだけを変更し、保存データのhome/awayと順位計算は変更しない。
 2日目の開催時刻と決勝方式は日程生成前に入力し、統合された生成操作で決勝計画と日程を続けて生成する。
@@ -290,6 +293,12 @@ npm run preview:excel -- --output-dir /tmp/football-scheduler-excel-review
 2日目順位決定トーナメントのversion管理されたfixtureを切り替えられる。このページは本番build
 entryとService Workerの対象外である。workbook生成はDOMやIndexedDBに依存せず、利用者入力を
 数式、macro、外部linkとして出力しない。
+採用済みの同じworkbook生成処理は本番のタブ3・4からも利用し、対象日の日程がない間は出力buttonを
+無効にする。生成済み日程を端末へ保存していれば、再読込み後やオフラインでもdownloadできる。
+2026-08-17のVite production buildでは、統合前のmain JavaScript `377.40 kB`（gzip `103.53 kB`）に
+対し、統合後はmain `381.64 kB`（gzip `104.82 kB`）、遅延読込みするworkbook model `6.67 kB`
+（gzip `2.69 kB`）、XLSX writer `72.08 kB`（gzip `20.20 kB`）となった。Excel生成chunkもService
+Workerのprecacheへ含め、初期表示でXLSX writerを評価せずにオフラインdownloadを維持する。
 
 ## 固定fixtureの実行
 

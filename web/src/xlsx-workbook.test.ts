@@ -2,15 +2,19 @@
 
 import { unzipSync } from "fflate";
 import readXlsxFile from "read-excel-file/node";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import tournamentDocumentJson from "../e2e/fixtures/issue75-eight-team-document.json";
 import { buildScheduleWorkbook } from "./schedule-workbook-model";
 import type { JsonObject, TournamentDocument } from "./types";
 import { XLSX_MIME_TYPE, numberCell, textCell, type WorkbookFile } from "./workbook";
-import { createWorkbookBlob } from "./xlsx-workbook";
+import { createWorkbookBlob, downloadWorkbookBlob } from "./xlsx-workbook";
 
 const document = tournamentDocumentJson as unknown as TournamentDocument;
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ブラウザ内xlsx生成", () => {
   it("3sheetを生成し、readerで名前・行・数値型を再読込みできる", async () => {
@@ -88,4 +92,32 @@ describe("ブラウザ内xlsx生成", () => {
     expect(blob.size).toBeGreaterThan(0);
     expect(performance.now() - started).toBeLessThan(10_000);
   }, 15_000);
+
+  it("download後に一時linkを除去してobject URLを解放する", () => {
+    vi.useFakeTimers();
+    const anchor = {
+      href: "",
+      download: "",
+      hidden: false,
+      click: vi.fn(),
+      remove: vi.fn(),
+    };
+    const targetDocument = {
+      createElement: vi.fn(() => anchor),
+      body: { append: vi.fn() },
+    } as unknown as Document;
+    const targetUrl = {
+      createObjectURL: vi.fn(() => "blob:workbook"),
+      revokeObjectURL: vi.fn(),
+    };
+
+    downloadWorkbookBlob(new Blob(["xlsx"]), "大会_1日目日程.xlsx", targetDocument, targetUrl);
+
+    expect(anchor.download).toBe("大会_1日目日程.xlsx");
+    expect(anchor.click).toHaveBeenCalledOnce();
+    expect(anchor.remove).toHaveBeenCalledOnce();
+    expect(targetUrl.revokeObjectURL).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(targetUrl.revokeObjectURL).toHaveBeenCalledWith("blob:workbook");
+  });
 });
