@@ -26,6 +26,7 @@ async function workbookValues(download: Download): Promise<{
 async function downloadFromPanel(page: Page, panel: "day1" | "day2"): Promise<Download> {
   const button = page.locator(`#${panel}-results-panel`).getByRole("button", {
     name: "エクセルに出力",
+    exact: true,
   });
   const downloadPromise = page.waitForEvent("download");
   await button.click();
@@ -65,7 +66,10 @@ test("タブ3から1日目の3sheetをAPIやTurnstile追加初期化なしでdow
   ]);
   expect(workbook.values).toContain("青空FC");
   await expect(page.locator("#day1-excel-status")).toContainText("Excelを出力しました");
-  await expect(page.locator("#day1-results-panel").getByRole("button", { name: "エクセルに出力" }))
+  await expect(page.locator("#day1-results-panel").getByRole("button", {
+    name: "エクセルに出力",
+    exact: true,
+  }))
     .toBeEnabled();
   expect(requests).toEqual([]);
   expect(await page.getByTestId("turnstile-widget-mock").count()).toBe(widgetCount);

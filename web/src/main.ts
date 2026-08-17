@@ -66,6 +66,12 @@ import {
   type ScheduleWorkbookDownloadScope,
 } from "./schedule-workbook-download";
 import {
+  downloadLeagueResultsWorkbook,
+  LeagueResultsWorkbookDownloadError,
+  LeagueResultsWorkbookDownloadGuard,
+  leagueResultsWorkbookAvailable,
+} from "./league-results-workbook-download";
+import {
   buildSchedulePresentation,
   loadScheduleViewMode,
   saveScheduleViewMode,
@@ -448,6 +454,12 @@ root.innerHTML = `
         <p id="league-results-progress">試合結果を確認しています。</p>
         <button id="confirm-standings" class="primary" type="button" disabled>順位を確定する</button>
         <p id="standings-status" class="status-message" role="status" aria-live="polite"></p>
+        <div class="league-results-export">
+          <h4>リーグ結果を配布する</h4>
+          <p>対戦結果と確定順位を、1ブロックにつき1つのシートへまとめます。</p>
+          <button id="excel-league-results" class="secondary" type="button" disabled>リーグ結果をエクセルに出力</button>
+          <p id="league-results-excel-status" class="status-message" role="status" aria-live="polite"></p>
+        </div>
       </div>
       <div id="go-day2-area" class="next-day-callout no-print" hidden>
         <div>
@@ -782,6 +794,8 @@ const standingsConfirmation = requiredElement<HTMLElement>("#standings-confirmat
 const leagueResultsProgress = requiredElement<HTMLElement>("#league-results-progress");
 const standingsStatus = requiredElement<HTMLElement>("#standings-status");
 const standingsButton = requiredElement<HTMLButtonElement>("#confirm-standings");
+const leagueResultsExcelButton = requiredElement<HTMLButtonElement>("#excel-league-results");
+const leagueResultsExcelStatus = requiredElement<HTMLElement>("#league-results-excel-status");
 const day2StartTimeInput = requiredElement<HTMLInputElement>("#day2-start-time");
 const day2GameDurationInput = requiredElement<HTMLInputElement>("#day2-game-duration");
 const day2MarginInput = requiredElement<HTMLInputElement>("#day2-margin-minutes");
@@ -1309,6 +1323,7 @@ function refreshLeagueResultsProgress(totalMatches: number): void {
     legacyCompatibility ||
     enteredCount !== totalMatches ||
     totalMatches === 0;
+  refreshLeagueResultsWorkbookDownloadButton();
 }
 
 function refreshTournamentResultsEnabled(): void {
@@ -1455,8 +1470,13 @@ function renderResult(): void {
   bracketPrintButton.hidden = true;
   day1ExcelButton.disabled = true;
   day2ExcelButton.disabled = true;
+  leagueResultsExcelButton.disabled = true;
   day1ExcelStatus.textContent = "";
   day2ExcelStatus.textContent = "";
+  if (!leagueResultsWorkbookDownloadGuard.active) {
+    leagueResultsExcelStatus.textContent = "";
+    delete leagueResultsExcelStatus.dataset.state;
+  }
   if (result === undefined) {
     summary.textContent = "まだ生成結果はありません。";
     content.textContent =
@@ -1468,6 +1488,7 @@ function renderResult(): void {
     day2Content.classList.add("empty");
     standingsConfirmation.hidden = true;
     printButton.disabled = true;
+    refreshLeagueResultsWorkbookDownloadButton();
     return;
   }
 
@@ -1807,6 +1828,7 @@ function renderResult(): void {
 
   printButton.disabled = false;
   refreshScheduleWorkbookDownloadButtons();
+  refreshLeagueResultsWorkbookDownloadButton();
 }
 
 function renderLeagueStandings(content: HTMLElement, standings: JsonObject, teamNames: Map<string, string>): void {
@@ -4062,6 +4084,7 @@ generateButton.addEventListener("click", () => {
 });
 
 let activeScheduleWorkbookDownload: ScheduleWorkbookDownloadScope | undefined;
+const leagueResultsWorkbookDownloadGuard = new LeagueResultsWorkbookDownloadGuard();
 
 function scheduleWorkbookStatus(scope: ScheduleWorkbookDownloadScope): HTMLElement {
   return scope === "day1" ? day1ExcelStatus : day2ExcelStatus;
@@ -4098,11 +4121,57 @@ async function invokeScheduleWorkbookDownload(scope: ScheduleWorkbookDownloadSco
   }
 }
 
+function refreshLeagueResultsWorkbookDownloadButton(): void {
+  const available = !legacyCompatibility &&
+    !leagueResultDrafts.hasPendingDrafts &&
+    leagueResultsWorkbookAvailable(documentState);
+  leagueResultsExcelButton.disabled = leagueResultsWorkbookDownloadGuard.active || !available;
+  leagueResultsExcelButton.toggleAttribute(
+    "aria-busy",
+    leagueResultsWorkbookDownloadGuard.active,
+  );
+}
+
+async function invokeLeagueResultsWorkbookDownload(): Promise<void> {
+  if (
+    leagueResultsWorkbookDownloadGuard.active ||
+    leagueResultDrafts.hasPendingDrafts ||
+    !leagueResultsWorkbookAvailable(documentState)
+  ) {
+    refreshLeagueResultsWorkbookDownloadButton();
+    return;
+  }
+  const snapshot = cloneDocument(documentState);
+  leagueResultsExcelStatus.dataset.state = "generating";
+  leagueResultsExcelStatus.textContent = "リーグ結果Excelを作成しています。完了までお待ちください…";
+  const operation = leagueResultsWorkbookDownloadGuard.run(
+    () => downloadLeagueResultsWorkbook(snapshot),
+  );
+  refreshLeagueResultsWorkbookDownloadButton();
+  try {
+    const result = await operation;
+    if (result === undefined) return;
+    leagueResultsExcelStatus.dataset.state = "success";
+    leagueResultsExcelStatus.textContent =
+      `リーグ結果Excelを出力しました。「${result.fileName}」の保存先を確認してください。`;
+  } catch (error) {
+    leagueResultsExcelStatus.dataset.state = "error";
+    leagueResultsExcelStatus.textContent = error instanceof LeagueResultsWorkbookDownloadError
+      ? `リーグ結果Excelを作成できませんでした。${error.message} 入力済み結果と確定順位は保持しています。`
+      : "リーグ結果Excelを作成できませんでした。入力済み結果と確定順位は保持しています。もう一度お試しください。";
+  } finally {
+    refreshLeagueResultsWorkbookDownloadButton();
+  }
+}
+
 day1ExcelButton.addEventListener("click", () => {
   void invokeScheduleWorkbookDownload("day1");
 });
 day2ExcelButton.addEventListener("click", () => {
   void invokeScheduleWorkbookDownload("day2");
+});
+leagueResultsExcelButton.addEventListener("click", () => {
+  void invokeLeagueResultsWorkbookDownload();
 });
 
 let requestedPrintScope: ProductionPrintScope | undefined;
