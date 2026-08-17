@@ -243,15 +243,15 @@ npm run test:e2e:preview
 ## 印刷用PDFレイアウトのローカル確認
 
 本番画面、IndexedDB、APIへ接続せず、印刷対象の表示モデルを固定fixtureから組み立てて
-ChromiumでPDF化できる。16チーム・3コートを基準に、1日目4ブロックリーグ、2日目同順位リーグ、
-2日目2トーナメントと、順位確定前後の表示を一括生成する。
+ChromiumでPDF化できる。16チーム・3コート・4ブロックと32チーム・4コート・8ブロックを基準に、
+1日目リーグ、2日目同順位リーグ、2日目2トーナメントと、順位確定前後の表示を一括生成する。
 
 ```console
 cd web
 npm run preview:print
 ```
 
-出力先は実行ごとに作られる`/tmp/football-scheduler-print-previews-*`で、5つのPDFの絶対パスを
+出力先は実行ごとに作られる`/tmp/football-scheduler-print-previews-*`で、10個のPDFの絶対パスを
 標準出力へ表示する。対象または出力先を限定する場合は次のように指定する。
 
 ```console

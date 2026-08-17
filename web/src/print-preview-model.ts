@@ -39,8 +39,28 @@ export interface PrintPreviewGroupModel {
 
 export interface PrintPreviewTournamentPoolModel {
   poolId: string;
+  name: string;
   heading: string;
+  rankRangeLabel: string;
+  participantCount: number;
+  participantEntries: readonly string[];
   plan: JsonObject;
+}
+
+export interface PrintPreviewTournamentOverview {
+  tournamentCount: number;
+  courtCount: number;
+  matchCount: number;
+  startTimeLabel: string;
+  endTimeLabel: string;
+}
+
+export interface PrintPreviewLeagueOverview {
+  groupCount: number;
+  courtCount: number;
+  matchCount: number;
+  startTimeLabel: string;
+  endTimeLabel: string;
 }
 
 export interface PrintPreviewModel {
@@ -55,6 +75,8 @@ export interface PrintPreviewModel {
   courtSchedules: readonly PrintPreviewCourtSchedule[];
   participantSchedules: readonly PrintPreviewParticipantSchedule[];
   tournamentPools: readonly PrintPreviewTournamentPoolModel[];
+  leagueOverview?: PrintPreviewLeagueOverview;
+  tournamentOverview?: PrintPreviewTournamentOverview;
   teamNames: ReadonlyMap<string, string>;
   scheduleByMatchId: ReadonlyMap<
     string,
@@ -67,6 +89,28 @@ export class PrintPreviewFixtureError extends Error {
     super(message);
     this.name = "PrintPreviewFixtureError";
   }
+}
+
+function printParticipant(value: unknown): PrintParticipant | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entry = value as JsonObject;
+  if (entry.type === "concrete_team" && typeof entry.team_id === "string") {
+    return { type: "concrete_team", team_id: entry.team_id };
+  }
+  if (
+    entry.type === "league_rank"
+    && typeof entry.block_id === "string"
+    && typeof entry.rank === "number"
+  ) {
+    return { type: "league_rank", block_id: entry.block_id, rank: entry.rank };
+  }
+  if (
+    (entry.type === "winner_of" || entry.type === "loser_of")
+    && typeof entry.match_id === "string"
+  ) {
+    return { type: entry.type, match_id: entry.match_id };
+  }
+  return undefined;
 }
 
 function participantKey(participant: PrintParticipant): string {
@@ -116,11 +160,14 @@ function assertParticipant(
 }
 
 function validateFixture(fixture: PrintPreviewFixture): void {
-  if (fixture.teams.length !== 16) {
-    throw new PrintPreviewFixtureError("印刷fixtureのチーム数は16である必要があります。");
+  if (fixture.teams.length !== 16 && fixture.teams.length !== 32) {
+    throw new PrintPreviewFixtureError("印刷fixtureのチーム数は16または32である必要があります。");
   }
-  if (fixture.courts.length !== 3) {
-    throw new PrintPreviewFixtureError("印刷fixtureのコート数は3である必要があります。");
+  const expectedCourtCount = fixture.teams.length === 16 ? 3 : 4;
+  if (fixture.courts.length !== expectedCourtCount) {
+    throw new PrintPreviewFixtureError(
+      `${String(fixture.teams.length)}チーム印刷fixtureのコート数は${String(expectedCourtCount)}である必要があります。`,
+    );
   }
   const teamIds = new Set(fixture.teams.map((team) => team.id));
   const courtIds = new Set(fixture.courts.map((court) => court.id));
@@ -165,8 +212,13 @@ function validateFixture(fixture: PrintPreviewFixture): void {
       throw new PrintPreviewFixtureError(`試合「${match.id}」が日程に1回だけ配置されていません。`);
     }
   }
-  if (fixture.scope !== "day2-tournament" && fixture.groups.length !== 4) {
-    throw new PrintPreviewFixtureError("リーグ印刷fixtureのグループ数は4である必要があります。");
+  const expectedGroupCount = fixture.scope === "day1-league"
+    ? fixture.teams.length / 4
+    : fixture.scope === "day2-same-rank" ? 4 : 0;
+  if (fixture.groups.length !== expectedGroupCount) {
+    throw new PrintPreviewFixtureError(
+      `印刷fixtureのグループ数は${String(expectedGroupCount)}である必要があります。`,
+    );
   }
   if (fixture.scope === "day2-tournament") {
     if (fixture.tournamentPlan === undefined) {
@@ -275,11 +327,41 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
   }
   const tournamentPools = fixture.tournamentPlan === undefined
     ? []
-    : placementTournamentPools(fixture.tournamentPlan).map((pool) => ({
-        poolId: pool.poolId,
-        heading: `${pool.displayName}表`,
-        plan: fixture.tournamentPlan!,
-      }));
+    : placementTournamentPools(fixture.tournamentPlan).map((pool) => {
+        const range = Array.isArray(pool.data.overall_rank_range)
+          ? pool.data.overall_rank_range
+          : [];
+        const rankRangeLabel = range.length === 2
+          ? `総合${String(range[0])}〜${String(range[1])}位`
+          : "総合順位帯未設定";
+        const participantEntries = (Array.isArray(pool.data.seeds) ? pool.data.seeds : [])
+          .filter((seed): seed is JsonObject =>
+            typeof seed === "object" && seed !== null && !Array.isArray(seed)
+          )
+          .slice()
+          .sort((left, right) => Number(left.seed_no ?? 0) - Number(right.seed_no ?? 0))
+          .map((seed) => {
+            const entry = printParticipant(seed.entry);
+            const sourceLabel = entry === undefined
+              ? "参加枠未設定"
+              : participantLabel(entry, teamNames, presentation.displayNumberByMatchId);
+            const resolvedName = fixture.participantResolution === "resolved"
+              && typeof seed.team_id === "string"
+              ? teamNames.get(seed.team_id)
+              : undefined;
+            return resolvedName === undefined ? sourceLabel : `${resolvedName}（${sourceLabel}）`;
+          });
+        return {
+          poolId: pool.poolId,
+          name: pool.displayName,
+          heading: `${pool.displayName}表`,
+          rankRangeLabel,
+          participantCount: Number(pool.data.participant_count ?? participantEntries.length),
+          participantEntries,
+          plan: fixture.tournamentPlan!,
+        };
+      });
+  const lastScheduleRow = presentation.timeRows.at(-1);
   return {
     fixtureId: fixture.id,
     description: fixture.description,
@@ -304,6 +386,28 @@ export function buildPrintPreviewModel(fixture: PrintPreviewFixture): PrintPrevi
       ? []
       : participantSchedules(fixture, matchById, allRows),
     tournamentPools,
+    ...(fixture.scope !== "day2-tournament"
+      ? {
+          leagueOverview: {
+            groupCount: fixture.groups.length,
+            courtCount: fixture.courts.length,
+            matchCount: fixture.matches.length,
+            startTimeLabel: presentation.timeRows[0]?.startTime ?? "未設定",
+            endTimeLabel: lastScheduleRow?.matchEnd ?? "未設定",
+          },
+        }
+      : {}),
+    ...(fixture.scope === "day2-tournament"
+      ? {
+          tournamentOverview: {
+            tournamentCount: tournamentPools.length,
+            courtCount: fixture.courts.length,
+            matchCount: fixture.matches.length,
+            startTimeLabel: presentation.timeRows[0]?.startTime ?? "未設定",
+            endTimeLabel: lastScheduleRow?.matchEnd ?? "未設定",
+          },
+        }
+      : {}),
     teamNames,
     scheduleByMatchId: new Map(presentation.timeRows.map((row) => [
       row.matchId,
