@@ -1,0 +1,132 @@
+.print-preview-body {
+  margin: 0;
+  background: #e8edf2;
+  color: #15202b;
+}
+
+.print-preview-controls {
+  display: flex;
+  align-items: end;
+  gap: 1rem;
+  max-width: 1180px;
+  margin: 1.25rem auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid #c8d0d8;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.print-preview-controls > div { margin-right: auto; }
+.print-preview-controls h1,
+.print-preview-controls p { margin: 0.2rem 0; }
+.print-preview-controls label { min-width: 20rem; }
+
+.preview-error:not(:empty) {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 1rem;
+  border: 2px solid #a62525;
+  background: #fff4f4;
+  color: #761919;
+}
+
+.print-document {
+  box-sizing: border-box;
+  width: 210mm;
+  margin: 1rem auto;
+  padding: 12mm;
+  background: #fff;
+  box-shadow: 0 4px 24px rgb(26 38 50 / 16%);
+}
+
+.print-document h2 { margin: 0 0 5mm; font-size: 18pt; }
+.print-document h3 { margin: 0 0 2mm; font-size: 12pt; }
+
+.print-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 8mm;
+  padding-bottom: 6mm;
+  border-bottom: 1px solid #7c8792;
+}
+
+.print-metadata-item { margin: 0; }
+.print-metadata-label {
+  display: block;
+  margin-bottom: 1mm;
+  color: #4b5966;
+  font-size: 8.5pt;
+}
+
+.print-groups { margin-top: 7mm; }
+.print-two-column-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5mm 7mm;
+}
+
+.print-group-card,
+.print-team-card {
+  break-inside: avoid;
+  padding: 3mm;
+  border: 1px solid #aeb8c2;
+  border-radius: 2mm;
+}
+
+.print-group-card ol { margin: 0; padding-left: 6mm; }
+.print-group-card li { margin: 1mm 0; }
+
+.print-page { break-before: page; }
+.print-tournament-pool { break-inside: avoid; }
+.print-tournament-pool[data-pool-index="1"] { break-before: auto; margin-top: 7mm; }
+.print-tournament-pool[data-pool-index="2"] { break-before: page; }
+
+.print-court-list { display: grid; gap: 5mm; }
+.print-court-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  padding: 3mm;
+  border: 1px solid #8f9ba6;
+}
+
+.print-document table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+.print-document th,
+.print-document td { padding: 1.5mm 2mm; border: 1px solid #aeb8c2; text-align: left; }
+.print-document th { background: #eef2f5; }
+.print-court-card th:first-child,
+.print-court-card td:first-child { width: 9mm; white-space: nowrap; }
+.print-court-card th:nth-child(2),
+.print-court-card td:nth-child(2) { width: 29mm; white-space: nowrap; }
+.print-court-card th:last-child,
+.print-court-card td:last-child { width: 35mm; }
+
+.print-team-card table td { border-width: 1px 0 0; }
+.print-team-card table td:first-child { width: 9mm; }
+.print-team-card table td:nth-child(2) { width: 28mm; white-space: nowrap; }
+.print-team-card table td:nth-child(3) { width: 20mm; white-space: nowrap; }
+
+.print-tournament-pool .tournament-bracket { margin: 0; }
+.print-tournament-pool .tournament-bracket > figcaption { display: none; }
+.print-tournament-pool .tournament-bracket-scroll { overflow: visible; }
+.print-tournament-pool svg { max-width: 100%; height: auto; }
+
+@page { size: A4 portrait; margin: 10mm; }
+
+@media print {
+  html,
+  body.print-preview-body { background: #fff !important; }
+  .preview-only,
+  .preview-error:empty { display: none !important; }
+  .print-document {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+  .print-tournament-pool:has(.tournament-bracket.exploration.horizontal) {
+    page: bracket-horizontal;
+  }
+  .print-tournament-pool .tournament-bracket.exploration.horizontal {
+    page: auto;
+  }
+}

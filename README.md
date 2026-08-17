@@ -240,6 +240,31 @@ npm run preview:results -- --card-breakpoint 899 --output-dir /tmp/result-input-
 npm run test:e2e:preview
 ```
 
+## 印刷用PDFレイアウトのローカル確認
+
+本番画面、IndexedDB、APIへ接続せず、印刷対象の表示モデルを固定fixtureから組み立てて
+ChromiumでPDF化できる。16チーム・3コートを基準に、1日目4ブロックリーグ、2日目同順位リーグ、
+2日目2トーナメントと、順位確定前後の表示を一括生成する。
+
+```console
+cd web
+npm run preview:print
+```
+
+出力先は実行ごとに作られる`/tmp/football-scheduler-print-previews-*`で、5つのPDFの絶対パスを
+標準出力へ表示する。対象または出力先を限定する場合は次のように指定する。
+
+```console
+npm run preview:print -- --fixture day1-league-16
+npm run preview:print -- --output-dir /tmp/football-scheduler-print-review
+```
+
+ブラウザでは`npm run dev`のoriginで`/print-preview.html`を開き、固定fixtureを切り替えられる。
+このページとfixtureは本番build entry、保存schema、Service Workerの対象外であり、`npm run build`が
+URLとfixture markerの非混入も検査する。PDFはロケール`ja-JP`、タイムゾーン`Asia/Tokyo`、A4、
+固定余白で生成し、fixture内の保存日時も固定している。レイアウト調整中の成果物であり、現行の
+本番印刷ボタンの挙動は変更しない。
+
 ## 固定fixtureの実行
 
 小さい疎通確認用fixtureは、次のように実行します。
