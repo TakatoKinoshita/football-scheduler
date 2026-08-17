@@ -1,5 +1,9 @@
 import { buildProductionPrintFixture } from "./print-document-model";
 import {
+  displayedTeamPair,
+  leagueAwayFirstMatchIds,
+} from "./league-team-display-order";
+import {
   buildPrintPreviewModel,
   type PrintPreviewScheduleRow,
 } from "./print-preview-model";
@@ -126,6 +130,29 @@ function scheduleParticipantLabel(
   return `${displayNumber}${participant.type === "winner_of" ? "勝" : "負"}`;
 }
 
+function workbookAwayFirstMatchIds(fixture: PrintPreviewFixture): ReadonlySet<string> {
+  if (fixture.scope === "day2-tournament") return new Set();
+  return leagueAwayFirstMatchIds(
+    fixture.matches.map((match) => ({
+      matchId: match.id,
+      homeEntryKey: participantKey(match.home),
+      awayEntryKey: participantKey(match.away),
+    })),
+    fixture.slots.flatMap((slot) => {
+      if (slot.match_id === null) return [];
+      const refereeEntryKey = slot.referee_assignment.kind === "team"
+        ? participantKey(slot.referee_assignment.team)
+        : undefined;
+      return [{
+        sectionNo: slot.section_no,
+        courtId: slot.court_id,
+        matchId: slot.match_id,
+        ...(refereeEntryKey === undefined ? {} : { refereeEntryKey }),
+      }];
+    }),
+  );
+}
+
 function workbookScheduleRows(
   fixture: PrintPreviewFixture,
   rows: readonly PrintPreviewScheduleRow[],
@@ -138,6 +165,7 @@ function workbookScheduleRows(
       .map((slot) => [slot.match_id, slot]),
   );
   const displayNumbers = new Map(rows.map((row) => [row.matchId, row.displayNumber]));
+  const awayFirstMatchIds = workbookAwayFirstMatchIds(fixture);
   return rows.map((row) => {
     const match = matches.get(row.matchId);
     const slot = slots.get(row.matchId);
@@ -153,10 +181,15 @@ function workbookScheduleRows(
             displayNumbers,
           )
         : participantLabel(slot.referee_assignment.team, teamNames);
+    const displayed = displayedTeamPair(
+      scheduleParticipantLabel(match.home, teamNames, displayNumbers),
+      scheduleParticipantLabel(match.away, teamNames, displayNumbers),
+      awayFirstMatchIds.has(row.matchId),
+    );
     return {
       ...row,
-      homeLabel: scheduleParticipantLabel(match.home, teamNames, displayNumbers),
-      awayLabel: scheduleParticipantLabel(match.away, teamNames, displayNumbers),
+      homeLabel: displayed.left,
+      awayLabel: displayed.right,
       refereeLabel,
     };
   });

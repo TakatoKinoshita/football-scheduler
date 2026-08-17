@@ -105,6 +105,28 @@ describe("日程Excel workbookモデル", () => {
     });
   });
 
+  it("1日目リーグは次試合の主審チームをWebと同じく直前試合の左側へ表示する", () => {
+    const workbook = buildScheduleWorkbook(tournamentDocument, "day1");
+    const timeRows = rowValues(sheet(workbook, "時間順日程表"));
+    const courtRows = rowValues(sheet(workbook, "コート別日程表"));
+
+    expect(timeRows.find((row) => row.includes("チーム7"))?.slice(4, 7)).toEqual([
+      "チーム7",
+      "-",
+      "チーム4",
+    ]);
+    expect(timeRows.find((row) => row.includes("チーム1"))?.slice(4, 7)).toEqual([
+      "チーム1",
+      "-",
+      "チーム3",
+    ]);
+    expect(courtRows.find((row) => row.includes("チーム7"))?.slice(3, 6)).toEqual([
+      "チーム7",
+      "-",
+      "チーム4",
+    ]);
+  });
+
   it("同順位リーグの仮順位枠を人間向け表記で残す", () => {
     const workbook = buildScheduleWorkbook(sameRankDocument, "day2");
     const allValues = workbook.sheets.flatMap((target) => rowValues(target).flat());
@@ -112,6 +134,51 @@ describe("日程Excel workbookモデル", () => {
     expect(allValues).toContain("Bブロック1位");
     expect(allValues).toContain("-");
     expect(allValues).not.toContain("rank:A:1");
+  });
+
+  it("同順位リーグも次試合の主審順位枠をWebと同じく直前試合の左側へ表示する", () => {
+    const document = clone(sameRankDocument);
+    const result = document.tournament.result as JsonObject;
+    const schedule = result.day2_schedule as JsonObject;
+    const slots = schedule.slots as JsonObject[];
+    const secondSlot = slots.find((slot) => slot.match_id === "SR-2-M1");
+    if (secondSlot === undefined) throw new Error("SR-2-M1のslotがありません。");
+    secondSlot.section_no = 2;
+    secondSlot.court_id = "court-a";
+    secondSlot.referee_assignment = {
+      kind: "team",
+      rank_ref: { type: "league_rank", block_id: "B", rank: 1 },
+      team_id: null,
+      organizer_reason: null,
+      fallback_reasons: [],
+    };
+    const routes = schedule.team_schedules as JsonObject[];
+    for (const route of routes.filter((route) => route.match_id === "SR-2-M1")) {
+      route.section_no = 2;
+      route.court_id = "court-a";
+    }
+    routes.push({
+      rank_ref: { type: "league_rank", block_id: "B", rank: 1 },
+      team_id: null,
+      role: "referee",
+      match_id: "SR-2-M1",
+      section_no: 2,
+      court_id: "court-a",
+    });
+
+    const workbook = buildScheduleWorkbook(document, "day2");
+    const timeRows = rowValues(sheet(workbook, "時間順日程表"));
+    const courtRows = rowValues(sheet(workbook, "コート別日程表"));
+    expect(timeRows.find((row) => row.includes("Bブロック1位"))?.slice(4, 7)).toEqual([
+      "Bブロック1位",
+      "-",
+      "Aブロック1位",
+    ]);
+    expect(courtRows.find((row) => row.includes("Bブロック1位"))?.slice(3, 6)).toEqual([
+      "Bブロック1位",
+      "-",
+      "Aブロック1位",
+    ]);
   });
 
   it("順位決定トーナメントの確定チームを登録順で出力し、候補役割を保持する", () => {
