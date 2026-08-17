@@ -16,6 +16,7 @@ const LEAGUE_RESULTS_FIXTURE_IDS = [
   "league-results-residual-draw-5",
   "league-results-all-draws-4",
   "league-results-multiple-blocks-long-names",
+  "league-results-16-teams-4-blocks-3-courts",
   "league-results-normal-8",
   "league-results-normal-16",
 ];
@@ -23,6 +24,10 @@ const LEAGUE_RESULTS_FIXTURE_IDS = [
 function option(name) {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+function hasOption(name) {
+  return process.argv.includes(name);
 }
 
 function selectedFixtures() {
@@ -77,6 +82,7 @@ function stopServer(server) {
 
 async function main() {
   const fixtures = selectedFixtures();
+  const includePdf = hasOption("--include-pdf");
   const requestedOutput = option("--output-dir");
   const outputDirectory = requestedOutput === undefined
     ? await mkdtemp(join(tmpdir(), "football-scheduler-excel-previews-"))
@@ -118,6 +124,19 @@ async function main() {
       const outputPath = join(outputDirectory, `${fixture}.xlsx`);
       await download.saveAs(outputPath);
       console.log(outputPath);
+      if (includePdf) {
+        await page.emulateMedia({ media: "print" });
+        const pdfPath = join(outputDirectory, `${fixture}-print-preview.pdf`);
+        await page.pdf({
+          path: pdfPath,
+          format: "A4",
+          landscape: true,
+          printBackground: true,
+          margin: { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" },
+        });
+        await page.emulateMedia({ media: "screen" });
+        console.log(pdfPath);
+      }
     }
     await page.close();
   } finally {

@@ -1,6 +1,6 @@
 import type { JsonObject, TournamentDocument } from "./types";
 
-export const LEAGUE_RESULTS_WORKBOOK_FIXTURE_VERSION = "1.0.0";
+export const LEAGUE_RESULTS_WORKBOOK_FIXTURE_VERSION = "1.1.0";
 
 export interface LeagueResultsWorkbookFixture {
   id: string;
@@ -46,6 +46,7 @@ interface FixtureSpec {
   teams: Array<{ id: string; name: string }>;
   blocks: BlockSpec[];
   randomSeed?: number;
+  courtCount?: number;
 }
 
 function emptyAggregate(): FixtureAggregate {
@@ -260,7 +261,10 @@ function fixture(spec: FixtureSpec): LeagueResultsWorkbookFixture {
           schema_version: "0.2.0",
           request_kind: "day1_league",
           teams: spec.teams,
-          courts: [{ id: "court-a", name: "Aコート" }],
+          courts: Array.from({ length: spec.courtCount ?? 1 }, (_, index) => ({
+            id: `court-${String(index + 1)}`,
+            name: `${String(index + 1)}コート`,
+          })),
           league: { block_count: spec.blocks.length, assignment_mode: "seeded_snake" },
           random_seed: randomSeed,
         },
@@ -312,6 +316,11 @@ function orderedFixture(size: 2 | 8 | 16): LeagueResultsWorkbookFixture {
 }
 
 const fourTeams = ["A", "B", "C", "D"].map((id) => ({ id, name: `チーム${id}` }));
+
+const sixteenTeamFourBlockMembers = Array.from({ length: 16 }, (_, index) => ({
+  id: `team-${String(index + 1).padStart(2, "0")}`,
+  name: `チーム${String(index + 1).padStart(2, "0")}`,
+}));
 
 export const leagueResultsWorkbookFixtures: readonly LeagueResultsWorkbookFixture[] = [
   orderedFixture(2),
@@ -389,6 +398,20 @@ export const leagueResultsWorkbookFixtures: readonly LeagueResultsWorkbookFixtur
       { id: "east", displayName: "東地区/予選", teamIds: ["A1", "A2", "A3", "A4"] },
       { id: "west", displayName: "東地区:予選", teamIds: ["B1", "B2", "B3", "B4"] },
     ],
+  }),
+  fixture({
+    id: "league-results-16-teams-4-blocks-3-courts",
+    description: "16チーム・4ブロック・3コートのリーグ結果",
+    tournamentName: "16チーム 4ブロック リーグ結果確認大会",
+    teams: sixteenTeamFourBlockMembers,
+    courtCount: 3,
+    blocks: ["A", "B", "C", "D"].map((id, blockIndex) => ({
+      id,
+      displayName: `${id}ブロック`,
+      teamIds: sixteenTeamFourBlockMembers
+        .slice(blockIndex * 4, blockIndex * 4 + 4)
+        .map((team) => team.id),
+    })),
   }),
   orderedFixture(8),
   orderedFixture(16),

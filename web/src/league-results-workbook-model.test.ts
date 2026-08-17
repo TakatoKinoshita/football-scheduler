@@ -55,8 +55,8 @@ function rowForTeam(sheet: WorkbookSheet, teamName: string): Array<string | numb
 
 describe("リーグ結果Excel workbookモデル", () => {
   it("version管理された全fixtureを1ブロック1sheetへ変換する", () => {
-    expect(LEAGUE_RESULTS_WORKBOOK_FIXTURE_VERSION).toBe("1.0.0");
-    expect(leagueResultsWorkbookFixtures).toHaveLength(8);
+    expect(LEAGUE_RESULTS_WORKBOOK_FIXTURE_VERSION).toBe("1.1.0");
+    expect(leagueResultsWorkbookFixtures).toHaveLength(9);
     for (const fixture of leagueResultsWorkbookFixtures) {
       const workbook = buildLeagueResultsWorkbook(fixture.document);
       const blocks = (plan(fixture.document).blocks as JsonObject[]);
@@ -64,9 +64,14 @@ describe("リーグ結果Excel workbookモデル", () => {
       expect(workbook.fileName.endsWith("_1日目リーグ結果.xlsx")).toBe(true);
       workbook.sheets.forEach((sheet, index) => {
         const block = blocks[index]!;
-        expect(values(sheet)[0]).toEqual(["大会名", fixture.document.tournament.name]);
+        expect(values(sheet)[0]?.slice(0, 2)).toEqual(["大会名", fixture.document.tournament.name]);
         expect(values(sheet)[1]?.[1]).toBe(block.display_name ?? `${String(block.id)}ブロック`);
-        expect(values(sheet)[2]).toEqual(["保存日時", "2026/08/17 15:00"]);
+        expect(values(sheet)[2]?.slice(0, 2)).toEqual(["保存日時", "2026/08/17 15:00"]);
+        expect(sheet.rows[0]?.[1]?.columnSpan).toBe(sheet.columns.length - 1);
+        expect(sheet.rows[3]?.[0]).toMatchObject({
+          value: expect.stringContaining("空欄 未実施"),
+          columnSpan: sheet.columns.length,
+        });
         expect(sheet.rows.length).toBeGreaterThan((block.team_ids as string[]).length + 4);
       });
     }
@@ -76,8 +81,9 @@ describe("リーグ結果Excel workbookモデル", () => {
     const workbook = buildLeagueResultsWorkbook(requiredFixture("league-results-direct-4"));
     const sheet = workbook.sheets[0]!;
     const rows = values(sheet);
-    expect(rows[4]?.slice(0, 5)).toEqual(["チーム", "チームA", "チームB", "チームC", "チームD"]);
-    expect(rows.slice(5, 9).map((row) => row[0])).toEqual([
+    expect(rows[4]).toEqual([]);
+    expect(rows[5]?.slice(0, 5)).toEqual(["チーム", "チームA", "チームB", "チームC", "チームD"]);
+    expect(rows.slice(6, 10).map((row) => row[0])).toEqual([
       "チームA", "チームB", "チームC", "チームD",
     ]);
     expect(rowForTeam(sheet, "チームA").slice(1, 5)).toEqual([
@@ -86,7 +92,17 @@ describe("リーグ結果Excel workbookモデル", () => {
     expect(rowForTeam(sheet, "チームD").slice(1, 5)).toEqual([
       "○ 1-0", "○ 1-0", "● 0-1", "—",
     ]);
-    expect(sheet.rows[5]?.[1]).toMatchObject({ backgroundColor: "#E5E7E6" });
+    expect(sheet.rows[6]?.[1]).toMatchObject({ backgroundColor: "#D9D9D9" });
+    expect(sheet.rows[5]?.slice(0, 5).every((cell) =>
+      cell?.backgroundColor === "#F2F2F2" && cell.textColor === undefined
+    )).toBe(true);
+    expect(sheet.rows.slice(6, 10).every((row) =>
+      row[0]?.backgroundColor === "#F2F2F2" && row[0].fontWeight === "bold"
+    )).toBe(true);
+    expect(sheet.rows[5]?.slice(5).every((cell) =>
+      cell?.backgroundColor === "#4A4A4A" && cell.textColor === "#FFFFFF"
+    )).toBe(true);
+    expect(rows[5]).not.toContain("試合");
   });
 
   it("保存済み順位を登録順のチーム行へ結合し、直接対戦値を再計算せず表示する", () => {
@@ -94,39 +110,46 @@ describe("リーグ結果Excel workbookモデル", () => {
     const sheet = workbook.sheets[0]!;
     const a = rowForTeam(sheet, "チームA");
     const c = rowForTeam(sheet, "チームC");
-    expect(a.slice(5)).toEqual([
-      3, 1, 0, 2, 3, 1, 2, -1, 3, "直接対戦", 3, 1, 1,
-    ]);
-    expect(c.slice(5)).toEqual([
-      3, 2, 0, 1, 6, 2, 1, 1, 1, "直接対戦", 3, 1, 1,
-    ]);
-    expect(sheet.rows[5]?.slice(5, 14).every((cell) => cell?.kind === "number")).toBe(true);
+    expect(a.slice(5)).toEqual([1, 0, 2, 3, 1, 2, -1, 3]);
+    expect(c.slice(5)).toEqual([2, 0, 1, 6, 2, 1, 1, 1]);
+    expect(sheet.rows[6]?.slice(5, 13).every((cell) => cell?.kind === "number")).toBe(true);
+    expect(sheet.rows[6]?.[5]).toMatchObject({ leftBorderStyle: "medium" });
+    expect(sheet.rows[6]?.[8]).toMatchObject({ fontWeight: "bold" });
+    expect(sheet.rows[6]?.[12]).toMatchObject({
+      fontWeight: "bold",
+      leftBorderStyle: "medium",
+      rightBorderStyle: "medium",
+    });
+    expect(values(sheet)).toContainEqual([1, "チームC", "直接対戦", 3, 1, 1]);
+    expect(values(sheet)).toContainEqual([3, "チームA", "直接対戦", 3, 1, 1]);
   });
 
   it("3チームミニリーグと残存同点群の保存済み監査値を維持する", () => {
     const mini = buildLeagueResultsWorkbook(requiredFixture("league-results-mini-league-4"));
-    expect(rowForTeam(mini.sheets[0]!, "チームC").slice(-3)).toEqual([3, 1, 3]);
-    expect(rowForTeam(mini.sheets[0]!, "チームA").slice(-3)).toEqual([3, -2, 1]);
+    expect(values(mini.sheets[0]!)).toContainEqual([1, "チームC", "直接対戦", 3, 1, 3]);
+    expect(values(mini.sheets[0]!)).toContainEqual([3, "チームA", "直接対戦", 3, -2, 1]);
 
     const residual = buildLeagueResultsWorkbook(requiredFixture("league-results-residual-draw-5"));
-    expect(rowForTeam(residual.sheets[0]!, "チームB").slice(-4)).toEqual([
-      "直接対戦後の抽選", 3, 1, 5,
+    expect(values(residual.sheets[0]!)).toContainEqual([
+      2, "チームB", "直接対戦後の抽選", 3, 1, 5,
     ]);
-    expect(rowForTeam(residual.sheets[0]!, "チームD").slice(-4)).toEqual([
-      "直接対戦後の抽選", 3, 1, 5,
+    expect(values(residual.sheets[0]!)).toContainEqual([
+      3, "チームD", "直接対戦後の抽選", 3, 1, 5,
     ]);
   });
 
   it("抽選番号・候補名・確定順を人間向けに表示し、内部digestを出力しない", () => {
     const workbook = buildLeagueResultsWorkbook(requiredFixture("league-results-all-draws-4"));
     const rows = values(workbook.sheets[0]!);
-    expect(rows).toContainEqual(["抽選記録"]);
+    expect(rows.some((row) => row[0] === "抽選記録")).toBe(true);
     expect(rows).toContainEqual(["抽選番号", 99]);
-    expect(rows).toContainEqual(["候補", "チームA、チームB、チームC、チームD"]);
-    expect(rows).toContainEqual([
-      "確定順",
-      "1. チームA → 2. チームC → 3. チームB → 4. チームD",
-    ]);
+    expect(rows.some((row) =>
+      row[0] === "候補" && row[1] === "チームA、チームB、チームC、チームD"
+    )).toBe(true);
+    expect(rows.some((row) =>
+      row[0] === "確定順"
+      && row[1] === "1. チームA → 2. チームC → 3. チームB → 4. チームD"
+    )).toBe(true);
     expect(rows.flat().some((value) => typeof value === "string" && value.includes("digest"))).toBe(false);
   });
 
@@ -157,9 +180,57 @@ describe("リーグ結果Excel workbookモデル", () => {
     ] as const) {
       const workbook = buildLeagueResultsWorkbook(requiredFixture(fixtureId));
       const sheet = workbook.sheets[0]!;
-      expect(sheet.columns).toHaveLength(1 + size + 13);
-      expect(sheet.rows[4]).toHaveLength(1 + size + 13);
-      expect(sheet.rows.slice(5, 5 + size)).toHaveLength(size);
+      expect(sheet.columns).toHaveLength(1 + size + 8);
+      expect(sheet.rows[5]).toHaveLength(1 + size + 8);
+      expect(sheet.rows.slice(6, 6 + size)).toHaveLength(size);
+      expect(sheet.stickyRowsCount).toBeUndefined();
+      expect(sheet.stickyColumnsCount).toBeUndefined();
+      expect(sheet).toMatchObject({
+        orientation: "landscape",
+        print: {
+          fitToWidth: 1,
+          fitToHeight: 0,
+          repeatRows: [6, 6],
+          repeatColumns: [1, 1],
+        },
+      });
+    }
+  });
+
+  it("16チーム・4ブロック・3コートfixtureを4sheetへ変換する", () => {
+    const document = requiredFixture("league-results-16-teams-4-blocks-3-courts");
+    expect(document.tournament.input.courts).toHaveLength(3);
+    expect(document.tournament.input.league).toMatchObject({ block_count: 4 });
+    const workbook = buildLeagueResultsWorkbook(document);
+    expect(workbook.sheets.map((sheet) => sheet.name)).toEqual([
+      "Aブロック", "Bブロック", "Cブロック", "Dブロック",
+    ]);
+    expect(workbook.sheets.every((sheet) => sheet.columns.length === 13)).toBe(true);
+  });
+
+  it("すべての文字・背景・罫線色をグレースケールで出力する", () => {
+    for (const fixture of leagueResultsWorkbookFixtures) {
+      const workbook = buildLeagueResultsWorkbook(fixture.document);
+      const colors: string[] = [];
+      for (const cell of workbook.sheets.flatMap((sheet) => sheet.rows.flat())) {
+        if (cell === null) continue;
+        for (const color of [
+          cell.textColor,
+          cell.backgroundColor,
+          cell.borderColor,
+          cell.leftBorderColor,
+          cell.rightBorderColor,
+          cell.topBorderColor,
+          cell.bottomBorderColor,
+        ]) {
+          if (color !== undefined) colors.push(color);
+        }
+      }
+      expect(colors.length).toBeGreaterThan(0);
+      expect(colors.every((color) => {
+        const channels = /^#([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/iu.exec(color);
+        return channels !== null && channels[1] === channels[2] && channels[2] === channels[3];
+      })).toBe(true);
     }
   });
 
