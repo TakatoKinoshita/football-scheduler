@@ -290,9 +290,27 @@ npm run preview:excel -- --output-dir /tmp/football-scheduler-excel-review
 ```
 
 ブラウザでは`npm run dev`のoriginで`/excel-preview.html`を開き、1日目リーグ、2日目同順位リーグ、
-2日目順位決定トーナメントのversion管理されたfixtureを切り替えられる。このページは本番build
+2日目順位決定トーナメントの日程と、1日目リーグ結果のversion管理されたfixtureを切り替えられる。
+このページは本番build
 entryとService Workerの対象外である。workbook生成はDOMやIndexedDBに依存せず、利用者入力を
 数式、macro、外部linkとして出力しない。
+
+1日目リーグの結果workbook基盤は、総当たり対戦マトリクスと保存済みの勝敗集計・順位・
+直接対戦値をチーム行で結合し、1ブロックを1sheetへ出力する。通常順位、2チーム直接対戦、
+3チームミニリーグ、残存同点抽選、全引き分け、複数ブロック、2・4・8・16チームの固定fixtureは
+次のコマンドで一括生成できる。
+
+```console
+cd web
+npm run preview:league-results
+npm run preview:league-results -- --output-dir /tmp/football-scheduler-league-results-review
+```
+
+この基盤は保存済み`league_standings`を順位の正本とし、export時に順位を再計算しない。一方で、
+league plan、全試合結果、参加チーム、保存済み集計値、順位・抽選監査値の対応は独立して検証し、
+不一致がある場合はworkbookを生成しない。抽選記録は抽選番号、候補チーム名、確定順だけを
+人間向けに表示し、digestや内部IDだけの値は配布物へ出力しない。
+
 採用済みの同じworkbook生成処理は本番のタブ3・4からも利用し、対象日の日程がない間は出力buttonを
 無効にする。生成済み日程を端末へ保存していれば、再読込み後やオフラインでもdownloadできる。
 2026-08-17のVite production buildでは、統合前のmain JavaScript `377.40 kB`（gzip `103.53 kB`）に

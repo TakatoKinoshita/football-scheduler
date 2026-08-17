@@ -3,10 +3,12 @@ import "./excel-preview.css";
 
 import {
   SCHEDULE_WORKBOOK_PREVIEW_MARKER,
-  scheduleWorkbookFixture,
   scheduleWorkbookFixtures,
 } from "./schedule-workbook-fixtures";
+import { leagueResultsWorkbookFixtures } from "./league-results-workbook-fixtures";
+import { buildLeagueResultsWorkbook } from "./league-results-workbook-model";
 import { buildScheduleWorkbook } from "./schedule-workbook-model";
+import type { WorkbookFile } from "./workbook";
 import { createWorkbookBlob, downloadWorkbookBlob } from "./xlsx-workbook";
 
 function requiredElement<T extends Element>(selector: string): T {
@@ -23,7 +25,26 @@ const downloadButton = requiredElement<HTMLButtonElement>("#excel-preview-downlo
 
 document.body.dataset.previewMarker = SCHEDULE_WORKBOOK_PREVIEW_MARKER;
 
-for (const fixture of scheduleWorkbookFixtures) {
+interface PreviewFixture {
+  id: string;
+  description: string;
+  build: () => WorkbookFile;
+}
+
+const workbookFixtures: readonly PreviewFixture[] = [
+  ...scheduleWorkbookFixtures.map((fixture): PreviewFixture => ({
+    id: fixture.id,
+    description: fixture.description,
+    build: () => buildScheduleWorkbook(fixture.document, fixture.scope),
+  })),
+  ...leagueResultsWorkbookFixtures.map((fixture): PreviewFixture => ({
+    id: fixture.id,
+    description: fixture.description,
+    build: () => buildLeagueResultsWorkbook(fixture.document),
+  })),
+];
+
+for (const fixture of workbookFixtures) {
   const option = document.createElement("option");
   option.value = fixture.id;
   option.textContent = fixture.description;
@@ -32,7 +53,7 @@ for (const fixture of scheduleWorkbookFixtures) {
 
 function requestedFixtureId(): string {
   return new URLSearchParams(window.location.search).get("fixture")
-    ?? scheduleWorkbookFixtures[0]!.id;
+    ?? workbookFixtures[0]!.id;
 }
 
 function setQuery(fixtureId: string): void {
@@ -45,7 +66,7 @@ function prepare(fixtureId: string): void {
   document.body.dataset.previewReady = "false";
   document.body.dataset.previewStatus = "loading";
   errorHost.textContent = "";
-  const fixture = scheduleWorkbookFixture(fixtureId);
+  const fixture = workbookFixtures.find((candidate) => candidate.id === fixtureId);
   if (fixture === undefined) {
     errorHost.textContent = `指定されたExcel fixture「${fixtureId}」は存在しません。`;
     downloadButton.disabled = true;
@@ -54,7 +75,7 @@ function prepare(fixtureId: string): void {
     return;
   }
   try {
-    const workbook = buildScheduleWorkbook(fixture.document, fixture.scope);
+    const workbook = fixture.build();
     fixtureSelect.value = fixture.id;
     description.textContent = fixture.description;
     fileName.textContent = workbook.fileName;

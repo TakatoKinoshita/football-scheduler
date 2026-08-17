@@ -5,6 +5,8 @@ import readXlsxFile from "read-excel-file/node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import tournamentDocumentJson from "../e2e/fixtures/issue75-eight-team-document.json";
+import { leagueResultsWorkbookFixture } from "./league-results-workbook-fixtures";
+import { buildLeagueResultsWorkbook } from "./league-results-workbook-model";
 import { buildScheduleWorkbook } from "./schedule-workbook-model";
 import type { JsonObject, TournamentDocument } from "./types";
 import { XLSX_MIME_TYPE, numberCell, textCell, type WorkbookFile } from "./workbook";
@@ -64,6 +66,31 @@ describe("ブラウザ内xlsx生成", () => {
       .map((path) => new TextDecoder().decode(files[path]!))
       .join("\n");
     expect(relationshipXml).not.toMatch(/TargetMode=["']External["']|relationships\/hyperlink/iu);
+    const worksheetXml = paths
+      .filter((path) => /^xl\/worksheets\/sheet\d+\.xml$/u.test(path))
+      .map((path) => new TextDecoder().decode(files[path]!))
+      .join("\n");
+    expect(worksheetXml).not.toMatch(/<f(?:\s|>)/u);
+    expect(worksheetXml).not.toContain("<hyperlink");
+  });
+
+  it("ブロック別リーグ結果を1ブロック1sheetで再読込みし、数値型と安全な文字列を保持する", async () => {
+    const fixture = leagueResultsWorkbookFixture("league-results-multiple-blocks-long-names");
+    if (fixture === undefined) throw new Error("リーグ結果fixtureがありません。");
+    const workbook = buildLeagueResultsWorkbook(fixture.document);
+    const blob = await createWorkbookBlob(workbook);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const sheets = await readXlsxFile(Buffer.from(bytes));
+    expect(sheets.map((sheet) => sheet.sheet)).toEqual(["東地区_予選", "東地区_予選 (2)"]);
+    expect(sheets[0]?.data[4]?.slice(0, 5)).toEqual([
+      "チーム", expect.stringContaining("=先頭記号"), "Aチーム2", "Aチーム3", "Aチーム4",
+    ]);
+    expect(typeof sheets[0]?.data[5]?.[5]).toBe("number");
+    expect(sheets[0]?.data[5]?.[0]).toEqual(expect.stringContaining("=先頭記号"));
+
+    const files = unzipSync(bytes);
+    const paths = Object.keys(files);
+    expect(paths.some((path) => /vbaProject\.bin|externalLinks/iu.test(path))).toBe(false);
     const worksheetXml = paths
       .filter((path) => /^xl\/worksheets\/sheet\d+\.xml$/u.test(path))
       .map((path) => new TextDecoder().decode(files[path]!))

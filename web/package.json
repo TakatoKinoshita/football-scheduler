@@ -12,6 +12,7 @@
     "preview:brackets": "node scripts/render-tournament-bracket-previews.mjs",
     "preview:print": "node scripts/render-print-preview-pdfs.mjs",
     "preview:excel": "node scripts/render-schedule-workbooks.mjs",
+    "preview:league-results": "node scripts/render-schedule-workbooks.mjs --fixture-set league-results",
     "preview:results": "node scripts/render-tournament-results-previews.mjs",
     "check:preview-isolation": "node scripts/check-preview-isolation.mjs",
     "test": "vitest run",
