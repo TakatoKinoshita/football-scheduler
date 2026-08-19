@@ -79,6 +79,7 @@ export function createTournamentDocument(now = new Date()): TournamentDocument {
         request_kind: "day1_league",
         teams: [],
         courts: [],
+        day1_arrival_preferences: [],
         league: {
           block_count: null,
           assignment_mode: "random",

@@ -309,6 +309,19 @@ root.innerHTML = `
             <span id="margin-minutes-error" class="field-error" role="alert"></span>
           </label>
         </div>
+        <details id="arrival-preferences" class="advanced-settings arrival-preferences" tabindex="-1">
+          <summary>遠方チームの開始セクションに配慮する</summary>
+          <p class="muted">指定したチームの試合を、できるだけ選択したセクション以降へ配置します。日程を長くしたり、ブロック分けを変更したりはしません。</p>
+          <div class="arrival-preference-toolbar">
+            <label class="field" for="arrival-bulk-section">
+              <span>希望する最初のセクション</span>
+              <input id="arrival-bulk-section" type="number" min="2" max="128" value="3" inputmode="numeric" />
+            </label>
+            <button id="arrival-apply" class="secondary" type="button">選択したチームに適用</button>
+          </div>
+          <div id="arrival-preference-team-list" class="arrival-preference-team-list"></div>
+          <span id="arrival-preferences-error" class="field-error" role="alert"></span>
+        </details>
         <details class="advanced-settings">
           <summary>1日目の詳細設定を表示</summary>
           <div class="form-grid">
@@ -762,6 +775,11 @@ const manualBlocksField = requiredElement<HTMLFieldSetElement>("#manual-blocks")
 const manualBlockSummary = requiredElement<HTMLElement>("#manual-block-summary");
 const manualBlockCounts = requiredElement<HTMLElement>("#manual-block-counts");
 const manualBlockTeamList = requiredElement<HTMLElement>("#manual-block-team-list");
+const arrivalPreferencesDetails = requiredElement<HTMLDetailsElement>("#arrival-preferences");
+const arrivalBulkSectionInput = requiredElement<HTMLInputElement>("#arrival-bulk-section");
+const arrivalApplyButton = requiredElement<HTMLButtonElement>("#arrival-apply");
+const arrivalPreferenceTeamList = requiredElement<HTMLElement>("#arrival-preference-team-list");
+const arrivalPreferencesError = requiredElement<HTMLElement>("#arrival-preferences-error");
 const finalStageFormatInput = requiredElement<HTMLSelectElement>("#final-stage-format");
 const finalStageFormatGuidance = requiredElement<HTMLElement>("#final-stage-format-guidance");
 const tournamentCountInput = requiredElement<HTMLSelectElement>("#tournament-count");
@@ -1565,6 +1583,26 @@ function renderResult(): void {
       "p",
       `旧ルールの日程です。隣接セクションで担当コートが変わる割当てが${String(legacyDay1ViolationCount)}件あります。閲覧・印刷はできますが、現在の規則に合わせるには1日目の日程を再作成してください。`,
       "notice legacy-schedule-warning",
+    );
+  }
+  const arrivalMetrics = asObjectArray(
+    asObject(result.metrics)?.day1_arrival_preference_metrics,
+  );
+  const unmetArrivalMetrics = arrivalMetrics.filter((metric) => metric.satisfied === false);
+  if (unmetArrivalMetrics.length > 0) {
+    const affectedTeams = unmetArrivalMetrics.map((metric) =>
+      typeof metric.team_id === "string"
+        ? (teamNames.get(metric.team_id) ?? metric.team_id)
+        : "名称未設定"
+    );
+    const earlyMatchCount = Number(
+      asObject(result.metrics)?.day1_arrival_early_match_count ?? 0,
+    );
+    appendTextElement(
+      content,
+      "p",
+      `開始セクションへの配慮を完全には満たせませんでした（${affectedTeams.join("、")}／希望より早い試合 ${String(earlyMatchCount)}件）。日程を長くしない範囲で最も希望に近い配置です。必要に応じて手動ブロック分けもお試しください。`,
+      "notice arrival-preference-warning",
     );
   }
 
@@ -3138,6 +3176,99 @@ function renderManualBlockAssignment(): void {
   }
 }
 
+function arrivalSectionTime(sectionNo: number): string | undefined {
+  const match = /^(\d{2}):(\d{2})$/u.exec(startTimeInput.value);
+  const duration = Number(gameDurationInput.value);
+  const margin = Number(marginInput.value);
+  if (match === null || !Number.isFinite(duration) || !Number.isFinite(margin)) return undefined;
+  const start = Number(match[1]) * 60 + Number(match[2]);
+  const minutes = start + (sectionNo - 1) * (duration + margin);
+  if (minutes >= 24 * 60) return undefined;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}頃`;
+}
+
+function readArrivalPreferences(): JsonObject[] {
+  return Array.from(
+    arrivalPreferenceTeamList.querySelectorAll<HTMLElement>(".arrival-preference-team-row"),
+  ).flatMap((row) => {
+    const teamId = row.dataset.teamId;
+    const checkbox = row.querySelector<HTMLInputElement>("input[type='checkbox']");
+    const sectionInput = row.querySelector<HTMLInputElement>("input[type='number']");
+    const earliestSection = sectionInput?.valueAsNumber;
+    return teamId !== undefined && checkbox?.checked === true
+      ? [{
+          team_id: teamId,
+          earliest_section:
+            typeof earliestSection === "number" && Number.isFinite(earliestSection)
+              ? earliestSection
+              : null,
+        }]
+      : [];
+  });
+}
+
+function renderArrivalPreferences(): void {
+  const teams = asObjectArray(documentState.tournament.input.teams).filter(
+    (team): team is JsonObject & { id: string } => typeof team.id === "string",
+  );
+  const preferences = new Map(
+    asObjectArray(documentState.tournament.input.day1_arrival_preferences).flatMap((item) =>
+      typeof item.team_id === "string"
+        ? [[item.team_id, item.earliest_section] as const]
+        : []
+    ),
+  );
+  arrivalPreferenceTeamList.replaceChildren();
+  for (const team of teams) {
+    const row = window.document.createElement("div");
+    row.className = "arrival-preference-team-row";
+    row.dataset.teamId = team.id;
+    const checkbox = window.document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = `arrival-preference-team-${team.id}`;
+    checkbox.checked = preferences.has(team.id);
+    checkbox.disabled = legacyCompatibility;
+    const label = window.document.createElement("label");
+    label.htmlFor = checkbox.id;
+    const teamName = typeof team.name === "string" ? team.name : team.id;
+    label.textContent = `${teamName}を配慮対象にする`;
+    const sectionInput = window.document.createElement("input");
+    sectionInput.type = "number";
+    sectionInput.min = "2";
+    sectionInput.max = "128";
+    sectionInput.inputMode = "numeric";
+    sectionInput.setAttribute("aria-label", `${teamName}の希望する最初のセクション`);
+    const savedSection = preferences.get(team.id);
+    sectionInput.value = savedSection === null
+      ? ""
+      : String(savedSection ?? Math.max(2, arrivalBulkSectionInput.valueAsNumber || 3));
+    sectionInput.disabled = legacyCompatibility || !checkbox.checked;
+    const timing = window.document.createElement("small");
+    const updateTiming = (): void => {
+      const sectionNo = sectionInput.valueAsNumber;
+      const time = Number.isInteger(sectionNo) ? arrivalSectionTime(sectionNo) : undefined;
+      timing.textContent = Number.isInteger(sectionNo)
+        ? `第${String(sectionNo)}セクション${time === undefined ? "" : `（${time}）`}以降`
+        : "";
+    };
+    updateTiming();
+    checkbox.addEventListener("change", () => {
+      sectionInput.disabled = !checkbox.checked;
+      onConfigurationChanged();
+    });
+    sectionInput.addEventListener("change", () => {
+      updateTiming();
+      onConfigurationChanged();
+    });
+    row.append(checkbox, label, sectionInput, timing);
+    arrivalPreferenceTeamList.append(row);
+  }
+  arrivalBulkSectionInput.disabled = legacyCompatibility || teams.length === 0;
+  arrivalApplyButton.disabled = legacyCompatibility || teams.length === 0;
+}
+
 function setLegacyControlsDisabled(disabled: boolean): void {
   for (const control of [
     nameInput,
@@ -3167,6 +3298,12 @@ function setLegacyControlsDisabled(disabled: boolean): void {
   }
   requiredElement<HTMLElement>("#legacy-banner").hidden = !disabled;
   manualBlocksField.disabled = disabled;
+  for (const control of arrivalPreferencesDetails.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+    "input, button",
+  )) {
+    control.disabled = disabled || (control.type === "number" && control !== arrivalBulkSectionInput
+      && !control.closest(".arrival-preference-team-row")?.querySelector<HTMLInputElement>("input[type='checkbox']")?.checked);
+  }
   for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
     "[data-panel='3'] input, [data-panel='3'] select, [data-panel='3'] textarea, [data-panel='4'] input, [data-panel='4'] select, [data-panel='4'] textarea",
   )) {
@@ -3347,6 +3484,7 @@ function render(): void {
   setLegacyControlsDisabled(legacyCompatibility);
   renderFinalStageControls();
   renderManualBlockAssignment();
+  renderArrivalPreferences();
   clearFieldIssues();
   renderResult();
   setLegacyControlsDisabled(legacyCompatibility);
@@ -3370,6 +3508,9 @@ function updateDraft(invalidateResult = false): void {
     const seeded = assignmentModeInput.value === "seeded_snake";
     const previousLeague = asObject(previous.tournament.input.league);
     const blockCount = blockCountInput.value === "" ? 0 : Number(blockCountInput.value);
+    const arrivalPreferences = readArrivalPreferences().filter(
+      (preference) => teams.some((team) => team.id === preference.team_id),
+    );
     renderFinalStageControls();
     const keepManualDraft = assignmentModeInput.value === "manual"
       || asObjectArray(previousLeague?.manual_blocks).length > 0;
@@ -3411,6 +3552,7 @@ function updateDraft(invalidateResult = false): void {
             ...(seeded ? { seed: index + 1 } : {}),
           })),
           courts,
+          day1_arrival_preferences: arrivalPreferences,
           league: {
             block_count: blockCountInput.value === "" ? null : blockCount,
             assignment_mode: assignmentModeInput.value,
@@ -3452,6 +3594,7 @@ function updateDraft(invalidateResult = false): void {
   updateReview();
   renderFinalStageControls();
   renderManualBlockAssignment();
+  renderArrivalPreferences();
   saveState.textContent = "保存しています…";
   autosave.schedule(
     documentState,
@@ -3586,9 +3729,10 @@ function showFieldIssues(issues: FieldIssue[]): void {
   for (const issue of issues) {
     const field = document.getElementById(issue.field);
     const error = document.getElementById(`${issue.field}-error`);
+    if (field instanceof HTMLDetailsElement) field.open = true;
     field?.setAttribute("aria-invalid", "true");
     const container = field?.closest<HTMLElement>(
-      ".field, .check-field, .manual-block-team-row, .manual-block-assignment",
+      ".field, .check-field, .manual-block-team-row, .manual-block-assignment, .advanced-settings",
     );
     container?.classList.add("field-has-error");
     if (error !== null) {
@@ -3675,6 +3819,29 @@ for (const control of [
 finalStageFormatInput.addEventListener("change", renderFinalStageControls);
 blockCountInput.addEventListener("change", renderFinalStageControls);
 teamsInput.addEventListener("input", renderFinalStageControls);
+arrivalApplyButton.addEventListener("click", () => {
+  const sectionNo = arrivalBulkSectionInput.valueAsNumber;
+  if (!Number.isInteger(sectionNo) || sectionNo < 2 || sectionNo > 128) {
+    arrivalPreferencesError.textContent = "希望セクションは2から128までの整数で入力してください。";
+    arrivalBulkSectionInput.setAttribute("aria-invalid", "true");
+    arrivalBulkSectionInput.focus();
+    return;
+  }
+  arrivalPreferencesError.textContent = "";
+  arrivalBulkSectionInput.removeAttribute("aria-invalid");
+  let selected = false;
+  for (const row of arrivalPreferenceTeamList.querySelectorAll<HTMLElement>(
+    ".arrival-preference-team-row",
+  )) {
+    const checkbox = row.querySelector<HTMLInputElement>("input[type='checkbox']");
+    const input = row.querySelector<HTMLInputElement>("input[type='number']");
+    if (checkbox?.checked === true && input !== null) {
+      input.value = String(sectionNo);
+      selected = true;
+    }
+  }
+  if (selected) onConfigurationChanged();
+});
 for (const stepButton of document.querySelectorAll<HTMLButtonElement>(".step[data-step]")) {
   stepButton.addEventListener("click", () => {
     const step = Number(stepButton.dataset.step) as WizardStep;

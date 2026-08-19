@@ -160,6 +160,132 @@ function validateReferences(input: JsonObject, teams: JsonObject[], matches: Jso
   }
 }
 
+function validateDay1ArrivalPreferences(input: JsonObject, teams: JsonObject[]): void {
+  if (input.day1_arrival_preferences === undefined) return;
+  const preferences = arrayValue(
+    input.day1_arrival_preferences,
+    "開始セクションへ配慮するチーム",
+    LIMITS.teams,
+  );
+  const teamIds = new Set(teams.map((team) => String(team.id)));
+  const seen = new Set<string>();
+  for (const preference of preferences) {
+    if (
+      typeof preference.team_id !== "string" ||
+      !teamIds.has(preference.team_id) ||
+      seen.has(preference.team_id) ||
+      typeof preference.earliest_section !== "number" ||
+      !Number.isInteger(preference.earliest_section) ||
+      preference.earliest_section < 2 ||
+      preference.earliest_section > LIMITS.sections
+    ) {
+      throw new ImportValidationError(
+        "INVALID_REFERENCE",
+        "開始セクションへ配慮するチームまたは希望セクションが不正です。",
+      );
+    }
+    seen.add(preference.team_id);
+  }
+}
+
+function validateDay1ArrivalAudit(
+  result: JsonObject,
+  input: JsonObject,
+  matches: JsonObject[],
+  slots: JsonObject[],
+): void {
+  if (input.day1_arrival_preferences === undefined) return;
+  const preferences = arrayValue(
+    input.day1_arrival_preferences,
+    "開始セクションへ配慮するチーム",
+    LIMITS.teams,
+  );
+  if (preferences.length === 0) return;
+  const metrics = objectValue(result.metrics, "1日目日程の監査値を読み取れませんでした。");
+  const slotByMatch = new Map(
+    slots.flatMap((slot) =>
+      typeof slot.match_id === "string" ? [[slot.match_id, slot] as const] : []
+    ),
+  );
+  const expectedMetrics = [...preferences]
+    .sort((left, right) => {
+      const leftId = String(left.team_id);
+      const rightId = String(right.team_id);
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    })
+    .map((preference) => {
+      const teamId = String(preference.team_id);
+      const earliestSection = Number(preference.earliest_section);
+      const relevantMatches = matches
+        .filter((match) => [
+          ...(Array.isArray(match.possible_home_team_ids) ? match.possible_home_team_ids : []),
+          ...(Array.isArray(match.possible_away_team_ids) ? match.possible_away_team_ids : []),
+        ].includes(teamId))
+        .sort((left, right) => {
+          const leftId = String(left.id);
+          const rightId = String(right.id);
+          return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+        });
+      const earlyMatches = relevantMatches.flatMap((match) => {
+        const slot = slotByMatch.get(String(match.id));
+        const sectionNo = Number(slot?.section_no);
+        return Number.isInteger(sectionNo) && sectionNo < earliestSection
+          ? [{
+              match_id: String(match.id),
+              section_no: sectionNo,
+              section_shortfall: earliestSection - sectionNo,
+            }]
+          : [];
+      });
+      const earlyRefereeCount = slots.filter((slot) => {
+        const assignment = typeof slot.referee_assignment === "object"
+            && slot.referee_assignment !== null
+            && !Array.isArray(slot.referee_assignment)
+          ? slot.referee_assignment as JsonObject
+          : undefined;
+        return Number(slot.section_no) < earliestSection
+          && (assignment?.kind ?? assignment?.type) === "team"
+          && assignment?.team_id === teamId;
+      }).length;
+      return {
+        team_id: teamId,
+        earliest_section: earliestSection,
+        match_count: relevantMatches.length,
+        early_match_count: earlyMatches.length,
+        early_referee_count: earlyRefereeCount,
+        total_section_shortfall: earlyMatches.reduce(
+          (total, match) => total + match.section_shortfall,
+          0,
+        ),
+        early_matches: earlyMatches,
+        satisfied: earlyMatches.length === 0 && earlyRefereeCount === 0,
+      };
+    });
+  const uniqueEarlyMatches = new Set(
+    expectedMetrics.flatMap((preference) => preference.early_matches.map((match) => match.match_id)),
+  );
+  const expectedScalars = {
+    day1_arrival_early_match_count: uniqueEarlyMatches.size,
+    day1_arrival_total_section_shortfall: expectedMetrics.reduce(
+      (total, preference) => total + preference.total_section_shortfall,
+      0,
+    ),
+    day1_arrival_early_referee_count: expectedMetrics.reduce(
+      (total, preference) => total + preference.early_referee_count,
+      0,
+    ),
+  };
+  if (
+    JSON.stringify(metrics.day1_arrival_preference_metrics) !== JSON.stringify(expectedMetrics) ||
+    Object.entries(expectedScalars).some(([key, value]) => metrics[key] !== value)
+  ) {
+    throw new ImportValidationError(
+      "INVALID_REFERENCE",
+      "開始セクションへの配慮に関する監査値が日程と一致しません。日程を再生成してください。",
+    );
+  }
+}
+
 function stringArray(value: unknown, label: string): string[] {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
     throw new ImportValidationError(
@@ -515,6 +641,8 @@ function validateDay1ScheduleResult(
       "1日目日程に配置されていないリーグ試合があります。",
     );
   }
+
+  validateDay1ArrivalAudit(result, input, matches, slots);
 
   if (result.section_timings === undefined) return;
   if (!currentDay1Format) day = validateDay1ScheduleSettings(input);
@@ -3103,6 +3231,7 @@ export function parseTournamentJson(text: string): TournamentDocument {
     ? []
     : arrayValue(input.matches, "試合", LIMITS.matches);
   validateReferences(input, teams, matches);
+  validateDay1ArrivalPreferences(input, teams);
   validateDay2Settings(input);
   validateManualLeagueSettings(input, teams, false);
   validateFinalStageImportInput(input, teams);

@@ -398,6 +398,55 @@ describe("大会JSONの入出力", () => {
     expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
   });
 
+  it("開始セクションへの配慮と監査値をJSON往復し、改ざんを拒否する", () => {
+    const document = scheduleViewTournamentFixture() as unknown as TournamentDocument;
+    document.tournament.input.day1_arrival_preferences = [
+      { team_id: "team-01", earliest_section: 3 },
+    ];
+    const result = document.tournament.result as Record<string, unknown>;
+    const metrics = result.metrics as Record<string, unknown>;
+    metrics.day1_arrival_preference_metrics = [{
+      team_id: "team-01",
+      earliest_section: 3,
+      match_count: 1,
+      early_match_count: 1,
+      early_referee_count: 0,
+      total_section_shortfall: 2,
+      early_matches: [{ match_id: "LG-A-M1", section_no: 1, section_shortfall: 2 }],
+      satisfied: false,
+    }];
+    metrics.day1_arrival_early_match_count = 1;
+    metrics.day1_arrival_total_section_shortfall = 2;
+    metrics.day1_arrival_early_referee_count = 0;
+
+    expect(parseTournamentJson(serializeTournamentJson(document))).toEqual(document);
+
+    metrics.day1_arrival_total_section_shortfall = 1;
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/監査値/);
+  });
+
+  it("開始セクションへの配慮で未知チームと範囲外セクションを拒否する", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "緑" },
+      { id: "team-04", name: "白" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "strict_same_rank",
+    };
+    document.tournament.input.day1_arrival_preferences = [
+      { team_id: "unknown", earliest_section: 1 },
+    ];
+
+    expect(() => parseTournamentJson(JSON.stringify(document))).toThrow(/希望セクション/);
+  });
+
   it("同順位リーグの仮計画と仮日程を同じ内容で復元する", () => {
     const document = sameRankWebFixture(16, { resolved: false });
     expect(parseTournamentJson(serializeTournamentJson(document as unknown as TournamentDocument)))

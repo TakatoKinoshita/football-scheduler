@@ -14,6 +14,8 @@ from typing import Any
 from ortools.sat.python import cp_model
 
 from football_scheduler.models import (
+    ArrivalPreferenceEarlyMatch,
+    Day1ArrivalPreferenceMetric,
     Diagnostic,
     MatchSpec,
     ObjectiveStageMetric,
@@ -128,6 +130,70 @@ class _ObjectiveAudit:
     best_bound: float | None
     optimality_proven: bool
     termination_reason: str
+
+
+@dataclass(frozen=True)
+class _ArrivalPreferenceObjective:
+    early_match_count: cp_model.IntVar
+    total_section_shortfall: cp_model.IntVar
+    combined_score: cp_model.IntVar
+
+
+def _add_day1_arrival_preference_objective(
+    model: cp_model.CpModel,
+    request: ScheduleRequest,
+    match_in_section: Mapping[tuple[int, int], cp_model.IntVar],
+    horizon: int,
+) -> _ArrivalPreferenceObjective | None:
+    """試合数、次に不足セクション数を最小化する安全な合成目的を作る。"""
+
+    if not request.day1_arrival_preferences:
+        return None
+    earliest_by_team = {
+        preference.team_id: preference.earliest_section
+        for preference in request.day1_arrival_preferences
+    }
+    early_matches: list[cp_model.IntVar] = []
+    shortfall_terms: list[cp_model.LinearExpr] = []
+    shortfall_upper_bound = 0
+    for match_index, match in enumerate(request.matches):
+        team_violations: list[cp_model.IntVar] = []
+        for team_id in sorted(match.possible_team_ids):
+            earliest = earliest_by_team.get(team_id)
+            if earliest is None:
+                continue
+            early = model.new_bool_var(f"arrival_early_{match_index}_{team_id}")
+            early_sections = range(min(horizon, earliest - 1))
+            model.add(
+                early == sum(match_in_section[match_index, section] for section in early_sections)
+            )
+            team_violations.append(early)
+            for section in early_sections:
+                shortfall_terms.append(
+                    (earliest - (section + 1)) * match_in_section[match_index, section]
+                )
+            shortfall_upper_bound += earliest - 1
+        if team_violations:
+            violated = model.new_bool_var(f"arrival_match_{match_index}_violated")
+            model.add_max_equality(violated, team_violations)
+            early_matches.append(violated)
+
+    early_match_count = model.new_int_var(0, len(early_matches), "day1_arrival_early_match_count")
+    model.add(early_match_count == sum(early_matches))
+    total_shortfall = model.new_int_var(
+        0,
+        shortfall_upper_bound,
+        "day1_arrival_total_section_shortfall",
+    )
+    model.add(total_shortfall == sum(shortfall_terms))
+    multiplier = shortfall_upper_bound + 1
+    combined = model.new_int_var(
+        0,
+        len(early_matches) * multiplier + shortfall_upper_bound,
+        "day1_arrival_preference_score",
+    )
+    model.add(combined == early_match_count * multiplier + total_shortfall)
+    return _ArrivalPreferenceObjective(early_match_count, total_shortfall, combined)
 
 
 def _supports_compact_day1_league_model(request: ScheduleRequest) -> bool:
@@ -475,8 +541,24 @@ def _solve_compact_day1_league(
             (_failure_diagnostic(status, request, maximum_horizon),),
         )
 
+    arrival_known_variable_count = len(compact.model.proto.variables)
+    arrival_objective = _add_day1_arrival_preference_objective(
+        compact.model,
+        request,
+        compact.match_in_section,
+        used_sections,
+    )
+    arrival_objective_names = (
+        (
+            "day1_arrival_early_match_count",
+            "day1_arrival_total_section_shortfall",
+        )
+        if arrival_objective is not None
+        else ()
+    )
     objective_order = (
         "used_sections",
+        *arrival_objective_names,
         "league_team_referee_count_difference",
         "maximum_team_wait_sections",
         "team_court_change_count",
@@ -498,10 +580,44 @@ def _solve_compact_day1_league(
         audits["court_usage_difference"] = _ObjectiveAudit(0.0, True, "capacity_balance")
     optimized = ["used_sections"]
     completed_upper_stages = True
+    if arrival_objective is not None:
+        remaining = solver_time_budget - wall_time
+        if remaining > 0.001:
+            candidate, stage_status, elapsed, audit = _stage_solver(
+                compact.model,
+                solver,
+                arrival_objective.combined_score,
+                arrival_known_variable_count,
+                max(0.001, remaining / 4),
+                request.random_seed,
+            )
+            wall_time += elapsed
+            if stage_status is SolverStatus.OPTIMAL:
+                solver = candidate
+                early_value = candidate.value(arrival_objective.early_match_count)
+                shortfall_value = candidate.value(arrival_objective.total_section_shortfall)
+                audits["day1_arrival_early_match_count"] = _ObjectiveAudit(
+                    float(early_value), True, audit.termination_reason
+                )
+                audits["day1_arrival_total_section_shortfall"] = _ObjectiveAudit(
+                    float(shortfall_value), True, audit.termination_reason
+                )
+                optimized.extend(arrival_objective_names)
+            else:
+                failed_audit = _ObjectiveAudit(None, False, audit.termination_reason)
+                audits["day1_arrival_early_match_count"] = failed_audit
+                audits["day1_arrival_total_section_shortfall"] = failed_audit
+                completed_upper_stages = False
+        else:
+            failed_audit = _ObjectiveAudit(None, False, "time_limit")
+            audits["day1_arrival_early_match_count"] = failed_audit
+            audits["day1_arrival_total_section_shortfall"] = failed_audit
+            completed_upper_stages = False
+
     referee_lower_bound = _league_referee_difference_lower_bound(request, used_sections)
     compact.model.add(compact.referee_count_difference >= referee_lower_bound)
     remaining = solver_time_budget - wall_time
-    if remaining > 0.001:
+    if completed_upper_stages and remaining > 0.001:
         candidate, status, elapsed, audit = _stage_solver(
             compact.model,
             solver,
@@ -517,7 +633,7 @@ def _solve_compact_day1_league(
             optimized.append("league_team_referee_count_difference")
         else:
             completed_upper_stages = False
-    else:
+    elif completed_upper_stages:
         audits["league_team_referee_count_difference"] = _ObjectiveAudit(None, False, "time_limit")
         completed_upper_stages = False
 
@@ -658,6 +774,12 @@ def _solve_compact_day1_league(
 
     frozen_slots = tuple(slots)
     audit_values = _audit_schedule_quality(request, frozen_slots)
+    (
+        arrival_metrics,
+        arrival_early_match_count,
+        arrival_total_shortfall,
+        arrival_early_referee_count,
+    ) = _audit_day1_arrival_preferences(request, frozen_slots)
     referee_counts = {team.id: 0 for team in request.teams}
     for slot in frozen_slots:
         assignment = slot.referee_assignment
@@ -669,13 +791,21 @@ def _solve_compact_day1_league(
     maximum_count = max(count_values, default=0)
     objective_values = {
         "used_sections": used_sections,
+        **(
+            {
+                "day1_arrival_early_match_count": arrival_early_match_count,
+                "day1_arrival_total_section_shortfall": arrival_total_shortfall,
+            }
+            if arrival_objective is not None
+            else {}
+        ),
         "league_team_referee_count_difference": maximum_count - minimum_count,
         "maximum_team_wait_sections": audit_values["maximum_team_wait_sections"],
         "team_court_change_count": audit_values["team_court_change_count"],
         "court_usage_difference": audit_values["court_usage_difference"],
     }
     all_proven = len(optimized) == len(objective_order)
-    diagnostics: tuple[Diagnostic, ...] = ()
+    diagnostics: list[Diagnostic] = []
     if not all_proven:
         first_unproven = next(name for name in objective_order if name not in optimized)
         stage_audit = audits[first_unproven]
@@ -686,13 +816,21 @@ def _solve_compact_day1_league(
         }
         if stage_audit.best_bound is not None:
             details["best_bound"] = stage_audit.best_bound
-        diagnostics = (
+        diagnostics.append(
             Diagnostic(
                 code="OPTIMALITY_NOT_PROVEN",
                 message="実行可能な日程は見つかりましたが、下位目的の最適性は制限時間内に証明できませんでした。",
                 details=details,
-            ),
+            )
         )
+    arrival_diagnostic = _arrival_preference_diagnostic(
+        arrival_metrics,
+        arrival_early_match_count,
+        arrival_total_shortfall,
+        arrival_early_referee_count,
+    )
+    if arrival_diagnostic is not None:
+        diagnostics.append(arrival_diagnostic)
 
     return ScheduleResult(
         status=SolverStatus.OPTIMAL if all_proven else SolverStatus.FEASIBLE,
@@ -718,6 +856,16 @@ def _solve_compact_day1_league(
             league_team_referee_count_min=minimum_count,
             league_team_referee_count_max=maximum_count,
             league_team_referee_count_difference=maximum_count - minimum_count,
+            day1_arrival_preference_metrics=arrival_metrics,
+            day1_arrival_early_match_count=(
+                arrival_early_match_count if arrival_objective is not None else None
+            ),
+            day1_arrival_total_section_shortfall=(
+                arrival_total_shortfall if arrival_objective is not None else None
+            ),
+            day1_arrival_early_referee_count=(
+                arrival_early_referee_count if arrival_objective is not None else None
+            ),
             maximum_team_wait_sections=audit_values["maximum_team_wait_sections"],
             referee_then_match_count=audit_values["referee_then_match_count"],
             league_previous_same_court_referee_count=audit_values[
@@ -745,7 +893,7 @@ def _solve_compact_day1_league(
             ),
             optimality_proven=all_proven,
         ),
-        diagnostics=diagnostics,
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -986,12 +1134,48 @@ def _solve_schedule_at_horizon(
         else primary_solver.best_objective_bound
     )
     remaining_time = solver_time_budget - wall_time
+    arrival_known_variable_count = len(model.proto.variables)
+    arrival_objective = _add_day1_arrival_preference_objective(
+        model,
+        request,
+        match_in_section,
+        horizon,
+    )
+    arrival_stage_complete = arrival_objective is None
+    if primary_status is SolverStatus.OPTIMAL and arrival_objective is not None:
+        model.add(used_sections_expression == primary_used_sections)
+        if remaining_time > 0.001:
+            arrival_solver, arrival_status, arrival_wall_time, _arrival_audit = _stage_solver(
+                model,
+                solver,
+                arrival_objective.combined_score,
+                arrival_known_variable_count,
+                max(0.001, remaining_time / 3),
+                request.random_seed,
+            )
+            wall_time += arrival_wall_time
+            if arrival_status is SolverStatus.OPTIMAL:
+                solver = arrival_solver
+                optimized_objectives.extend(
+                    (
+                        "day1_arrival_early_match_count",
+                        "day1_arrival_total_section_shortfall",
+                    )
+                )
+                arrival_stage_complete = True
+            else:
+                status = SolverStatus.FEASIBLE
+        remaining_time = solver_time_budget - wall_time
     fairness_time_threshold = (
         _LARGE_LEAGUE_FAIRNESS_TIME_SECONDS
         if league_match_count > 24
         else _MIN_FAIRNESS_TIME_SECONDS
     )
-    if primary_status is SolverStatus.OPTIMAL and remaining_time >= fairness_time_threshold:
+    if (
+        primary_status is SolverStatus.OPTIMAL
+        and arrival_stage_complete
+        and remaining_time >= fairness_time_threshold
+    ):
         league_referee_count: dict[str, cp_model.IntVar] = {}
         for team_id in team_ids:
             count = model.new_int_var(0, league_match_count, f"league_referee_count_{team_id}")
@@ -1153,15 +1337,29 @@ def _solve_schedule_at_horizon(
     minimum_league_referee_count_value = min(league_referee_count_values, default=0)
     maximum_league_referee_count_value = max(league_referee_count_values, default=0)
     audit = _audit_schedule_quality(request, tuple(slots))
+    (
+        arrival_metrics,
+        arrival_early_match_count,
+        arrival_total_shortfall,
+        arrival_early_referee_count,
+    ) = _audit_day1_arrival_preferences(request, tuple(slots))
 
-    diagnostics: tuple[Diagnostic, ...] = ()
+    diagnostics: list[Diagnostic] = []
     if status is SolverStatus.FEASIBLE:
-        diagnostics = (
+        diagnostics.append(
             Diagnostic(
                 code="OPTIMALITY_NOT_PROVEN",
                 message="実行可能な日程は見つかりましたが、制限時間内に最適性を証明できませんでした。",
-            ),
+            )
         )
+    arrival_diagnostic = _arrival_preference_diagnostic(
+        arrival_metrics,
+        arrival_early_match_count,
+        arrival_total_shortfall,
+        arrival_early_referee_count,
+    )
+    if arrival_diagnostic is not None:
+        diagnostics.append(arrival_diagnostic)
 
     return ScheduleResult(
         status=status,
@@ -1188,6 +1386,16 @@ def _solve_schedule_at_horizon(
             league_team_referee_count_difference=(
                 maximum_league_referee_count_value - minimum_league_referee_count_value
             ),
+            day1_arrival_preference_metrics=arrival_metrics,
+            day1_arrival_early_match_count=(
+                arrival_early_match_count if arrival_objective is not None else None
+            ),
+            day1_arrival_total_section_shortfall=(
+                arrival_total_shortfall if arrival_objective is not None else None
+            ),
+            day1_arrival_early_referee_count=(
+                arrival_early_referee_count if arrival_objective is not None else None
+            ),
             maximum_team_wait_sections=audit["maximum_team_wait_sections"],
             referee_then_match_count=audit["referee_then_match_count"],
             league_previous_same_court_referee_count=audit[
@@ -1208,6 +1416,17 @@ def _solve_schedule_at_horizon(
                 )
                 for name, value in (
                     ("used_sections", used_sections),
+                    *(
+                        (
+                            ("day1_arrival_early_match_count", arrival_early_match_count),
+                            (
+                                "day1_arrival_total_section_shortfall",
+                                arrival_total_shortfall,
+                            ),
+                        )
+                        if arrival_objective is not None
+                        else ()
+                    ),
                     (
                         "league_team_referee_count_difference",
                         maximum_league_referee_count_value - minimum_league_referee_count_value,
@@ -1219,7 +1438,7 @@ def _solve_schedule_at_horizon(
             ),
             optimality_proven=status is SolverStatus.OPTIMAL,
         ),
-        diagnostics=diagnostics,
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -1691,6 +1910,12 @@ def _result_from_day1_league_hint(
 
     frozen_slots = tuple(slots)
     audit = _audit_schedule_quality(request, frozen_slots)
+    (
+        arrival_metrics,
+        arrival_early_match_count,
+        arrival_total_shortfall,
+        arrival_early_referee_count,
+    ) = _audit_day1_arrival_preferences(request, frozen_slots)
     counts = {team.id: 0 for team in request.teams}
     for slot in frozen_slots:
         if slot.match_id is None or match_by_id[slot.match_id].phase != "league":
@@ -1704,6 +1929,14 @@ def _result_from_day1_league_hint(
     maximum = max(count_values, default=0)
     objective_values = (
         ("used_sections", used_sections),
+        *(
+            (
+                ("day1_arrival_early_match_count", arrival_early_match_count),
+                ("day1_arrival_total_section_shortfall", arrival_total_shortfall),
+            )
+            if request.day1_arrival_preferences
+            else ()
+        ),
         ("league_team_referee_count_difference", maximum - minimum),
         ("maximum_team_wait_sections", audit["maximum_team_wait_sections"]),
         ("team_court_change_count", audit["team_court_change_count"]),
@@ -1728,6 +1961,16 @@ def _result_from_day1_league_hint(
             league_team_referee_count_min=minimum,
             league_team_referee_count_max=maximum,
             league_team_referee_count_difference=maximum - minimum,
+            day1_arrival_preference_metrics=arrival_metrics,
+            day1_arrival_early_match_count=(
+                arrival_early_match_count if request.day1_arrival_preferences else None
+            ),
+            day1_arrival_total_section_shortfall=(
+                arrival_total_shortfall if request.day1_arrival_preferences else None
+            ),
+            day1_arrival_early_referee_count=(
+                arrival_early_referee_count if request.day1_arrival_preferences else None
+            ),
             maximum_team_wait_sections=audit["maximum_team_wait_sections"],
             referee_then_match_count=audit["referee_then_match_count"],
             league_previous_same_court_referee_count=audit[
@@ -1749,11 +1992,21 @@ def _result_from_day1_league_hint(
             ),
             optimality_proven=False,
         ),
-        diagnostics=(
-            Diagnostic(
-                code="OPTIMALITY_NOT_PROVEN",
-                message="実行可能な日程は見つかりましたが、制限時間内に最適性を証明できませんでした。",
-            ),
+        diagnostics=tuple(
+            item
+            for item in (
+                Diagnostic(
+                    code="OPTIMALITY_NOT_PROVEN",
+                    message="実行可能な日程は見つかりましたが、制限時間内に最適性を証明できませんでした。",
+                ),
+                _arrival_preference_diagnostic(
+                    arrival_metrics,
+                    arrival_early_match_count,
+                    arrival_total_shortfall,
+                    arrival_early_referee_count,
+                ),
+            )
+            if item is not None
         ),
     )
 
@@ -2063,6 +2316,86 @@ def _audit_schedule_quality(request: ScheduleRequest, slots: tuple[Slot, ...]) -
         "organizer_referee_count": organizer_count,
         "tournament_team_referee_count": tournament_team_referees,
     }
+
+
+def _audit_day1_arrival_preferences(
+    request: ScheduleRequest,
+    slots: tuple[Slot, ...],
+) -> tuple[tuple[Day1ArrivalPreferenceMetric, ...], int, int, int]:
+    """開始セクション配慮を実配置から独立に再集計する。"""
+
+    if not request.day1_arrival_preferences:
+        return (), 0, 0, 0
+    slot_by_match = {slot.match_id: slot for slot in slots if slot.match_id is not None}
+    unique_early_match_ids: set[str] = set()
+    total_shortfall = 0
+    total_early_referees = 0
+    metrics: list[Day1ArrivalPreferenceMetric] = []
+    for preference in sorted(request.day1_arrival_preferences, key=lambda item: item.team_id):
+        relevant_matches = sorted(
+            match.id for match in request.matches if preference.team_id in match.possible_team_ids
+        )
+        early_matches: list[ArrivalPreferenceEarlyMatch] = []
+        for match_id in relevant_matches:
+            slot = slot_by_match.get(match_id)
+            if slot is None or slot.section_no >= preference.earliest_section:
+                continue
+            shortfall = preference.earliest_section - slot.section_no
+            unique_early_match_ids.add(match_id)
+            total_shortfall += shortfall
+            early_matches.append(
+                ArrivalPreferenceEarlyMatch(
+                    match_id=match_id,
+                    section_no=slot.section_no,
+                    section_shortfall=shortfall,
+                )
+            )
+        early_referee_count = sum(
+            1
+            for slot in slots
+            if slot.section_no < preference.earliest_section
+            and slot.referee_assignment is not None
+            and slot.referee_assignment.kind is RefereeKind.TEAM
+            and slot.referee_assignment.team_id == preference.team_id
+        )
+        total_early_referees += early_referee_count
+        metrics.append(
+            Day1ArrivalPreferenceMetric(
+                team_id=preference.team_id,
+                earliest_section=preference.earliest_section,
+                match_count=len(relevant_matches),
+                early_match_count=len(early_matches),
+                early_referee_count=early_referee_count,
+                total_section_shortfall=sum(item.section_shortfall for item in early_matches),
+                early_matches=tuple(early_matches),
+                satisfied=not early_matches and early_referee_count == 0,
+            )
+        )
+    return tuple(metrics), len(unique_early_match_ids), total_shortfall, total_early_referees
+
+
+def _arrival_preference_diagnostic(
+    metrics: tuple[Day1ArrivalPreferenceMetric, ...],
+    early_match_count: int,
+    total_shortfall: int,
+    early_referee_count: int,
+) -> Diagnostic | None:
+    if early_match_count == 0 and early_referee_count == 0:
+        return None
+    affected = [item for item in metrics if not item.satisfied]
+    return Diagnostic(
+        code="DAY1_ARRIVAL_PREFERENCE_UNMET",
+        message="指定チームを希望セクション以降へ完全には配置できませんでした。日程表の警告を確認してください。",
+        details={
+            "team_ids": [item.team_id for item in affected],
+            "match_ids": sorted(
+                {match.match_id for item in affected for match in item.early_matches}
+            ),
+            "early_match_count": early_match_count,
+            "total_section_shortfall": total_shortfall,
+            "early_referee_count": early_referee_count,
+        },
+    )
 
 
 def _with_total_solver_wall_time(

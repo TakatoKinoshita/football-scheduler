@@ -14,6 +14,7 @@ from football_scheduler.fixtures import (
 )
 from football_scheduler.models import (
     Court,
+    Day1ArrivalPreference,
     DaySettings,
     MatchSpec,
     RefereeKind,
@@ -71,6 +72,110 @@ def test_referee_counts_are_serialized_in_team_id_order() -> None:
     assert [item.team_id for item in result.metrics.league_team_referee_counts] == sorted(
         team.id for team in base.teams
     )
+
+
+def _arrival_preference_request(earliest_section: int) -> ScheduleRequest:
+    teams = tuple(Team(id=team_id, name=team_id) for team_id in ("A", "B", "C"))
+    return ScheduleRequest(
+        teams=teams,
+        courts=(Court(id="court-a", name="Aコート"),),
+        matches=(
+            MatchSpec(
+                id="LG-A-M1",
+                possible_home_team_ids=("A",),
+                possible_away_team_ids=("B",),
+            ),
+            MatchSpec(
+                id="LG-A-M2",
+                possible_home_team_ids=("A",),
+                possible_away_team_ids=("C",),
+            ),
+        ),
+        day=DaySettings(max_sections=3),
+        referees=RefereeSettings(
+            organizer_capacity=1,
+            team_referees_required_after_first=False,
+        ),
+        day1_arrival_preferences=(
+            Day1ArrivalPreference(team_id="B", earliest_section=earliest_section),
+        ),
+        solver=SolverSettings(max_time_seconds=10),
+    )
+
+
+def test_arrival_preference_is_optimized_after_minimum_used_sections() -> None:
+    result = solve_schedule(_arrival_preference_request(2))
+    slots = {slot.match_id: slot for slot in result.slots if slot.match_id is not None}
+
+    assert result.status is SolverStatus.OPTIMAL
+    assert result.metrics.used_sections == 3
+    assert slots["LG-A-M1"].section_no == 3
+    assert result.metrics.day1_arrival_early_match_count == 0
+    assert result.metrics.day1_arrival_total_section_shortfall == 0
+    assert result.metrics.day1_arrival_preference_metrics[0].satisfied is True
+    objectives = [stage.objective for stage in result.metrics.objective_stages]
+    assert objectives[:3] == [
+        "used_sections",
+        "day1_arrival_early_match_count",
+        "day1_arrival_total_section_shortfall",
+    ]
+
+
+def test_unmet_arrival_preference_warns_without_extending_the_schedule() -> None:
+    result = solve_schedule(_arrival_preference_request(128))
+
+    assert result.status is SolverStatus.OPTIMAL
+    assert result.metrics.used_sections == 3
+    assert result.metrics.day1_arrival_early_match_count == 1
+    assert result.metrics.day1_arrival_total_section_shortfall == 125
+    assert result.metrics.day1_arrival_preference_metrics[0].satisfied is False
+    assert {item.code for item in result.diagnostics} >= {"DAY1_ARRIVAL_PREFERENCE_UNMET"}
+
+
+def test_overlapping_arrival_preferences_count_each_early_match_once() -> None:
+    base = _arrival_preference_request(128)
+    request = base.model_copy(
+        update={
+            "day1_arrival_preferences": (
+                Day1ArrivalPreference(team_id="A", earliest_section=128),
+                Day1ArrivalPreference(team_id="B", earliest_section=128),
+            )
+        }
+    )
+
+    result = solve_schedule(request)
+
+    assert result.status is SolverStatus.OPTIMAL
+    assert result.metrics.used_sections == 3
+    assert result.metrics.day1_arrival_early_match_count == 2
+    assert (
+        sum(item.early_match_count for item in result.metrics.day1_arrival_preference_metrics) == 3
+    )
+
+
+def test_arrival_preference_rejects_duplicate_and_unknown_teams() -> None:
+    dumped = _arrival_preference_request(2).model_dump(mode="json")
+    dumped["day1_arrival_preferences"] = [
+        {"team_id": "B", "earliest_section": 2},
+        {"team_id": "B", "earliest_section": 3},
+    ]
+    with pytest.raises(ValidationError, match="複数指定"):
+        ScheduleRequest.model_validate(dumped)
+
+    dumped["day1_arrival_preferences"] = [{"team_id": "unknown", "earliest_section": 2}]
+    with pytest.raises(ValidationError, match="未定義"):
+        ScheduleRequest.model_validate(dumped)
+
+
+@pytest.mark.parametrize("earliest_section", [1, 129])
+def test_arrival_preference_rejects_section_outside_supported_range(
+    earliest_section: int,
+) -> None:
+    dumped = _arrival_preference_request(2).model_dump(mode="json")
+    dumped["day1_arrival_preferences"] = [{"team_id": "B", "earliest_section": earliest_section}]
+
+    with pytest.raises(ValidationError):
+        ScheduleRequest.model_validate(dumped)
 
 
 def test_maximum_mvp_fixture_uses_documented_input_limits() -> None:

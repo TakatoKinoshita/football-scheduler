@@ -49,6 +49,13 @@ class Team(ContractModel):
     block_id: Identifier | None = None
 
 
+class Day1ArrivalPreference(ContractModel):
+    """1日目の試合を希望セクション以降へ寄せるチーム単位の配慮設定。"""
+
+    team_id: Identifier
+    earliest_section: Annotated[int, Field(ge=2, le=128)]
+
+
 class Court(ContractModel):
     id: Identifier
     name: NonEmptyText
@@ -146,6 +153,7 @@ class ScheduleRequest(ContractModel):
     matches: tuple[MatchSpec, ...]
     day: DaySettings
     referees: RefereeSettings
+    day1_arrival_preferences: tuple[Day1ArrivalPreference, ...] = ()
     random_seed: int = 20260803
     solver: SolverSettings = SolverSettings()
 
@@ -167,6 +175,15 @@ class ScheduleRequest(ContractModel):
             raise ValueError("コートIDは大会内で一意である必要があります")
         if len(set(match_ids)) != len(match_ids):
             raise ValueError("試合IDは大会内で一意である必要があります")
+
+        preference_team_ids = [item.team_id for item in self.day1_arrival_preferences]
+        if len(set(preference_team_ids)) != len(preference_team_ids):
+            raise ValueError("1日目の開始セクション配慮は同じチームへ複数指定できません")
+        unknown_preference_teams = set(preference_team_ids) - set(team_ids)
+        if unknown_preference_teams:
+            raise ValueError("1日目の開始セクション配慮が未定義チームを参照しています")
+        if self.day1_arrival_preferences and self.day.id != "day1":
+            raise ValueError("開始セクション配慮は1日目だけに指定できます")
 
         object.__setattr__(
             self,
@@ -245,6 +262,27 @@ class TeamRefereeCount(ContractModel):
     count: Annotated[int, Field(ge=0)]
 
 
+class ArrivalPreferenceEarlyMatch(ContractModel):
+    """指定セクションより前へ配置された1試合の監査値。"""
+
+    match_id: Identifier
+    section_no: Annotated[int, Field(gt=0)]
+    section_shortfall: Annotated[int, Field(gt=0)]
+
+
+class Day1ArrivalPreferenceMetric(ContractModel):
+    """1チーム分の開始セクション配慮の達成状況。"""
+
+    team_id: Identifier
+    earliest_section: Annotated[int, Field(ge=2, le=128)]
+    match_count: Annotated[int, Field(ge=0)]
+    early_match_count: Annotated[int, Field(ge=0)]
+    early_referee_count: Annotated[int, Field(ge=0)]
+    total_section_shortfall: Annotated[int, Field(ge=0)]
+    early_matches: tuple[ArrivalPreferenceEarlyMatch, ...] = ()
+    satisfied: bool
+
+
 class ObjectiveStageMetric(ContractModel):
     """辞書式最適化の目的別監査値。"""
 
@@ -280,6 +318,10 @@ class SolverMetrics(ContractModel):
     league_team_referee_count_min: Annotated[int, Field(ge=0)] | None = None
     league_team_referee_count_max: Annotated[int, Field(ge=0)] | None = None
     league_team_referee_count_difference: Annotated[int, Field(ge=0)] | None = None
+    day1_arrival_preference_metrics: tuple[Day1ArrivalPreferenceMetric, ...] = ()
+    day1_arrival_early_match_count: Annotated[int, Field(ge=0)] | None = None
+    day1_arrival_total_section_shortfall: Annotated[int, Field(ge=0)] | None = None
+    day1_arrival_early_referee_count: Annotated[int, Field(ge=0)] | None = None
     maximum_team_wait_sections: Annotated[int, Field(ge=0)] | None = None
     referee_then_match_count: Annotated[int, Field(ge=0)] | None = None
     league_previous_same_court_referee_count: Annotated[int, Field(ge=0)] | None = None

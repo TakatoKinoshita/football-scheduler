@@ -925,6 +925,13 @@ def _validate_limits(request: Mapping[str, Any]) -> None:
     _validate_sequence_limit(request, "teams", MAX_TEAMS, "チーム数", "TEAM_LIMIT_EXCEEDED")
     _validate_sequence_limit(request, "courts", MAX_COURTS, "コート数", "COURT_LIMIT_EXCEEDED")
     _validate_sequence_limit(request, "matches", MAX_MATCHES, "試合数", "MATCH_LIMIT_EXCEEDED")
+    _validate_sequence_limit(
+        request,
+        "day1_arrival_preferences",
+        MAX_TEAMS,
+        "開始セクションへ配慮するチーム数",
+        "TEAM_LIMIT_EXCEEDED",
+    )
 
     max_sections = request.get("max_sections")
     if max_sections is None:
@@ -1175,7 +1182,10 @@ def _build_validation_document(
         "schema_version": request.get("schema_version", SCHEMA_VERSION),
         "config": config,
         "matches": matches,
-        "schedule": {"slots": slots},
+        "schedule": {
+            "slots": slots,
+            "metrics": deepcopy(result.get("metrics", {})),
+        },
     }
 
 

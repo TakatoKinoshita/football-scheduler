@@ -95,6 +95,12 @@ textarea { resize: vertical; }
 .advanced-settings { margin-top: 1.2rem; padding: 1rem; background: #f3f2ec; border: 1px solid var(--border); border-radius: .5rem; }
 .advanced-settings summary { min-height: 44px; cursor: pointer; color: var(--green); font-weight: 800; }
 .advanced-settings[open] summary { margin-bottom: 1rem; }
+.arrival-preference-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin: .8rem 0 1rem; }
+.arrival-preference-toolbar .field { width: min(19rem, 100%); }
+.arrival-preference-team-list { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem 1rem; }
+.arrival-preference-team-row { display: grid; grid-template-columns: auto minmax(7rem, 1fr) 5.5rem; align-items: center; gap: .35rem .7rem; padding: .65rem; background: white; border: 1px solid var(--border); border-radius: .4rem; }
+.arrival-preference-team-row label { min-width: 0; overflow-wrap: anywhere; font-weight: 800; }
+.arrival-preference-team-row small { grid-column: 2 / -1; }
 .settings-section { margin-top: 0; padding: clamp(1rem, 2.5vw, 1.5rem); background: #f8faf7; border: 1px solid var(--border); border-left: 5px solid #83a995; border-radius: .6rem; }
 .settings-section + .settings-section { margin-top: 1.5rem; }
 .settings-section > h3, .settings-section > .section-heading h3 { margin-top: 0; color: var(--green); }
@@ -334,8 +340,10 @@ footer { padding: 1.5rem; color: #dbe8df; background: #18332b; text-align: cente
   main { width: min(100% - 1rem, 1100px); margin-top: 1rem; }
   .steps { grid-template-columns: 1fr 1fr; }
   .settings-section { padding: 1rem; }
-  .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list, .tournament-name-grid { grid-template-columns: 1fr; }
+  .form-grid, .form-grid.three-columns, .result-content dl, .block-grid, .team-schedule-grid, .manual-block-team-list, .arrival-preference-team-list, .tournament-name-grid { grid-template-columns: 1fr; }
   .manual-block-team-row { grid-template-columns: 1fr; }
+  .arrival-preference-team-row { grid-template-columns: auto minmax(0, 1fr); }
+  .arrival-preference-team-row input[type="number"], .arrival-preference-team-row small { grid-column: 2; }
   .schedule-view-toggle label { flex: 1 1 8rem; }
   .field-wide { grid-column: auto; }
   .button-row > * { width: 100%; }

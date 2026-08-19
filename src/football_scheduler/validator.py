@@ -148,6 +148,13 @@ def validate_schedule(document: Any) -> JsonObject:
 
     summary = _league_team_referee_summary(data, matches_by_id, normalized_slots)
     summary["adjacent_assignment_court_change_count"] = len(adjacent_court_changes)
+    arrival_summary = _day1_arrival_preference_summary(
+        data,
+        matches_by_id,
+        normalized_slots,
+    )
+    summary.update(arrival_summary)
+    _validate_day1_arrival_metrics(data, arrival_summary, diagnostics)
     return _report(
         diagnostics,
         match_count=len(matches),
@@ -2200,6 +2207,116 @@ def _league_team_referee_summary(
         "league_team_referee_count_max": maximum,
         "league_team_referee_count_difference": maximum - minimum,
     }
+
+
+def _day1_arrival_preference_summary(
+    data: Mapping[str, Any],
+    matches_by_id: Mapping[str, Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+) -> JsonObject:
+    """指定チームの開始セクション配慮を、保存済みスロットから再集計する。"""
+
+    raw_preferences = _config(data).get("day1_arrival_preferences")
+    preferences = sorted(
+        (
+            (str(item["team_id"]), int(item["earliest_section"]))
+            for item in _as_mapping_list(raw_preferences)
+            if item.get("team_id") not in (None, "")
+            and isinstance(item.get("earliest_section"), int)
+        ),
+        key=lambda item: item[0],
+    )
+    if not preferences:
+        return {}
+
+    candidate_cache: dict[str, frozenset[str]] = {}
+    slot_by_match = {
+        str(slot["match_id"]): slot for slot in slots if slot.get("match_id") in matches_by_id
+    }
+    unique_early_match_ids: set[str] = set()
+    total_shortfall = 0
+    total_early_referees = 0
+    preference_metrics: list[JsonObject] = []
+    for team_id, earliest_section in preferences:
+        relevant_match_ids = sorted(
+            match_id
+            for match_id in matches_by_id
+            if team_id
+            in _match_candidates(
+                match_id,
+                matches_by_id,
+                candidate_cache,
+            )
+        )
+        early_matches: list[JsonObject] = []
+        for match_id in relevant_match_ids:
+            slot = slot_by_match.get(match_id)
+            if slot is None or int(slot["section_no"]) >= earliest_section:
+                continue
+            section_no = int(slot["section_no"])
+            section_shortfall = earliest_section - section_no
+            unique_early_match_ids.add(match_id)
+            total_shortfall += section_shortfall
+            early_matches.append(
+                {
+                    "match_id": match_id,
+                    "section_no": section_no,
+                    "section_shortfall": section_shortfall,
+                }
+            )
+        early_referee_count = sum(
+            1
+            for slot in slots
+            if int(slot["section_no"]) < earliest_section and _referee(slot) == ("team", team_id)
+        )
+        total_early_referees += early_referee_count
+        preference_metrics.append(
+            {
+                "team_id": team_id,
+                "earliest_section": earliest_section,
+                "match_count": len(relevant_match_ids),
+                "early_match_count": len(early_matches),
+                "early_referee_count": early_referee_count,
+                "total_section_shortfall": sum(
+                    int(item["section_shortfall"]) for item in early_matches
+                ),
+                "early_matches": early_matches,
+                "satisfied": not early_matches and early_referee_count == 0,
+            }
+        )
+
+    return {
+        "day1_arrival_preference_metrics": preference_metrics,
+        "day1_arrival_early_match_count": len(unique_early_match_ids),
+        "day1_arrival_total_section_shortfall": total_shortfall,
+        "day1_arrival_early_referee_count": total_early_referees,
+    }
+
+
+def _validate_day1_arrival_metrics(
+    data: Mapping[str, Any],
+    summary: Mapping[str, Any],
+    diagnostics: list[JsonObject],
+) -> None:
+    if not summary:
+        return
+    schedule = data.get("schedule")
+    metrics = schedule.get("metrics") if isinstance(schedule, Mapping) else None
+    if not isinstance(metrics, Mapping):
+        metrics = data.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return
+    for key, expected in summary.items():
+        if key in metrics and metrics[key] != expected:
+            diagnostics.append(
+                _diagnostic(
+                    "SCHEDULE_AUDIT_MISMATCH",
+                    "開始セクションへの配慮に関する監査値と独立集計が一致しません。",
+                    field=key,
+                    expected=expected,
+                    actual=metrics[key],
+                )
+            )
 
 
 def _string_set(value: Any) -> set[str]:

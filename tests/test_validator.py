@@ -100,6 +100,43 @@ def test_valid_schedule_passes_independent_validation(valid_document: dict[str, 
     }
 
 
+def test_arrival_preference_is_audited_without_becoming_a_hard_constraint(
+    valid_document: dict[str, object],
+) -> None:
+    document = deepcopy(valid_document)
+    config = document["config"]  # type: ignore[assignment]
+    config["day1_arrival_preferences"] = [{"team_id": "A", "earliest_section": 3}]
+    schedule = document["schedule"]  # type: ignore[assignment]
+    schedule["metrics"] = {
+        "day1_arrival_preference_metrics": [
+            {
+                "team_id": "A",
+                "earliest_section": 3,
+                "match_count": 2,
+                "early_match_count": 1,
+                "early_referee_count": 0,
+                "total_section_shortfall": 2,
+                "early_matches": [{"match_id": "M1", "section_no": 1, "section_shortfall": 2}],
+                "satisfied": False,
+            }
+        ],
+        "day1_arrival_early_match_count": 1,
+        "day1_arrival_total_section_shortfall": 2,
+        "day1_arrival_early_referee_count": 0,
+    }
+
+    report = validate_schedule(document)
+
+    assert report["valid"] is True
+    assert report["summary"]["day1_arrival_early_match_count"] == 1
+    assert report["summary"]["day1_arrival_total_section_shortfall"] == 2
+
+    schedule["metrics"]["day1_arrival_total_section_shortfall"] = 1
+    tampered = validate_schedule(document)
+    assert tampered["valid"] is False
+    assert "SCHEDULE_AUDIT_MISMATCH" in {item["code"] for item in tampered["diagnostics"]}
+
+
 def test_accepts_an_object_with_model_dump(valid_document: dict[str, object]) -> None:
     class ModelLike:
         def model_dump(self, *, mode: str) -> dict[str, object]:

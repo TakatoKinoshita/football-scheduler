@@ -12,6 +12,7 @@ from football_scheduler.league import LeagueTeam
 from football_scheduler.models import (
     ContractModel,
     Court,
+    Day1ArrivalPreference,
     DaySettings,
     RefereeSettings,
     SolverSettings,
@@ -31,6 +32,7 @@ class ScheduleCreationRequest(ContractModel):
     day: DaySettings
     day2: DaySettings
     referees: RefereeSettings
+    day1_arrival_preferences: tuple[Day1ArrivalPreference, ...] = ()
     random_seed: int = 20260803
     solver: SolverSettings = SolverSettings()
     existing_result: dict[str, Any] | None = None
@@ -54,6 +56,7 @@ class ScheduleCreationRequest(ContractModel):
             final_stage=self.final_stage,
             day=self.day,
             referees=self.referees,
+            day1_arrival_preferences=self.day1_arrival_preferences,
             random_seed=self.random_seed,
             solver=self.solver,
         )
