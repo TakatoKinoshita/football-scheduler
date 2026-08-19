@@ -206,6 +206,80 @@ test("正常入力はseeded_snakeのシード順を付けてAPIを1回だけ呼�
   expect(requests[0]).toHaveProperty("day2");
 });
 
+test("複数の遠方チームへ希望セクションを一括指定して生成要求へ保存する", async ({ page }) => {
+  await mockExternalServices(page);
+  await openApp(page);
+  await fillThroughGeneration(page);
+  await page.locator("#arrival-preferences summary").click();
+  await page.locator("#arrival-preference-team-team-01").check();
+  await page.locator("#arrival-preference-team-team-03").check();
+  await page.locator("#arrival-bulk-section").fill("4");
+  await page.getByRole("button", { name: "選択したチームに適用" }).click();
+
+  await page.unroute(GENERATE_API);
+  let request: Record<string, unknown> | undefined;
+  await page.route(GENERATE_API, async (route) => {
+    const payload = route.request().postDataJSON() as {
+      teams?: Array<{ id?: unknown }>;
+      courts?: Array<{ id?: unknown }>;
+    };
+    request = payload as Record<string, unknown>;
+    const generated = generatedRolePathResult(payload);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(scheduleCreationResponse({
+        ...generated,
+        metrics: {
+          ...generated.metrics,
+          day1_arrival_preference_metrics: [
+            {
+              team_id: "team-01",
+              earliest_section: 4,
+              match_count: 1,
+              early_match_count: 1,
+              early_referee_count: 1,
+              total_section_shortfall: 3,
+              early_matches: [
+                { match_id: "LG-A-M1", section_no: 1, section_shortfall: 3 },
+              ],
+              satisfied: false,
+            },
+            {
+              team_id: "team-03",
+              earliest_section: 4,
+              match_count: 1,
+              early_match_count: 1,
+              early_referee_count: 0,
+              total_section_shortfall: 2,
+              early_matches: [
+                { match_id: "LG-B-M1", section_no: 2, section_shortfall: 2 },
+              ],
+              satisfied: false,
+            },
+          ],
+          day1_arrival_early_match_count: 2,
+          day1_arrival_total_section_shortfall: 5,
+          day1_arrival_early_referee_count: 1,
+        },
+      })),
+    });
+  });
+
+  await page.getByRole("button", { name: "日程を生成する" }).click();
+  await expect.poll(() => request).toBeDefined();
+  expect(request).toMatchObject({
+    day1_arrival_preferences: [
+      { team_id: "team-01", earliest_section: 4 },
+      { team_id: "team-03", earliest_section: 4 },
+    ],
+  });
+  await expect(page.locator("#result-content")).toContainText(
+    "開始セクションへの配慮を完全には満たせませんでした",
+  );
+  await expect(page.locator("#result-content")).toContainText("希望より早い試合 2件");
+});
+
 test("自動方式へ戻した後は非表示の手動割当てを両決勝方式の生成要求へ含めない", async ({
   page,
 }) => {
@@ -327,13 +401,13 @@ test("手動で各チームを均衡ブロックへ割り当て、その所属�
   await page.locator("#final-stage-format").selectOption("same_rank_league");
 
   await expect(page.locator("#manual-block-summary")).toContainText("未割当て 4チーム");
-  const blue = page.getByLabel("青空FC");
+  const blue = page.getByLabel("青空FC", { exact: true });
   await blue.focus();
   await blue.press("ArrowDown");
   await blue.press("Enter");
-  await page.getByLabel("みどりSC").selectOption("B");
-  await page.getByLabel("中央キッカーズ").selectOption("A");
-  await page.getByLabel("海浜ユナイテッド").selectOption("B");
+  await page.getByLabel("みどりSC", { exact: true }).selectOption("B");
+  await page.getByLabel("中央キッカーズ", { exact: true }).selectOption("A");
+  await page.getByLabel("海浜ユナイテッド", { exact: true }).selectOption("B");
   await expect(page.locator("#manual-block-summary")).toContainText("割当てが完了");
   await expect(page.locator("#manual-block-count-A")).toContainText("現在2チーム／最終2〜2チーム");
   await expect(page.locator("#manual-block-count-B")).toContainText("現在2チーム／最終2〜2チーム");

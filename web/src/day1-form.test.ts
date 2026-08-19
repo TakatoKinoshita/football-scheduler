@@ -42,6 +42,7 @@ describe("1日目リーグ入力", () => {
     expect(document.schemaVersion).toBe(SCHEMA_VERSION);
     expect(document.tournament.input.schema_version).toBe(SCHEMA_VERSION);
     expect(document.tournament.input).not.toHaveProperty("final_stage");
+    expect(document.tournament.input.day1_arrival_preferences).toEqual([]);
     expect(document.tournament.input.league).not.toHaveProperty("odd_split_policy");
     expect(document.tournament.input.referees).toMatchObject({
       team_referees_required_after_first: true,
@@ -105,6 +106,7 @@ describe("1日目リーグ入力", () => {
       request_kind: "day1_league",
       teams: document.tournament.input.teams,
       courts: document.tournament.input.courts,
+      day1_arrival_preferences: [],
       league: document.tournament.input.league,
       final_stage: document.tournament.input.final_stage,
       day: document.tournament.input.day,
@@ -114,6 +116,44 @@ describe("1日目リーグ入力", () => {
     });
     expect(request).not.toHaveProperty("day2");
     expect(document.tournament.input).toHaveProperty("day2");
+  });
+
+  it("遠方チームの希望セクションをAPI要求へ保持する", () => {
+    const document = createTournamentDocument();
+    document.tournament.input.day1_arrival_preferences = [
+      { team_id: "team-01", earliest_section: 3 },
+    ];
+
+    expect(buildDay1ScheduleRequest(document.tournament.input).day1_arrival_preferences).toEqual([
+      { team_id: "team-01", earliest_section: 3 },
+    ]);
+  });
+
+  it("遠方チームの未知参照・重複・範囲外セクションを拒否する", () => {
+    const document = createTournamentDocument();
+    document.tournament.name = "地区大会";
+    document.tournament.input.teams = [
+      { id: "team-01", name: "青" },
+      { id: "team-02", name: "赤" },
+      { id: "team-03", name: "緑" },
+      { id: "team-04", name: "白" },
+    ];
+    document.tournament.input.courts = [{ id: "court-a", name: "Aコート" }];
+    document.tournament.input.league = { block_count: 2, assignment_mode: "random" };
+    document.tournament.input.final_stage = {
+      format: "same_rank_league",
+      uneven_policy: "strict_same_rank",
+    };
+    document.tournament.input.day1_arrival_preferences = [
+      { team_id: "unknown", earliest_section: 1 },
+      { team_id: "unknown", earliest_section: 3 },
+    ];
+
+    expect(validateDay1LeagueDocument(document)).toContainEqual({
+      field: "arrival-preferences",
+      step: 2,
+      message: "配慮するチームと希望セクションを確認してください。希望セクションは2から128までです。",
+    });
   });
 
   it("既存のチーム審判任意設定を1日目API要求へ保持する", () => {

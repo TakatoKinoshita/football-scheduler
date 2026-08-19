@@ -79,6 +79,7 @@ export function buildDay1ScheduleRequest(input: JsonObject): JsonObject {
     request_kind: input.request_kind,
     teams: input.teams,
     courts,
+    day1_arrival_preferences: input.day1_arrival_preferences ?? [],
     league,
     final_stage: Object.keys(finalStage).length === 0 ? input.final_stage : finalStage,
     day: input.day,
@@ -165,6 +166,7 @@ function createEditableDocumentFromLegacy(
       request_kind: "day1_league",
       teams,
       courts,
+      day1_arrival_preferences: [],
       league: {
         block_count: typeof league.block_count === "number" ? league.block_count : null,
         assignment_mode: new Set(["random", "seeded_snake", "manual"]).has(
@@ -312,6 +314,37 @@ export function validateDay1LeagueDocument(
         message: `${blockId}ブロックは${size}チーム指定済みです。自動配置後は各ブロック${analysis.minimumSize}〜${analysis.maximumSize}チームになるため、対象チームを未割当てへ戻してください。`,
       });
     }
+  }
+  const teamIds = new Set(
+    objectArray(input.teams).flatMap((team) => typeof team.id === "string" ? [team.id] : []),
+  );
+  const rawPreferences = input.day1_arrival_preferences;
+  const preferences = objectArray(rawPreferences);
+  const preferenceTeamIds = new Set<string>();
+  if (rawPreferences !== undefined && !Array.isArray(rawPreferences)) {
+    issues.push({
+      field: "arrival-preferences",
+      step: 2,
+      message: "配慮するチームと希望セクションを確認してください。希望セクションは2から128までです。",
+    });
+  }
+  for (const preference of preferences) {
+    if (
+      typeof preference.team_id !== "string" ||
+      !teamIds.has(preference.team_id) ||
+      preferenceTeamIds.has(preference.team_id) ||
+      !Number.isInteger(preference.earliest_section) ||
+      Number(preference.earliest_section) < 2 ||
+      Number(preference.earliest_section) > 128
+    ) {
+      issues.push({
+        field: "arrival-preferences",
+        step: 2,
+        message: "配慮するチームと希望セクションを確認してください。希望セクションは2から128までです。",
+      });
+      break;
+    }
+    preferenceTeamIds.add(preference.team_id);
   }
   const finalStage = objectValue(input.final_stage);
   if (finalStage === undefined) {
@@ -468,6 +501,7 @@ const API_FIELD_MAP: Array<
   ["league.block_count", "block-count", 2, "ブロック数"],
   ["league.assignment_mode", "assignment-mode", 2, "チームの分け方"],
   ["league.manual_blocks", "manual-blocks", 2, "手動ブロック割当て"],
+  ["day1_arrival_preferences", "arrival-preferences", 2, "遠方チームへの配慮"],
   ["final_stage.tournament_names", "tournament-name-1", 2, "トーナメント名"],
   ["final_stage", "final-stage-format", 2, "2日目の決勝方式"],
   ["day.start_time", "start-time", 2, "開始時刻"],

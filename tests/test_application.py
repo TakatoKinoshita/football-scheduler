@@ -252,6 +252,56 @@ def test_day1_league_request_generates_match_and_passes_independent_validation()
     )
 
 
+def test_day1_league_request_keeps_arrival_preference_soft_and_auditable() -> None:
+    request = _day1_league_request(team_count=4, block_count=2, court_count=2)
+    request["day1_arrival_preferences"] = [{"team_id": "team-1", "earliest_section": 128}]
+
+    result = _handle_request(request)
+
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    assert result["validation"]["valid"] is True
+    assert result["metrics"]["day1_arrival_early_match_count"] == 1
+    assert result["validation"]["summary"]["day1_arrival_early_match_count"] == 1
+    assert "DAY1_ARRIVAL_PREFERENCE_UNMET" in {item["code"] for item in result["diagnostics"]}
+
+
+def test_compact_day1_league_prioritizes_arrival_before_quality_objectives() -> None:
+    request = _day1_league_request(team_count=8, block_count=2, court_count=2)
+    request["referees"]["team_referees_required_after_first"] = True
+    request["day1_arrival_preferences"] = [{"team_id": "team-1", "earliest_section": 3}]
+
+    result = _handle_request(request)
+
+    assert result["status"] in {"OPTIMAL", "FEASIBLE"}, result
+    assert result["metrics"]["model_variant"] == "compact_day1_league"
+    assert result["validation"]["valid"] is True
+    assert [stage["objective"] for stage in result["metrics"]["objective_stages"]][:4] == [
+        "used_sections",
+        "day1_arrival_early_match_count",
+        "day1_arrival_total_section_shortfall",
+        "league_team_referee_count_difference",
+    ]
+
+
+def test_day1_arrival_preference_count_is_limited_before_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _day1_league_request(team_count=4, block_count=2, court_count=2)
+    request["day1_arrival_preferences"] = [
+        {"team_id": "team-1", "earliest_section": 2} for _ in range(application.MAX_TEAMS + 1)
+    ]
+    monkeypatch.setattr(
+        application,
+        "solve_schedule",
+        lambda _: pytest.fail("solver must not run"),
+    )
+
+    result = _handle_request(request)
+
+    assert result["status"] == "error"
+    assert result["diagnostics"][0]["code"] == "TEAM_LIMIT_EXCEEDED"
+
+
 def test_day1_league_request_adds_block_ids_before_solving(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
