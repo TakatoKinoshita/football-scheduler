@@ -72,6 +72,12 @@ import {
   leagueResultsWorkbookAvailable,
 } from "./league-results-workbook-download";
 import {
+  downloadSameRankResultsWorkbook,
+  SameRankResultsWorkbookDownloadError,
+  SameRankResultsWorkbookDownloadGuard,
+  sameRankResultsWorkbookAvailable,
+} from "./same-rank-results-workbook-download";
+import {
   buildSchedulePresentation,
   loadScheduleViewMode,
   saveScheduleViewMode,
@@ -498,6 +504,7 @@ root.innerHTML = `
         <p id="tournament-results-progress">2日目の試合結果を確認しています。</p>
         <button id="confirm-tournament-results" class="primary" type="button" disabled>総合最終順位を確定する</button>
         <p id="tournament-results-status" class="status-message" role="status" aria-live="polite"></p>
+        <div id="same-rank-results-export-host"></div>
       </div>
     </section>
 
@@ -808,6 +815,7 @@ const tournamentResultsConfirmation = requiredElement<HTMLElement>(
 );
 const tournamentResultsProgress = requiredElement<HTMLElement>("#tournament-results-progress");
 const tournamentResultsStatus = requiredElement<HTMLElement>("#tournament-results-status");
+const sameRankResultsExportHost = requiredElement<HTMLElement>("#same-rank-results-export-host");
 const tournamentResultsButton = requiredElement<HTMLButtonElement>(
   "#confirm-tournament-results",
 );
@@ -1341,6 +1349,7 @@ function refreshTournamentResultsEnabled(): void {
     tournamentResultsProgress.textContent =
       `入力済み ${String(progress.entered)} / ${String(progress.total)}試合`;
     tournamentResultsButton.disabled = legacyCompatibility || !progress.complete;
+    refreshSameRankResultsWorkbookDownloadButton();
     return;
   }
   const plan = asObject(result?.tournament_plan);
@@ -1363,6 +1372,7 @@ function refreshTournamentResultsEnabled(): void {
     plan === undefined ||
     !complete ||
     tournamentResultDrafts.hasPendingDrafts;
+  clearSameRankResultsExportControls();
 }
 
 interface ScheduleRowDetails {
@@ -1464,6 +1474,7 @@ function renderResult(): void {
   const day2Content = requiredElement<HTMLElement>("#day2-result-content");
   const result = documentState.tournament.result;
   tournamentResultsConfirmation.hidden = true;
+  clearSameRankResultsExportControls();
   goDay2Area.hidden = true;
   day2PrintButton.disabled = true;
   bracketPrintButton.disabled = true;
@@ -2518,6 +2529,7 @@ function renderSameRankResultsInput(
   });
   observeResultInputRoot(content, resultPresentation);
   tournamentResultsConfirmation.hidden = false;
+  ensureSameRankResultsExportControls();
   setupVisibleTurnstile();
   refreshTournamentResultsEnabled();
   const standings = asObject(documentState.tournament.result?.same_rank_standings);
@@ -4085,6 +4097,46 @@ generateButton.addEventListener("click", () => {
 
 let activeScheduleWorkbookDownload: ScheduleWorkbookDownloadScope | undefined;
 const leagueResultsWorkbookDownloadGuard = new LeagueResultsWorkbookDownloadGuard();
+const sameRankResultsWorkbookDownloadGuard = new SameRankResultsWorkbookDownloadGuard();
+
+interface SameRankResultsExportControls {
+  section: HTMLElement;
+  button: HTMLButtonElement;
+  status: HTMLElement;
+}
+
+let sameRankResultsExportControls: SameRankResultsExportControls | undefined;
+
+function clearSameRankResultsExportControls(): void {
+  sameRankResultsExportHost.replaceChildren();
+  sameRankResultsExportControls = undefined;
+}
+
+function ensureSameRankResultsExportControls(): SameRankResultsExportControls {
+  if (sameRankResultsExportControls !== undefined) return sameRankResultsExportControls;
+  const section = window.document.createElement("div");
+  section.className = "league-results-export";
+  const heading = window.document.createElement("h4");
+  heading.textContent = "同順位リーグ結果を配布する";
+  const description = window.document.createElement("p");
+  description.textContent = "対戦表と総合順位を、1グループにつき1つのシートへまとめます。";
+  const button = window.document.createElement("button");
+  button.id = "excel-same-rank-results";
+  button.className = "secondary";
+  button.type = "button";
+  button.disabled = true;
+  button.textContent = "同順位リーグ結果をエクセルに出力";
+  const status = window.document.createElement("p");
+  status.id = "same-rank-results-excel-status";
+  status.className = "status-message";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  button.addEventListener("click", () => { void invokeSameRankResultsWorkbookDownload(); });
+  section.append(heading, description, button, status);
+  sameRankResultsExportHost.replaceChildren(section);
+  sameRankResultsExportControls = { section, button, status };
+  return sameRankResultsExportControls;
+}
 
 function scheduleWorkbookStatus(scope: ScheduleWorkbookDownloadScope): HTMLElement {
   return scope === "day1" ? day1ExcelStatus : day2ExcelStatus;
@@ -4161,6 +4213,50 @@ async function invokeLeagueResultsWorkbookDownload(): Promise<void> {
       : "リーグ結果Excelを作成できませんでした。入力済み結果と確定順位は保持しています。もう一度お試しください。";
   } finally {
     refreshLeagueResultsWorkbookDownloadButton();
+  }
+}
+
+function refreshSameRankResultsWorkbookDownloadButton(): void {
+  const controls = sameRankResultsExportControls;
+  if (controls === undefined) return;
+  const available = !legacyCompatibility
+    && !sameRankResultDrafts.hasPendingDrafts
+    && sameRankResultsWorkbookAvailable(documentState);
+  controls.button.disabled = sameRankResultsWorkbookDownloadGuard.active || !available;
+  controls.button.toggleAttribute("aria-busy", sameRankResultsWorkbookDownloadGuard.active);
+}
+
+async function invokeSameRankResultsWorkbookDownload(): Promise<void> {
+  const controls = sameRankResultsExportControls;
+  if (
+    controls === undefined
+    || sameRankResultsWorkbookDownloadGuard.active
+    || sameRankResultDrafts.hasPendingDrafts
+    || !sameRankResultsWorkbookAvailable(documentState)
+  ) {
+    refreshSameRankResultsWorkbookDownloadButton();
+    return;
+  }
+  const snapshot = cloneDocument(documentState);
+  controls.status.dataset.state = "generating";
+  controls.status.textContent = "同順位リーグ結果Excelを作成しています。完了までお待ちください…";
+  const operation = sameRankResultsWorkbookDownloadGuard.run(
+    () => downloadSameRankResultsWorkbook(snapshot),
+  );
+  refreshSameRankResultsWorkbookDownloadButton();
+  try {
+    const result = await operation;
+    if (result === undefined) return;
+    controls.status.dataset.state = "success";
+    controls.status.textContent =
+      `同順位リーグ結果Excelを出力しました。「${result.fileName}」の保存先を確認してください。`;
+  } catch (error) {
+    controls.status.dataset.state = "error";
+    controls.status.textContent = error instanceof SameRankResultsWorkbookDownloadError
+      ? `同順位リーグ結果Excelを作成できませんでした。${error.message} 入力済み結果と総合最終順位は保持しています。`
+      : "同順位リーグ結果Excelを作成できませんでした。入力済み結果と総合最終順位は保持しています。もう一度お試しください。";
+  } finally {
+    refreshSameRankResultsWorkbookDownloadButton();
   }
 }
 

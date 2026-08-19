@@ -363,6 +363,7 @@ test("順位決定トーナメントのカードは待機・PK・状態・Tab順
   await mockExternalServices(page);
   await openApp(page);
   await importDocument(page, tournamentResultsFixture());
+  await expect(page.locator("#excel-same-rank-results")).toHaveCount(0);
   await setTournamentResultWidth(page, 899);
 
   const section = page.locator("#tournament-results-input");
