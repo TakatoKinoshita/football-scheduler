@@ -210,7 +210,11 @@ test("複数の遠方チームへ希望セクションを一括指定して生�
   await mockExternalServices(page);
   await openApp(page);
   await fillThroughGeneration(page);
+  await expect(page.locator("#arrival-preferences summary")).toHaveText(
+    "遠方チームの指定と開始セクション",
+  );
   await page.locator("#arrival-preferences summary").click();
+  await expect(page.getByLabel("青空FCを指定", { exact: true })).toBeVisible();
   await page.locator("#arrival-preference-team-team-01").check();
   await page.locator("#arrival-preference-team-team-03").check();
   await page.locator("#arrival-bulk-section").fill("4");

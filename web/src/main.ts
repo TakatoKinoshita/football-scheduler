@@ -310,7 +310,7 @@ root.innerHTML = `
           </label>
         </div>
         <details id="arrival-preferences" class="advanced-settings arrival-preferences" tabindex="-1">
-          <summary>遠方チームの開始セクションに配慮する</summary>
+          <summary>遠方チームの指定と開始セクション</summary>
           <p class="muted">指定したチームの試合を、できるだけ選択したセクション以降へ配置します。日程を長くしたり、ブロック分けを変更したりはしません。</p>
           <div class="arrival-preference-toolbar">
             <label class="field" for="arrival-bulk-section">
@@ -3233,7 +3233,7 @@ function renderArrivalPreferences(): void {
     const label = window.document.createElement("label");
     label.htmlFor = checkbox.id;
     const teamName = typeof team.name === "string" ? team.name : team.id;
-    label.textContent = `${teamName}を配慮対象にする`;
+    label.textContent = `${teamName}を指定`;
     const sectionInput = window.document.createElement("input");
     sectionInput.type = "number";
     sectionInput.min = "2";
