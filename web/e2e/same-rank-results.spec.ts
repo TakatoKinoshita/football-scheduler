@@ -1,5 +1,6 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Download, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import readXlsxFile from "read-excel-file/node";
 
 import { sameRankWebFixture } from "./fixtures";
 import {
@@ -37,6 +38,18 @@ async function expectEditingState(row: Locator): Promise<void> {
   await expect(label).toHaveAttribute("data-state", "editing");
   await expect.poll(() => label.evaluate((element) => element.firstChild?.textContent))
     .toBe("入力中");
+}
+
+async function readWorkbook(download: Download) {
+  const path = await download.path();
+  if (path === null) throw new Error("downloadしたExcelのpathを取得できませんでした。");
+  return readXlsxFile(await readFile(path));
+}
+
+async function downloadSameRankResults(page: Parameters<typeof importDocument>[0]): Promise<Download> {
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "同順位リーグ結果をエクセルに出力" }).click();
+  return downloadPromise;
 }
 
 test("次試合を審判するaway順位枠を2日目同順位リーグ日程の左側へ表示する", async ({
@@ -136,15 +149,34 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   }
 
   await expect(page.locator("#confirm-tournament-results")).toBeEnabled();
+  const excelButton = page.getByRole("button", { name: "同順位リーグ結果をエクセルに出力" });
+  await expect(excelButton).toBeDisabled();
+  await expect(page.locator("#same-rank-results-export-host")).toContainText(
+    "1グループにつき1つのシート",
+  );
   await page.locator("#confirm-tournament-results").click();
   await expect(page.locator("#same-rank-standings-view")).toBeVisible();
   await expect(page.getByRole("table", { name: "同順位リーグの総合最終順位" }).locator("tbody tr"))
     .toHaveCount(16);
+  await expect(excelButton).toBeEnabled();
+  const firstDownload = await downloadSameRankResults(page);
+  expect(firstDownload.suggestedFilename()).toBe("表示切替大会_2日目同順位リーグ結果.xlsx");
+  const workbook = await readWorkbook(firstDownload);
+  expect(workbook.map((sheet) => sheet.sheet)).toEqual([
+    "予選1位リーグ", "予選2位リーグ", "予選3位リーグ", "予選4位リーグ",
+  ]);
+  expect(workbook[0]!.data.flat()).toContain("△ 1-1");
+  expect(workbook[0]!.data.flat()).toContain("総合順位");
+  await expect(page.locator("#same-rank-results-excel-status"))
+    .toContainText("同順位リーグ結果Excelを出力しました");
   expect(resultRequests).toHaveLength(0);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator("#tab-day2").click();
   await expect(page.getByRole("table", { name: "同順位リーグの総合最終順位" }).locator("tbody tr"))
     .toHaveCount(16);
+  await expect(excelButton).toBeEnabled();
+  expect((await readWorkbook(await downloadSameRankResults(page))).map((sheet) => sheet.sheet))
+    .toEqual(["予選1位リーグ", "予選2位リーグ", "予選3位リーグ", "予選4位リーグ"]);
 
   const firstRow = page.locator(`#same-rank-results-input tr[data-match-id="${matchIds[0]}"]`);
   const regularHome = firstRow.locator('input[data-score-field="regularHome"]');
@@ -159,6 +191,7 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
 
   await expect(regularHome).toBeEnabled();
   await regularHome.fill("2");
+  await expect(excelButton).toBeDisabled();
   await regularHome.focus();
   await expect(regularHome).toBeFocused();
   const scrollBefore = await regularHome.evaluate((input: HTMLInputElement) => {
@@ -174,9 +207,15 @@ test("16チーム4ブロックの同順位リーグを再表示し、引き分�
   ).toBe(1);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
   await expect(page.locator("#same-rank-standings-view")).toHaveCount(0);
+  await expect(excelButton).toBeDisabled();
   await expect(page.locator("#tournament-results-status")).toContainText(
     "以前の総合最終順位を取り消しました",
   );
+  await page.locator("#confirm-tournament-results").click();
+  await expect(excelButton).toBeEnabled();
+  const updated = await readWorkbook(await downloadSameRankResults(page));
+  expect(updated[0]!.data.flat()).toContain("○ 2-1");
+  expect(resultRequests).toHaveLength(0);
 });
 
 test("同順位リーグ結果入力は狭幅カードと広幅5列表を切り替え、ラベル・Tab順・44pxを保つ", async ({

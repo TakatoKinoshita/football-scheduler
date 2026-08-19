@@ -98,39 +98,41 @@ const DRAW_TITLE_STYLE: WorkbookCellStyle = {
   borderStyle: "thin",
 };
 
-interface Team {
+export interface RoundRobinWorkbookTeam {
   id: string;
   name: string;
 }
 
-interface LeagueBlock {
+export interface RoundRobinWorkbookGroup {
   id: string;
   displayName: string;
   teamIds: string[];
+  automatic?: boolean;
 }
 
-interface LeagueMatch {
+export interface RoundRobinWorkbookMatch {
   id: string;
   blockId: string;
   homeTeamId: string;
   awayTeamId: string;
 }
 
-interface MatchResult {
+export interface RoundRobinWorkbookMatchResult {
   matchId: string;
   homeScore: number;
   awayScore: number;
 }
 
-interface Metrics {
+export interface RoundRobinWorkbookMetrics {
   points: number;
   goalDifference: number;
   goalsFor: number;
 }
 
-interface Standing {
+export interface RoundRobinWorkbookStanding {
   blockId: string;
   rank: number;
+  overallRank?: number;
   teamId: string;
   played: number;
   wins: number;
@@ -141,24 +143,40 @@ interface Standing {
   goalDifference: number;
   points: number;
   tieBreak: string;
-  headToHead: Metrics | null;
+  headToHead: RoundRobinWorkbookMetrics | null;
+  automatic?: boolean;
 }
 
-interface DrawRecord {
+export interface RoundRobinWorkbookDrawRecord {
   blockId: string;
   candidates: string[];
   decidedOrder: string[];
   randomSeed: number;
 }
 
-interface ValidLeagueResults {
-  teams: Team[];
-  blocks: LeagueBlock[];
-  matches: LeagueMatch[];
-  results: ReadonlyMap<string, MatchResult>;
-  standings: ReadonlyMap<string, Standing>;
-  draws: DrawRecord[];
+export interface RoundRobinResultsWorkbookData {
+  teams: RoundRobinWorkbookTeam[];
+  blocks: RoundRobinWorkbookGroup[];
+  matches: RoundRobinWorkbookMatch[];
+  results: ReadonlyMap<string, RoundRobinWorkbookMatchResult>;
+  standings: ReadonlyMap<string, RoundRobinWorkbookStanding>;
+  draws: RoundRobinWorkbookDrawRecord[];
 }
+
+interface RoundRobinResultsWorkbookOptions {
+  fileNameSuffix: string;
+  scopeLabel: "ブロック" | "グループ";
+  includeOverallRank?: boolean;
+}
+
+type Team = RoundRobinWorkbookTeam;
+type LeagueBlock = RoundRobinWorkbookGroup;
+type LeagueMatch = RoundRobinWorkbookMatch;
+type MatchResult = RoundRobinWorkbookMatchResult;
+type Metrics = RoundRobinWorkbookMetrics;
+type Standing = RoundRobinWorkbookStanding;
+type DrawRecord = RoundRobinWorkbookDrawRecord;
+type ValidLeagueResults = RoundRobinResultsWorkbookData;
 
 interface Aggregate {
   played: number;
@@ -849,6 +867,7 @@ function metadataRows(
   blockName: string,
   savedAt: string,
   tableColumnCount: number,
+  options: Pick<RoundRobinResultsWorkbookOptions, "scopeLabel"> & { automatic?: boolean },
 ): WorkbookCell[][] {
   const row = (label: string, value: string): WorkbookCell[] => [
     textCell(label, META_LABEL_STYLE),
@@ -857,11 +876,13 @@ function metadataRows(
   ];
   return [
     row("大会名", tournamentName),
-    row("ブロック", blockName),
+    row(options.scopeLabel, blockName),
     row("保存日時", savedAt),
     [
       textCell(
-        "見方：各対戦セルは行側チーム視点（○ 勝ち／△ 引分／● 敗け、— 自己対戦、空欄 未実施）",
+        options.automatic === true
+          ? "このグループは1チームのため、実試合を行わず総合順位を自動確定しています。"
+          : "見方：各対戦セルは行側チーム視点（○ 勝ち／△ 引分／● 敗け、— 自己対戦、空欄 未実施）",
         { ...LEGEND_STYLE, columnSpan: tableColumnCount },
       ),
       ...Array.from({ length: tableColumnCount - 1 }, () => null),
@@ -880,8 +901,14 @@ const AGGREGATE_HEADERS = [
   "順位",
 ] as const;
 
-function headerRow(teamNames: readonly string[]): WorkbookCell[] {
-  const labels = ["チーム", ...teamNames, ...AGGREGATE_HEADERS];
+function headerRow(
+  teamNames: readonly string[],
+  options: Pick<RoundRobinResultsWorkbookOptions, "includeOverallRank">,
+): WorkbookCell[] {
+  const aggregateHeaders = options.includeOverallRank === true
+    ? [...AGGREGATE_HEADERS.slice(0, -1), "グループ内順位", "総合順位"]
+    : AGGREGATE_HEADERS;
+  const labels = ["チーム", ...teamNames, ...aggregateHeaders];
   const aggregateStart = teamNames.length + 1;
   const rankColumn = labels.length - 1;
   return labels.map((label, index) => textCell(label, {
@@ -901,8 +928,11 @@ function headerRow(teamNames: readonly string[]): WorkbookCell[] {
   }));
 }
 
-function standingCells(standing: Standing): WorkbookCell[] {
-  return [
+function standingCells(
+  standing: Standing,
+  includeOverallRank = false,
+): WorkbookCell[] {
+  const cells: WorkbookCell[] = [
     numberCell(standing.wins, AGGREGATE_START_STYLE),
     numberCell(standing.draws, DATA_STYLE),
     numberCell(standing.losses, DATA_STYLE),
@@ -912,6 +942,16 @@ function standingCells(standing: Standing): WorkbookCell[] {
     numberCell(standing.goalDifference, DATA_STYLE),
     numberCell(standing.rank, RANK_STYLE),
   ];
+  if (includeOverallRank) {
+    if (standing.overallRank === undefined) {
+      return fail(
+        "LEAGUE_RESULTS_EXPORT_STANDINGS_INVALID",
+        `チーム「${standing.teamId}」の総合順位を読み取れませんでした。`,
+      );
+    }
+    cells.push(numberCell(standing.overallRank, RANK_STYLE));
+  }
+  return cells;
 }
 
 function tieBreakRows(
@@ -994,8 +1034,9 @@ function drawRows(
 
 function blockSheet(
   document: TournamentDocument,
-  data: ValidLeagueResults,
+  data: RoundRobinResultsWorkbookData,
   block: LeagueBlock,
+  options: RoundRobinResultsWorkbookOptions,
 ): WorkbookSheet {
   const teamNames = new Map(data.teams.map((team) => [team.id, team.name]));
   const pairMatches = new Map(
@@ -1003,7 +1044,8 @@ function blockSheet(
       .filter((match) => match.blockId === block.id)
       .map((match) => [pairKey(match.homeTeamId, match.awayTeamId), match]),
   );
-  const tableColumnCount = 1 + block.teamIds.length + AGGREGATE_HEADERS.length;
+  const tableColumnCount = 1 + block.teamIds.length + AGGREGATE_HEADERS.length
+    + (options.includeOverallRank === true ? 1 : 0);
   const matrixRows = block.teamIds.map((teamId): WorkbookCell[] => {
     const standing = data.standings.get(teamId)!;
     const opponents = block.teamIds.map((opponentId): WorkbookCell => {
@@ -1014,7 +1056,7 @@ function blockSheet(
     return [
       textCell(teamNames.get(teamId)!, { ...MATRIX_ROW_HEADER_STYLE, height: 34 }),
       ...opponents,
-      ...standingCells(standing),
+      ...standingCells(standing, options.includeOverallRank),
     ];
   });
   const matrixWidth = block.teamIds.length >= 12 ? 9 : block.teamIds.length >= 8 ? 10 : 12;
@@ -1024,6 +1066,7 @@ function blockSheet(
       { width: 22 },
       ...block.teamIds.map(() => ({ width: matrixWidth })),
       ...[6, 6, 6, 8, 7, 7, 9, 7].map((width) => ({ width })),
+      ...(options.includeOverallRank === true ? [{ width: 9 }] : []),
     ],
     rows: [
       ...metadataRows(
@@ -1031,9 +1074,10 @@ function blockSheet(
         block.displayName,
         savedAtLabel(document.updatedAt),
         tableColumnCount,
+        { scopeLabel: options.scopeLabel, automatic: block.automatic },
       ),
       [],
-      headerRow(block.teamIds.map((teamId) => teamNames.get(teamId)!)),
+      headerRow(block.teamIds.map((teamId) => teamNames.get(teamId)!), options),
       ...matrixRows,
       ...tieBreakRows(block, data.standings, teamNames),
       ...drawRows(block.id, data.draws, teamNames, tableColumnCount),
@@ -1051,13 +1095,24 @@ function blockSheet(
 
 export function buildLeagueResultsWorkbook(document: TournamentDocument): WorkbookFile {
   const data = validateLeagueResults(document);
+  return buildRoundRobinResultsWorkbook(document, data, {
+    fileNameSuffix: "1日目リーグ結果",
+    scopeLabel: "ブロック",
+  });
+}
+
+export function buildRoundRobinResultsWorkbook(
+  document: TournamentDocument,
+  data: RoundRobinResultsWorkbookData,
+  options: RoundRobinResultsWorkbookOptions,
+): WorkbookFile {
   const names = uniqueSheetNames(data.blocks.map((block) => block.displayName));
   return {
     fileName: sanitizeWorkbookFileName(
-      `${document.tournament.name.trim() || "名称未設定"}_1日目リーグ結果.xlsx`,
+      `${document.tournament.name.trim() || "名称未設定"}_${options.fileNameSuffix}.xlsx`,
     ),
     sheets: data.blocks.map((block, index) => ({
-      ...blockSheet(document, data, block),
+      ...blockSheet(document, data, block, options),
       name: names[index]!,
     })),
   };
